@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "default": "deny",
+    "require_explicit_metadata_before_distribution": true
+  },
+  "models": []
+}
