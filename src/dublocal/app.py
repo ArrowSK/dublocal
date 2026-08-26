@@ -5,6 +5,7 @@ from typing import Any
 
 import gradio as gr
 
+from .dependencies import local_resource_status
 from .media import (
     DubLocalError,
     YoutubeRateLimitError,
@@ -34,6 +35,7 @@ from .updater import (
     check_for_updates,
     format_update_status,
     install_update,
+    repair_installation,
     schedule_restart,
 )
 
@@ -386,6 +388,7 @@ def prepare_translation_ui(source_language: str, target_language: str):
             "```text\n"
             "[done] local translation is ready\n"
             f"[models] {names}\n"
+            "[storage] compatible Hugging Face model files are reused from the shared local cache\n"
             "[next] click Translate subtitles\n"
             "```"
         )
@@ -399,7 +402,8 @@ def remove_translation_models_ui(source_language: str, target_language: str):
         removed = remove_translation_models()
         return translation_manager_status(source_language, target_language), (
             "```text\n"
-            f"[models] removed {removed} local translation model folder(s)\n"
+            f"[models] removed {removed} DubLocal translation registration/local copy item(s)\n"
+            "[shared cache] shared Hugging Face cache files are kept so another local app is not broken\n"
             "[engine] optional Python translation packages were kept\n"
             "```"
         )
@@ -435,6 +439,13 @@ def translate_selected(
         return None, [], _error_status(message)
 
 
+def refresh_resources_ui() -> str:
+    try:
+        return local_resource_status()
+    except Exception as exc:
+        return _error_status(f"Could not inspect reusable local resources: {exc}")
+
+
 def check_updates_ui() -> str:
     try:
         return format_update_status(check_for_updates(fetch_remote=True))
@@ -446,23 +457,47 @@ def check_updates_ui() -> str:
 def install_update_ui() -> str:
     try:
         result = install_update()
-        if not result.changed:
+        if not result.changed and not result.repaired:
             return (
                 "```text\n"
-                "[status] DubLocal is already up to date\n"
+                "[status] DubLocal is already up to date and the runtime matches the checkout\n"
                 "[restart] not required\n"
                 "```"
             )
+        action = "core repaired" if result.repaired and not result.changed else "update installed from GitHub"
         return (
             "```text\n"
-            "[done] update installed from GitHub\n"
+            f"[done] {action}\n"
             f"[from] {result.previous_revision[:12]}\n"
             f"[to]   {result.current_revision[:12]}\n"
-            "[next] click Restart DubLocal to load the new code\n"
+            "[next] click Restart DubLocal to load the refreshed code\n"
             "```"
         )
     except Exception as exc:
         message = str(exc) if isinstance(exc, UpdateError) else f"Unexpected updater error: {exc}"
+        return _error_status(message)
+
+
+def repair_installation_ui(confirm_replace_modified_files: bool) -> str:
+    try:
+        result = repair_installation(
+            replace_modified_files=bool(confirm_replace_modified_files)
+        )
+        lines = [
+            "[done] DubLocal installation repaired",
+            f"[revision] {result.current_revision[:12]}",
+            "[core] Python environment refreshed and import path verified",
+            "[preserved] models, shared caches, generated jobs and untracked user files",
+        ]
+        if result.source_repaired:
+            lines.append("[source] modified tracked program files were restored from official GitHub main")
+        if result.backup_path:
+            lines.append(f"[backup] previous local source edits saved to {result.backup_path}")
+        lines.append("[restart] a clean DubLocal restart has been scheduled")
+        schedule_restart()
+        return "```text\n" + "\n".join(lines) + "\n```"
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, UpdateError) else f"Unexpected repair error: {exc}"
         return _error_status(message)
 
 
@@ -593,10 +628,10 @@ def build_app() -> gr.Blocks:
             gr.HTML(
                 """
                 <div class="dl-note">
-                  Translation is entirely local and optional. The first preparation installs the local translation
-                  runtime and only the Apache-2.0 OPUS model(s) needed for the selected language route. English ↔ another
-                  language needs one ~310 MiB model; translation between two non-English languages uses English as a
-                  local pivot and needs both models. There is no silent cloud fallback.
+                  Translation is entirely local and optional. DubLocal uses the normal shared Hugging Face cache, so an
+                  identical pinned model already downloaded by another compatible local app can be reused instead of
+                  stored again. English ↔ another language needs one ~310 MiB model; two non-English languages use both.
+                  There is no silent cloud fallback.
                 </div>
                 """
             )
@@ -610,21 +645,45 @@ def build_app() -> gr.Blocks:
                 label="Translated subtitle preview",
             )
 
-        with gr.Accordion("DubLocal updates", open=False):
+        with gr.Accordion("Reusable local resources", open=False):
+            resource_status = gr.Markdown(local_resource_status(), elem_classes=["console"])
+            refresh_resources_button = gr.Button("Rescan local resources", variant="secondary")
+            gr.HTML(
+                """
+                <div class="dl-note">
+                  DubLocal reuses system executables such as FFmpeg/whisper.cpp and shared model caches rather than
+                  making private copies. It can also discover compatible Python environments such as an existing Kokoro
+                  installation. Python packages from another virtual environment are not injected into DubLocal's own
+                  interpreter; backends that support reuse run them through an isolated external-process bridge.
+                </div>
+                """
+            )
+
+        with gr.Accordion("DubLocal updates & repair", open=False):
             update_status = gr.Markdown(
-                "```text\n[updates] click Check for updates when you want DubLocal to contact GitHub\n[safety] local changes are never overwritten automatically\n```",
+                "```text\n[updates] Check for updates compares the running app, local checkout and official GitHub main\n[repair] Repair installation can fix a stale runtime or modified tracked program files without deleting models/caches\n```",
                 elem_classes=["console"],
+            )
+            repair_confirm = gr.Checkbox(
+                label=(
+                    "Allow Repair installation to replace modified tracked DubLocal program files "
+                    "(a patch backup is saved first)"
+                ),
+                value=False,
             )
             with gr.Row():
                 check_update_button = gr.Button("Check for updates", variant="secondary")
                 install_update_button = gr.Button("Install update", variant="secondary")
+                repair_button = gr.Button("Repair installation", variant="secondary")
                 restart_button = gr.Button("Restart DubLocal", variant="primary")
             gr.HTML(
                 """
                 <div class="dl-note">
-                  Updates are user-initiated. DubLocal fetches its configured GitHub branch, accepts only a clean
-                  fast-forward update, refreshes the current Python environment, and asks you to restart before the
-                  new code is used. Developer checkouts with local edits or divergent commits are blocked for safety.
+                  Normal updates remain fast-forward-only and never overwrite tracked edits. Repair is the recovery path:
+                  if tracked program files were modified, DubLocal can save their Git patch under ~/.dublocal/repair-backups,
+                  restore the official files from GitHub main, refresh the managed Python core, verify the import path and
+                  restart cleanly. Local commits or diverged Git history are never rewritten automatically. Models, caches,
+                  generated jobs and untracked user files are outside that repair operation.
                 </div>
                 """
             )
@@ -632,8 +691,8 @@ def build_app() -> gr.Blocks:
         gr.HTML(
             """
             <div class="dl-note">
-              M3 produces reusable source and translated timed subtitle files locally. Kokoro voice generation,
-              timing adaptation, audio mixing and rendered video are later milestones and are not simulated here.
+              Current development version: 0.3.x / M3. M3 produces reusable source and translated timed subtitle files
+              locally. Kokoro voice generation, timing adaptation, audio mixing and rendered video are later milestones.
             </div>
             """
         )
@@ -708,12 +767,21 @@ def build_app() -> gr.Blocks:
             inputs=[subtitle_path_state, translation_source_language, translation_target_language],
             outputs=[translated_output, translated_preview, status],
         )
+        refresh_resources_button.click(
+            fn=refresh_resources_ui,
+            outputs=[resource_status],
+        )
         check_update_button.click(
             fn=check_updates_ui,
             outputs=[update_status],
         )
         install_update_button.click(
             fn=install_update_ui,
+            outputs=[update_status],
+        )
+        repair_button.click(
+            fn=repair_installation_ui,
+            inputs=[repair_confirm],
             outputs=[update_status],
         )
         restart_button.click(
