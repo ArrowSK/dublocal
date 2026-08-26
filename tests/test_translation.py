@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+
+import huggingface_hub
 
 import dublocal.translation as translation
 from dublocal.translation import TranslatedSegment
@@ -24,6 +27,71 @@ def test_translation_models_live_outside_repository(monkeypatch, tmp_path: Path)
     path = translation.translation_model_path("en-to-many")
 
     assert path == tmp_path / "app-data" / "models" / "translation" / "en-to-many"
+
+
+def test_translation_model_reuses_shared_hf_snapshot_and_remove_keeps_snapshot(
+    monkeypatch, tmp_path: Path
+):
+    app_data = tmp_path / "app-data"
+    snapshot = tmp_path / "hf-cache" / "snapshot"
+    snapshot.mkdir(parents=True)
+    for name in translation._MODEL_FILES:
+        (snapshot / name).write_bytes(b"model-file")
+
+    metadata = translation.TRANSLATION_MODELS["en-to-many"]
+    monkeypatch.setattr(translation, "user_data_dir", lambda app: str(app_data))
+    monkeypatch.setattr(translation, "translation_engine_ready", lambda: True)
+    monkeypatch.setattr(translation, "_sha256", lambda path: metadata["weight_sha256"])
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda **kwargs: str(snapshot))
+
+    registered = translation.install_translation_model("en-to-many")
+
+    assert registered.is_symlink()
+    assert registered.resolve() == snapshot.resolve()
+    assert translation._model_valid("en-to-many") is True
+    assert translation._model_storage("en-to-many") == "shared HF cache"
+
+    removed = translation.remove_translation_models()
+
+    assert removed == 1
+    assert not registered.exists()
+    assert snapshot.exists()
+    assert (snapshot / "model.safetensors").exists()
+
+
+def test_translation_can_use_external_compatible_runtime(monkeypatch, tmp_path: Path):
+    current = tmp_path / "dublocal-python"
+    external = tmp_path / "studio-python"
+    current.write_text("", encoding="utf-8")
+    external.write_text("", encoding="utf-8")
+    runtime = SimpleNamespace(python=external, label="narroam-studio")
+    captured = {}
+
+    monkeypatch.setattr(translation.sys, "executable", str(current))
+    monkeypatch.setattr(translation, "_translation_runtime", lambda: runtime)
+
+    def fake_external(active_runtime, model_id, texts, target_tag, batch_size):
+        captured.update(
+            runtime=active_runtime,
+            model_id=model_id,
+            texts=texts,
+            target_tag=target_tag,
+            batch_size=batch_size,
+        )
+        return ["Szia"]
+
+    monkeypatch.setattr(translation, "_translate_external", fake_external)
+
+    result = translation._translate_with_model(
+        "en-to-many",
+        ["Hello"],
+        target_language="hu",
+    )
+
+    assert result == ["Szia"]
+    assert captured["runtime"] is runtime
+    assert captured["model_id"] == "en-to-many"
+    assert captured["target_tag"] == "hun"
 
 
 def test_translate_srt_preserves_timings(monkeypatch, tmp_path: Path):
