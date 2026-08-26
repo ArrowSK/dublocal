@@ -1,47 +1,65 @@
 <p align="center">
-  <img src="assets/macos/DubLocal.svg" width="150" alt="DubLocal logo">
+  <img src="assets/macos/DubLocal.svg" alt="DubLocal logo" width="132">
 </p>
 
 <h1 align="center">DubLocal_</h1>
 
 <p align="center">
-  <strong>Local subtitles and voice-over tooling for macOS.</strong><br>
-  Start with a YouTube link or a local media file. Use existing captions when they work; fall back to local speech transcription when they do not.
+  Local subtitles, translation and voice-over tooling for macOS.<br>
+  Your media stays on your Mac unless you explicitly use a remote media source such as YouTube.
 </p>
 
 <p align="center">
-  macOS 13+ · Apple Silicon + Intel · Python 3.11+ · Apache-2.0
+  <strong>M3 development build</strong> · macOS 13+ · Apple Silicon and Intel · Apache-2.0
 </p>
 
 ---
 
-## What DubLocal is
+DubLocal is for a simple problem: you have a video or audio file — or a YouTube link you are allowed to process — and you want timed subtitles in another language without sending the media through a cloud transcription or translation service.
 
-DubLocal is an open-source, local-first macOS app for building translated subtitle and dubbing workflows without sending your media to a cloud transcription service by default.
-
-Today it can inspect media, discover or extract subtitles, and create timestamped subtitles locally with `whisper.cpp`. Translation and generated voice-over are the next layers of the same pipeline rather than separate throw-away tools.
-
-The normal interface is a branded **DubLocal.app** launcher. Terminal is needed for the first installation only; after that the app can check for and install GitHub updates from inside DubLocal.
+The long-term goal is local AI voice-over dubbing. The current build already handles the first three stages reliably: subtitle acquisition, local speech transcription and local subtitle translation.
 
 ## What works today
 
-| Area | Current support |
-| --- | --- |
-| YouTube | Scan one video, discover creator/automatic captions, extract captions when YouTube allows it |
-| Local media | Inspect common video/audio containers with `ffprobe`; discover and extract text subtitle tracks |
-| YouTube rate limits | HTTP 429 caption failures are handled cleanly and can fall back to local transcription |
-| Local transcription | `whisper.cpp` / `whisper-cli`, timestamped SRT output, subtitle preview |
-| Whisper models | Tiny, Base and Small; install/remove on demand; checksummed before use |
-| Apple Silicon | Normal whisper.cpp Metal-accelerated path |
-| Intel Macs | Conservative CPU compatibility path |
-| Updates | Built-in GitHub update checker/installer with safe fast-forward-only updates |
-| Launcher | `DubLocal.app` and `Stop DubLocal.app` with the branded icon |
+| Stage | Status | What DubLocal does |
+| --- | --- | --- |
+| Media input | ✅ | YouTube URL or local video/audio |
+| Existing subtitles | ✅ | Finds embedded/local and YouTube caption tracks |
+| Missing captions | ✅ | Creates timestamped subtitles locally with whisper.cpp |
+| Subtitle translation | ✅ M3 | Translates the timed SRT locally with optional OPUS models |
+| AI voice | Next | Kokoro local TTS backend |
+| Dubbing mix | Planned | Timing fit, original-audio ducking and speech overlay |
+| Video render | Planned | Preview and final media export |
 
-Not implemented yet: translation, Kokoro voice generation, duration fitting, audio ducking and rendered dubbed-video export. The UI does not pretend those layers exist before they are real.
+## The normal workflow
 
-## Install once
+1. Open **DubLocal.app**.
+2. Choose **YouTube** or **Local file**, then scan the source.
+3. If good subtitles already exist, extract them. If not, use **Transcribe locally**.
+4. In **Local translation**, choose the subtitle language and the language you want.
+5. The first time you use a translation route, click **Prepare translation**. DubLocal installs only the optional runtime and model(s) that route needs.
+6. Click **Translate subtitles** and download the translated SRT.
 
-Open Terminal and run:
+The timestamps are kept unchanged during translation, so the translated subtitle file remains synchronized with the original media.
+
+## Local-first means optional models stay optional
+
+DubLocal deliberately keeps the base installation small. AI weights are not silently downloaded.
+
+For transcription, you choose a Whisper model yourself. **Base** (~142 MiB) is the recommended starting point.
+
+For translation, DubLocal uses two allowlisted Apache-2.0 Helsinki-NLP OPUS models:
+
+- many supported languages → English, ~310 MiB;
+- English → many supported languages, ~310 MiB.
+
+An English ↔ another-language translation needs one model. A translation between two non-English languages uses English as a local pivot and therefore needs both. Exact pinned revisions and checksums are recorded in `MODEL_LICENSES.json`.
+
+There is no silent cloud transcription or translation fallback.
+
+## Install on macOS
+
+The initial development installation uses Git so DubLocal can update itself safely from this repository.
 
 ```bash
 git clone https://github.com/ArrowSK/dublocal.git
@@ -49,96 +67,74 @@ cd dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-The installer creates the local Python environment, checks the required media tools, can offer Homebrew installation of FFmpeg and `whisper.cpp`, generates the macOS icon, and installs:
+The installer creates:
 
 ```text
 ~/Applications/DubLocal.app
 ~/Applications/Stop DubLocal.app
 ```
 
-No Whisper model is downloaded automatically. Launch DubLocal, open **Local transcription · Whisper**, and install a model only when you want local transcription. **Base (142 MiB)** is the recommended starting point.
+It also creates DubLocal's private Python environment, checks FFmpeg, can install the small `whisper.cpp` engine through Homebrew, and generates the branded macOS icon.
 
-For a slower, explained walkthrough, see [Installation](docs/INSTALLATION.md).
+After that, normal use is through **DubLocal.app** — not Terminal.
 
-## Your first subtitle
+For a calmer step-by-step install guide, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-1. Open **DubLocal.app**.
-2. Choose **YouTube** or **Local file**.
-3. Scan the source.
-4. If a usable subtitle track exists, select it and choose **Extract existing subtitles**.
-5. If captions are missing, image-based, or blocked by YouTube, open **Local transcription · Whisper** and choose **Transcribe locally**.
-6. DubLocal returns an SRT file and a timed subtitle preview.
+## Updating without Terminal
 
-See the [User Guide](docs/USER_GUIDE.md) for the same workflow with model choices, rate-limit behaviour and practical examples.
+Open **DubLocal updates** inside the app:
 
-## Updates without Terminal
+**Check for updates → Install update → Restart DubLocal**
 
-Open **DubLocal updates** inside the app and use:
+The updater only accepts a clean fast-forward from the configured GitHub branch. If the installation folder contains local edits or divergent commits, DubLocal stops and explains why instead of overwriting anything.
 
-- **Check for updates** — contacts the configured GitHub upstream only when you ask;
-- **Install update** — accepts only a clean, fast-forward update and refreshes the current Python environment;
-- **Restart DubLocal** — restarts through the native launcher so the new code is loaded.
+## Supported M3 translation languages
 
-The updater deliberately refuses to overwrite local edits or guess through divergent Git history. Developer checkouts remain safe.
+The current UI allowlist is:
 
-Manual `git pull` remains available as a fallback; see [Installation → Updating](docs/INSTALLATION.md).
+English, Hungarian, Russian, German, French, Spanish, Italian, Portuguese, Polish, Ukrainian, Serbian and Croatian.
 
-## How the local fallback works
+The underlying OPUS models cover more languages, but DubLocal intentionally exposes a smaller tested set first. More languages can be added after their model behavior and identifiers are validated.
+
+## Where files live
+
+DubLocal separates code, models and temporary jobs:
 
 ```text
-YouTube / local media
-        ↓
-scan source
-        ↓
-usable captions? ── yes ──→ extract
-        │
-        no / blocked
-        ↓
-local whisper.cpp transcription
-        ↓
-normalized timed SRT
-        ↓
-next: translation
-        ↓
-then: Kokoro TTS → timing → audio mix → rendered export
+~/dublocal/                         cloned application source
+~/Library/.../DubLocal/models/      optional local AI models
+~/Library/Caches/.../DubLocal/jobs/ generated/intermediate job files
+~/.dublocal/logs/                   launcher log
 ```
 
-For YouTube, local transcription may still need to fetch the video's audio. DubLocal does not bypass DRM, access controls or platform restrictions.
+The exact `~/Library` paths are chosen using the normal macOS application-data conventions through `platformdirs`.
 
-## Privacy and storage
+Removing a translation or Whisper model does not uninstall DubLocal.
 
-Media processing is local by default. The app binds to `127.0.0.1`, not your LAN.
+## Documentation
 
-Whisper model weights are optional and stored outside the Git repository in the normal macOS application-data location. Runtime logs live under:
-
-```text
-~/.dublocal/logs/dublocal.log
-```
-
-DubLocal contacts GitHub for update checks only when you press **Check for updates** or **Install update**. YouTube is contacted only for YouTube-source operations.
-
-## If something goes wrong
-
-Start with [Troubleshooting](docs/TROUBLESHOOTING.md). It covers the problems most likely to be confusing: YouTube HTTP 429, missing FFmpeg, missing `whisper.cpp`, model problems, a blocked updater, launcher startup failures, and Git working-tree warnings.
+- [User guide](docs/USER_GUIDE.md) — how to use DubLocal without needing to understand the implementation.
+- [Installation](docs/INSTALLATION.md) — first installation, launcher and updates.
+- [Troubleshooting](docs/TROUBLESHOOTING.md) — practical fixes for the errors users are likely to encounter.
+- [Architecture](docs/ARCHITECTURE.md) — how the local pipeline is separated into replaceable backends.
+- [Third-party licences](THIRD_PARTY_LICENSES.md) and [model registry](MODEL_LICENSES.json) — what DubLocal depends on and why.
 
 ## Roadmap
 
-- ✅ local source inspection and subtitle extraction
-- ✅ YouTube caption discovery and controlled rate-limit handling
-- ✅ normalized subtitle timeline
-- ✅ local `whisper.cpp` transcription and model manager
-- ✅ native macOS launcher
-- ✅ safe in-app GitHub updater
-- ☐ translation backend and translation model manager
-- ☐ Kokoro TTS backend
-- ☐ speech timing and original-audio ducking
-- ☐ rendered preview/export
-- ☐ signed/notarized macOS release packaging
+```text
+M1  Source + existing captions              ✅
+M2  Local transcription / Whisper           ✅
+M3  Local subtitle translation              ✅ implementation; validation in progress
+M4  Kokoro local voice generation            next
+M5  Voice timing + original-audio ducking    planned
+M6  Preview + rendered media export          planned
+M7  Signed/notarized Mac packaging           planned
+```
 
-Contributor-facing design notes are in [Architecture](docs/ARCHITECTURE.md).
+## Legal note
 
-## Legal
+DubLocal is a media-processing tool, not a licence to copy media. Process only content you have the right or legal authority to download, translate, modify or redistribute. DubLocal does not implement DRM or access-control circumvention.
 
-DubLocal is a media-processing tool. Use it only with media you have the right or legal authority to download, translate, modify or redistribute. The project does not grant rights to third-party content and does not implement DRM or access-control circumvention.
+## Licence
 
-DubLocal itself is licensed under Apache-2.0. Third-party software and model weights keep their own licences; see [Third-party licences](THIRD_PARTY_LICENSES.md) and [Model licence registry](MODEL_LICENSES.json).
+DubLocal itself is Apache-2.0. Third-party software and model weights keep their own licences. See `THIRD_PARTY_LICENSES.md` and `MODEL_LICENSES.json` for the current inventory.
