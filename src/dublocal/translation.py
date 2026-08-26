@@ -15,7 +15,7 @@ from typing import Iterable
 
 from platformdirs import user_cache_dir, user_data_dir
 
-from .dependencies import shared_huggingface_cache
+from .dependencies import discover_python_runtime, shared_huggingface_cache
 from .media import DubLocalError
 from .timeline import Segment, parse_srt, segments_to_srt
 
@@ -57,6 +57,7 @@ TRANSLATION_MODELS: dict[str, dict[str, str]] = {
     },
 }
 
+_TRANSLATION_RUNTIME_MODULES = ("torch", "transformers", "sentencepiece", "safetensors")
 _MODEL_FILES = [
     "config.json",
     "generation_config.json",
@@ -101,7 +102,7 @@ _LANGUAGE_ALIASES = {
 
 
 class TranslationEngineMissingError(DubLocalError):
-    """Raised when the optional translation Python stack is not installed."""
+    """Raised when no compatible local translation Python runtime exists."""
 
 
 class TranslationModelMissingError(DubLocalError):
@@ -172,17 +173,22 @@ def normalise_language_code(value: str | None) -> str:
     return "auto"
 
 
+def _translation_runtime():
+    return discover_python_runtime(_TRANSLATION_RUNTIME_MODULES, allow_current=True)
+
+
 def translation_engine_ready() -> bool:
-    return all(
-        importlib.util.find_spec(module) is not None
-        for module in ("torch", "transformers", "sentencepiece", "safetensors")
-    )
+    return _translation_runtime() is not None
 
 
 def translation_engine_status() -> str:
-    if translation_engine_ready():
-        return "ready · PyTorch + Transformers + SentencePiece + safetensors"
-    return "not installed · optional local translation engine"
+    runtime = _translation_runtime()
+    if runtime is None:
+        return "not installed · optional local translation engine"
+    current = Path(sys.executable).resolve()
+    if runtime.python.resolve() == current:
+        return "ready · DubLocal venv · PyTorch + Transformers + SentencePiece + safetensors"
+    return f"ready · reusing external runtime · {runtime.label} · {runtime.python}"
 
 
 def _repository_root() -> Path:
@@ -193,6 +199,9 @@ def _repository_root() -> Path:
 
 
 def install_translation_engine() -> None:
+    # Prefer a compatible runtime that is already present. We never inject the
+    # site-packages of another venv into DubLocal's interpreter; external reuse
+    # happens through translation_worker.py in a separate Python process.
     if translation_engine_ready():
         return
 
@@ -446,6 +455,48 @@ def _cleanup_model(torch_module, model) -> None:
         pass
 
 
+def _translate_external(runtime, model_id: str, texts: list[str], target_tag: str, batch_size: int) -> list[str]:
+    job = _new_job_dir("translation-worker")
+    request = job / "request.json"
+    response = job / "response.json"
+    worker = Path(__file__).with_name("translation_worker.py")
+    request.write_text(
+        json.dumps(
+            {
+                "model_dir": str(translation_model_path(model_id)),
+                "texts": texts,
+                "target_tag": target_tag,
+                "batch_size": batch_size,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    try:
+        result = subprocess.run(
+            [str(runtime.python), str(worker), str(request), str(response)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3600,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise DubLocalError(f"Reusable external translation runtime failed to start: {exc}") from exc
+    if result.returncode != 0 or not response.is_file():
+        detail = (result.stderr or result.stdout or "external worker returned no result").strip()
+        raise DubLocalError(
+            "Reusable external translation runtime failed: "
+            + (detail.splitlines()[-1] if detail else "unknown worker error")
+        )
+    try:
+        payload = json.loads(response.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise DubLocalError("Reusable external translation runtime returned invalid output.") from exc
+    if not payload.get("ok"):
+        raise DubLocalError(f"Reusable external translation runtime failed: {payload.get('error', 'unknown error')}")
+    return [str(item).strip() for item in payload.get("translations", [])]
+
+
 def _translate_with_model(
     model_id: str,
     texts: list[str],
@@ -455,6 +506,21 @@ def _translate_with_model(
 ) -> list[str]:
     if not texts:
         return []
+
+    target_tag = ""
+    if model_id == "en-to-many":
+        target = normalise_language_code(target_language)
+        if target not in TRANSLATION_LANGUAGES or target == "en":
+            raise DubLocalError("Invalid English-to-multilingual target language.")
+        target_tag = TRANSLATION_LANGUAGES[target]["opus"]
+
+    runtime = _translation_runtime()
+    if runtime is None:
+        raise TranslationEngineMissingError(
+            "No compatible local translation runtime is available. Click Prepare translation."
+        )
+    if runtime.python.resolve() != Path(sys.executable).resolve():
+        return _translate_external(runtime, model_id, texts, target_tag, batch_size)
 
     import torch
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -477,14 +543,7 @@ def _translate_with_model(
     if device != "cpu":
         model.to(device)
 
-    prepared = list(texts)
-    if model_id == "en-to-many":
-        target = normalise_language_code(target_language)
-        if target not in TRANSLATION_LANGUAGES or target == "en":
-            _cleanup_model(torch, model)
-            raise DubLocalError("Invalid English-to-multilingual target language.")
-        tag = TRANSLATION_LANGUAGES[target]["opus"]
-        prepared = [f">>{tag}<< {text}" for text in texts]
+    prepared = [f">>{target_tag}<< {text}" for text in texts] if target_tag else list(texts)
 
     def run_on_device(active_device: str) -> list[str]:
         outputs: list[str] = []
