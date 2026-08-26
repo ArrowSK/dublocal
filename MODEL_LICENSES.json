@@ -3,7 +3,8 @@
   "policy": {
     "default": "deny",
     "require_explicit_metadata_before_distribution": true,
-    "models_download_on_user_request_only": true
+    "models_download_on_user_request_only": true,
+    "prefer_verified_shared_cache_reuse": true
   },
   "models": [
     {
@@ -59,6 +60,8 @@
       "redistribution": true,
       "bundled": false,
       "download_on_demand": true,
+      "storage_policy": "shared_huggingface_cache_with_dublocal_registration",
+      "remove_policy": "remove_dublocal_registration_keep_shared_snapshot",
       "weight_size": "310 MiB",
       "sha256": "8b8ff7a54cd65dd0015c620755dd62f956796035d2cafd43446e960e13c79c28",
       "role": "Allowlisted multilingual source languages to English"
@@ -74,6 +77,8 @@
       "redistribution": true,
       "bundled": false,
       "download_on_demand": true,
+      "storage_policy": "shared_huggingface_cache_with_dublocal_registration",
+      "remove_policy": "remove_dublocal_registration_keep_shared_snapshot",
       "weight_size": "310 MiB",
       "sha256": "dd4c874ecad8853d94415c21937c7e35ea09cc22f178b63821294ed010121436",
       "role": "English to allowlisted multilingual target languages"
