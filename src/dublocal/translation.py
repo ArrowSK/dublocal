@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import gc
 import hashlib
+import importlib
 import importlib.util
+import json
 import shutil
 import subprocess
 import sys
@@ -17,8 +19,6 @@ from .media import DubLocalError
 from .timeline import Segment, parse_srt, segments_to_srt
 
 
-# These are the languages currently exposed by the DubLocal UI.  OPUS uses
-# three-letter / script-aware identifiers for the multilingual target token.
 TRANSLATION_LANGUAGES: dict[str, dict[str, str]] = {
     "en": {"label": "English", "opus": "eng"},
     "hu": {"label": "Hungarian", "opus": "hun"},
@@ -34,8 +34,9 @@ TRANSLATION_LANGUAGES: dict[str, dict[str, str]] = {
     "hr": {"label": "Croatian", "opus": "hrv"},
 }
 
-# Exact, immutable Hugging Face revisions are used.  Both revisions add a
-# safetensors representation on top of the corresponding Apache-2.0 OPUS model.
+# Exact immutable Hugging Face revisions containing safetensors equivalents of
+# the Apache-2.0 OPUS Marian weights. The large weight itself is independently
+# SHA-256 checked before the model is marked verified locally.
 TRANSLATION_MODELS: dict[str, dict[str, str]] = {
     "many-to-en": {
         "label": "Many languages → English",
@@ -65,6 +66,7 @@ _MODEL_FILES = [
     "tokenizer_config.json",
     "vocab.json",
 ]
+_VERIFIED_MARKER = ".dublocal-verified.json"
 
 _LANGUAGE_ALIASES = {
     "eng": "en",
@@ -153,7 +155,6 @@ def normalise_language_code(value: str | None) -> str:
     if not raw or raw in {"auto", "und", "unknown"}:
         return "auto"
 
-    # YouTube commonly returns values such as en-US or en-orig.
     candidates = [raw, raw.split("-", 1)[0]]
     for candidate in candidates:
         if candidate in _LANGUAGE_ALIASES:
@@ -205,13 +206,29 @@ def install_translation_engine() -> None:
         )
 
 
+def _verification_marker(model_id: str) -> Path:
+    return translation_model_path(model_id) / _VERIFIED_MARKER
+
+
 def _model_valid(model_id: str) -> bool:
     metadata = TRANSLATION_MODELS[model_id]
     directory = translation_model_path(model_id)
-    weight = directory / "model.safetensors"
     if not all((directory / name).is_file() for name in _MODEL_FILES):
         return False
-    return _sha256(weight) == metadata["weight_sha256"]
+
+    marker = _verification_marker(model_id)
+    if not marker.is_file():
+        return False
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+
+    return (
+        payload.get("repo_id") == metadata["repo_id"]
+        and payload.get("revision") == metadata["revision"]
+        and payload.get("weight_sha256") == metadata["weight_sha256"]
+    )
 
 
 def installed_translation_models() -> list[str]:
@@ -261,6 +278,20 @@ def install_translation_model(model_id: str) -> Path:
         raise DubLocalError(
             "The translation model download is incomplete: " + ", ".join(missing)
         )
+
+    _verification_marker(model_id).write_text(
+        json.dumps(
+            {
+                "repo_id": metadata["repo_id"],
+                "revision": metadata["revision"],
+                "weight_sha256": metadata["weight_sha256"],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     return destination
 
 
@@ -440,8 +471,6 @@ def _translate_with_model(
         except RuntimeError:
             if device == "cpu":
                 raise
-            # Some Marian/PyTorch combinations can hit an unsupported MPS op.
-            # Falling back to CPU keeps M3 reliable without changing the user's model.
             model.to("cpu")
             translated = run_on_device("cpu")
     finally:
