@@ -17,11 +17,10 @@ def test_discovers_compatible_external_python_runtime(monkeypatch, tmp_path: Pat
         "_candidate_pythons",
         lambda: [(current, "DubLocal environment"), (external, "narroam-studio")],
     )
-    monkeypatch.setattr(dependencies.Path, "resolve", lambda self: self)
     monkeypatch.setattr(dependencies.sys, "executable", str(current))
 
     def fake_probe(python, modules):
-        if python == external:
+        if python.resolve() == external.resolve():
             return tuple(modules)
         return ()
 
@@ -30,7 +29,7 @@ def test_discovers_compatible_external_python_runtime(monkeypatch, tmp_path: Pat
     runtime = dependencies.discover_python_runtime(("kokoro",), allow_current=True)
 
     assert runtime is not None
-    assert runtime.python == external
+    assert runtime.python == external.resolve()
     assert runtime.label == "narroam-studio"
     assert runtime.modules == ("kokoro",)
 
