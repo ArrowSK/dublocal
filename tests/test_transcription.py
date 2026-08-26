@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,10 +34,15 @@ def test_transcribe_source_produces_normalized_segments(monkeypatch, tmp_path: P
 
     def fake_run(command, **kwargs):
         assert "-osrt" in command
+        assert "-oj" in command
         assert command[command.index("-l") + 1] == "auto"
         output_prefix = Path(command[command.index("-of") + 1])
         output_prefix.with_suffix(".srt").write_text(
             "1\n00:00:00,500 --> 00:00:02,000\nHello from Whisper.\n",
+            encoding="utf-8",
+        )
+        output_prefix.with_suffix(".json").write_text(
+            json.dumps({"result": {"language": "en"}}),
             encoding="utf-8",
         )
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -47,7 +53,7 @@ def test_transcribe_source_produces_normalized_segments(monkeypatch, tmp_path: P
 
     assert result.srt_path.name == "captions.srt"
     assert result.model_id == "base"
-    assert result.language == "auto"
+    assert result.language == "en"
     assert len(result.segments) == 1
     assert result.segments[0].start_ms == 500
     assert result.segments[0].end_ms == 2000
@@ -74,8 +80,13 @@ def test_intel_transcription_forces_cpu_mode(monkeypatch, tmp_path: Path):
 
     def fake_run(command, **kwargs):
         captured.extend(command)
-        Path(command[command.index("-of") + 1]).with_suffix(".srt").write_text(
+        output_prefix = Path(command[command.index("-of") + 1])
+        output_prefix.with_suffix(".srt").write_text(
             "1\n00:00:00,000 --> 00:00:01,000\nTest.\n",
+            encoding="utf-8",
+        )
+        output_prefix.with_suffix(".json").write_text(
+            json.dumps({"result": {"language": "en"}}),
             encoding="utf-8",
         )
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -85,3 +96,4 @@ def test_intel_transcription_forces_cpu_mode(monkeypatch, tmp_path: Path):
     transcription.transcribe_source({"kind": "local", "path": str(source)}, model_id="tiny")
 
     assert "-ng" in captured
+    assert "-oj" in captured
