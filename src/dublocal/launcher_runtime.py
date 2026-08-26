@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from .app import build_app
+from .app import MATRIX_CSS, build_app
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -22,6 +22,7 @@ def main() -> None:
         server_name="127.0.0.1",
         server_port=port,
         show_error=False,
+        css=MATRIX_CSS,
     )
 
 
