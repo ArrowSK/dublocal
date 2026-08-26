@@ -5,7 +5,7 @@ from pathlib import Path
 
 from platformdirs import user_cache_dir
 
-from .app import MATRIX_CSS, build_app
+from .ui import MATRIX_CSS, build_app
 
 
 def _env_bool(name: str, default: bool) -> bool:
