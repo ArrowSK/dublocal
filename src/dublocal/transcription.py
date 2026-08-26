@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import platform
 import shutil
@@ -103,7 +104,7 @@ def install_whisper_model(model_id: str) -> Path:
 
     request = Request(
         metadata["url"],
-        headers={"User-Agent": "DubLocal/0.2 (+https://github.com/ArrowSK/dublocal)"},
+        headers={"User-Agent": "DubLocal/0.3 (+https://github.com/ArrowSK/dublocal)"},
     )
     try:
         with urlopen(request, timeout=60) as response, temporary.open("wb") as output:
@@ -276,6 +277,19 @@ def _whisper_environment() -> dict[str, str]:
     return env
 
 
+def _detected_language(output_prefix: Path, requested_language: str) -> str:
+    json_path = output_prefix.with_suffix(".json")
+    if json_path.is_file():
+        try:
+            payload = json.loads(json_path.read_text(encoding="utf-8", errors="replace"))
+            detected = str((payload.get("result") or {}).get("language") or "").strip().lower()
+            if detected:
+                return detected
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            pass
+    return requested_language
+
+
 def transcribe_source(
     info: dict[str, Any],
     model_id: str = "base",
@@ -300,6 +314,7 @@ def transcribe_source(
     source = _source_media_path(info, job_dir)
     wav = _convert_to_whisper_wav(source, job_dir)
     output_prefix = job_dir / "captions"
+    requested_language = (language or "auto").strip().lower()
 
     command = [
         executable,
@@ -308,10 +323,11 @@ def transcribe_source(
         "-f",
         str(wav),
         "-osrt",
+        "-oj",
         "-of",
         str(output_prefix),
         "-l",
-        (language or "auto").strip().lower(),
+        requested_language,
         "-np",
     ]
 
@@ -349,5 +365,5 @@ def transcribe_source(
         srt_path=srt_path,
         segments=segments,
         model_id=model_id,
-        language=(language or "auto").strip().lower(),
+        language=_detected_language(output_prefix, requested_language),
     )
