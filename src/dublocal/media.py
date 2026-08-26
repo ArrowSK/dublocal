@@ -286,6 +286,30 @@ def _preferred_youtube_formats(track: dict[str, Any]) -> list[dict[str, str]]:
     return formats
 
 
+def _normalise_subtitle_to_srt(path: Path) -> Path:
+    if path.suffix.lower() == ".srt":
+        return path
+
+    ffmpeg = _require_tool("ffmpeg")
+    output = path.parent / "captions.srt"
+    _run(
+        [
+            ffmpeg,
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(path),
+            str(output),
+        ]
+    )
+    if not output.is_file() or output.stat().st_size == 0:
+        raise DubLocalError("FFmpeg could not normalize the downloaded caption track to SRT.")
+    return output
+
+
 def _download_youtube_caption_direct(
     info: dict[str, Any], track: dict[str, Any], output_dir: Path
 ) -> Path | None:
@@ -358,7 +382,7 @@ def extract_youtube_subtitle(info: dict[str, Any], track_value: str) -> Path:
 
     direct = _download_youtube_caption_direct(info, track, output_dir)
     if direct is not None:
-        return direct
+        return _normalise_subtitle_to_srt(direct)
 
     options = {
         "quiet": True,
@@ -399,7 +423,7 @@ def extract_youtube_subtitle(info: dict[str, Any], track_value: str) -> Path:
             "yt-dlp reported the caption track but did not produce a subtitle file. "
             "Use Local transcription if the caption remains unavailable."
         )
-    return candidates[0]
+    return _normalise_subtitle_to_srt(candidates[0])
 
 
 def extract_subtitle(info: dict[str, Any], track_value: str) -> Path:
