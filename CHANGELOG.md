@@ -2,58 +2,52 @@
 
 DubLocal is still in active development. The versions below describe development builds from the `main` branch.
 
-> **Current development build:** `v0.3.0.dev0` — **M3 Local Translation**
+> **Current development build:** `v0.4.0.dev0` — **M4 Local Voice**
 >
 > A packaged GitHub Release has **not** been published yet. The first public packaged release will be created only after the corresponding build has been validated and the macOS distribution work is ready.
 
-## v0.3.0.dev0 — M3 Local Translation — current
+## v0.4.0.dev0 — M4 Local Voice — current
 
-M3 turns the timestamped subtitle timeline from M2 into a fully local translation workflow.
+M4 adds the first local speech-synthesis stage without changing the source movie soundtrack yet.
 
 ### Added
+
+- Kokoro as the first local TTS backend.
+- Reuse of a compatible existing Kokoro virtual environment through a separate worker process instead of copying that environment's packages into DubLocal.
+- A fallback **Prepare Kokoro** action that installs DubLocal's optional Kokoro runtime only when no reusable runtime is available.
+- Official Kokoro language and voice selectors.
+- American and British English as separate pronunciation frontends/voice families.
+- Voice-only WAV generation from either the source SRT or translated SRT.
+- Per-subtitle segment WAV assets and a JSON generation manifest.
+- Timeline assembly that keeps every subtitle start time and reports speech that overruns its current subtitle window.
+- Model Manager controls for explicit Kokoro preparation/verification.
+- Shared Hugging Face cache reuse for Kokoro model/voice assets.
+
+### Runtime-discovery fix
+
+M4 fixes an important macOS virtual-environment edge case. A venv's `bin/python` is often a symlink to the same framework Python used by other venvs. Earlier discovery resolved that symlink, which could make two different environments appear to be the same interpreter. DubLocal now preserves the venv entry-point path itself, so an environment such as `~/narroam-studio/.venv/bin/python` can be recognized as a distinct reusable runtime.
+
+### Scope boundary
+
+M4 does **not** replace dialogue in the original soundtrack and does not re-encode video. It produces a synchronized voice-only track. M5 adds duration fitting, original-audio ducking/mixing and the stream-copy/remux strategy for replacing the primary audio or adding a second selectable dubbed track.
+
+Official Kokoro currently covers American/British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin Chinese. Translation targets such as Hungarian, Russian and German remain subtitle-only until another compatible local TTS backend is added.
+
+## v0.3.0.dev0 — M3 Local Translation
+
+M3 turned the timestamped subtitle timeline from M2 into a fully local translation workflow.
 
 - Local subtitle translation with pinned Apache-2.0 Helsinki-NLP OPUS models.
 - English ↔ supported-language translation with one model, and non-English ↔ non-English translation through a local English pivot.
 - Original/translated side-by-side subtitle preview.
 - Translated SRT export with the original timestamps preserved exactly.
 - Whisper Auto-detected language handoff into the translation workflow.
-- Shared Hugging Face cache reuse: an identical pinned model already downloaded by another compatible local app can be reused instead of stored a second time.
-- Compatible external Python-runtime discovery. Heavy stacks already present in another known local environment can be reused through an isolated worker process rather than mixing virtual environments.
-- Reusable-resource reporting for FFmpeg, ffprobe, whisper.cpp, Hugging Face cache and detected Kokoro runtime availability.
-- **Repair installation** for Git-based development installs, modeled on NarRoam Studio's recovery behavior.
-- New top-level **Main** and **Settings** navigation.
-- **Settings → Updates**, **Settings → Model Manager**, and **Settings → Local Resources** subtabs.
-- Whisper and OPUS installation/removal moved out of the processing flow into the dedicated Model Manager.
-- Translation Model Manager presets for English → supported languages, supported languages → English, and non-English ↔ non-English routes.
-
-### Update and repair changes
-
-Normal in-app updates remain conservative: DubLocal accepts only the official `ArrowSK/dublocal` `main` branch, fast-forwards clean installations and refuses to overwrite tracked local edits.
-
-If tracked DubLocal program files have been modified, **Repair installation** can now:
-
-1. save the local Git diff as a patch under `~/.dublocal/repair-backups/`;
-2. restore tracked program files from official GitHub `main`;
-3. refresh the managed DubLocal Python core;
-4. verify the imported version and module path;
-5. restart DubLocal cleanly.
-
-Repair does not delete optional models, shared caches, generated jobs or untracked user files, and it will not rewrite local commits or diverged Git history.
-
-### Storage/reuse policy
-
-DubLocal now prefers reuse over duplication where that is technically safe:
-
-- system executables are reused in place;
-- Hugging Face model snapshots use the normal shared Hugging Face cache;
-- compatible external Python environments can be used through separate-process workers;
-- packages from one virtual environment are never injected into another virtual environment's interpreter.
-
-This same external-runtime mechanism is intended for M4 Kokoro integration.
-
-### Planned output behavior recorded for M5
-
-Dubbed-media export will avoid unnecessary video re-encoding. Compatible source video will be stream-copied while DubLocal creates/re-encodes only the new mixed audio track. The user will be able to choose between making the DubLocal mix the primary/default audio stream or adding it as a second selectable audio track while preserving the original audio.
+- Shared Hugging Face cache reuse instead of unnecessary duplicate model copies.
+- Compatible external Python-runtime discovery through isolated worker processes.
+- Reusable-resource reporting for FFmpeg, ffprobe, whisper.cpp and the Hugging Face cache.
+- **Repair installation** for Git-based development installs.
+- Main/Settings navigation with Settings → Updates, Model Manager and Local Resources.
+- Planned M5 behavior recorded: stream-copy compatible video and let the user replace the primary audio or add a second selectable dubbed track.
 
 ## v0.2.0.dev0 — M2 Local Transcription
 
