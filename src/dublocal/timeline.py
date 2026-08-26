@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Iterable
 
 
-_TIMESTAMP_RE = re.compile(r"^(?P<hours>\d{1,3}):(?P<minutes>\d{2}):(?P<seconds>\d{2})[,.](?P<millis>\d{3})$")
+_TIMESTAMP_RE = re.compile(
+    r"^(?P<hours>\d{1,3}):(?P<minutes>\d{2}):(?P<seconds>\d{2})[,.](?P<millis>\d{3})$"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +93,25 @@ def parse_srt(text: str) -> list[Segment]:
     return segments
 
 
-def segments_to_rows(segments: list[Segment]) -> list[list[str]]:
+def segments_to_srt(segments: Iterable[Segment]) -> str:
+    """Serialize normalized segments to standard UTF-8 SRT text."""
+
+    blocks: list[str] = []
+    for fallback_index, segment in enumerate(segments, start=1):
+        index = segment.index if segment.index > 0 else fallback_index
+        blocks.append(
+            "\n".join(
+                [
+                    str(index),
+                    f"{format_timestamp(segment.start_ms)} --> {format_timestamp(segment.end_ms)}",
+                    segment.text.strip(),
+                ]
+            )
+        )
+    return "\n\n".join(blocks) + ("\n" if blocks else "")
+
+
+def segments_to_rows(segments: Iterable[Segment]) -> list[list[str]]:
     return [
         [format_timestamp(segment.start_ms), format_timestamp(segment.end_ms), segment.text]
         for segment in segments
