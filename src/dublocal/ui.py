@@ -116,13 +116,34 @@ def _suggest_voice_controls(
     return gr.Dropdown(value=suggested), _voice_dropdown(suggested)
 
 
+def _translation_preview_rows(rows: list[list[str]]) -> list[list[str]]:
+    """Put translated text before source text so it stays visible on normal-width windows."""
+    return [
+        [row[0], row[1], row[3], row[2]] if len(row) >= 4 else list(row)
+        for row in rows
+    ]
+
+
+def _translation_result_note(rows: list[list[str]]) -> str:
+    comparable = [row for row in rows if len(row) >= 4]
+    changed = sum(
+        1
+        for row in comparable
+        if str(row[2]).strip() != str(row[3]).strip()
+    )
+    return f"[translation] {changed}/{len(comparable)} segment(s) differ from the source"
+
+
 def _translate_with_state(
     subtitle_path: str,
     source_language: str,
     target_language: str,
 ):
     output, rows, status = translate_selected(subtitle_path, source_language, target_language)
-    return output, rows, status, output or ""
+    if output and rows:
+        note = _translation_result_note(rows)
+        status = status.replace("\n```", f"\n{note}\n```", 1)
+    return output, _translation_preview_rows(rows), status, output or ""
 
 
 def _generate_voice_ui(
@@ -308,8 +329,9 @@ def build_app() -> gr.Blocks:
                     )
                     translated_output = gr.File(label="Translated SRT", interactive=False)
                     translated_preview = gr.Dataframe(
-                        headers=["Start", "End", "Original", "Translation"],
+                        headers=["Start", "End", "Translation", "Original"],
                         datatype=["str", "str", "str", "str"],
+                        column_widths=["105px", "105px", "40%", "40%"],
                         value=[],
                         interactive=False,
                         wrap=True,
