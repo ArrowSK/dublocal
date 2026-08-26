@@ -1,129 +1,119 @@
 # DubLocal user guide
 
-DubLocal is designed around one simple idea: **use the easiest reliable subtitle source first, and only do heavier local transcription when it is actually needed.**
+DubLocal is meant to be used like a small Mac utility, not like a Python project. Once it is installed, start it with **DubLocal.app** and work in the browser window it opens locally.
 
-You do not need to understand FFmpeg, whisper.cpp or subtitle formats to use the normal workflow.
+This guide describes the current M3 build: existing subtitles, local Whisper transcription and local subtitle translation.
 
-## 1. Open DubLocal
+## Before you start
 
-Launch:
+DubLocal does not upload a local movie or audio file to a cloud AI service. Transcription and translation run locally on the Mac.
+
+YouTube is different because the source itself is remote: DubLocal has to contact YouTube to inspect the video, request captions, or fetch audio when you explicitly ask for local transcription. You must have the right or legal authority to process the media.
+
+## 1. Choose your source
+
+At the top of DubLocal choose either **YouTube** or **Local file**.
+
+For YouTube, paste one video URL and click **Scan source**. DubLocal shows the video title and any creator or automatic caption tracks it can discover.
+
+For a local file, select your video or audio file and click **Scan source**. DubLocal uses `ffprobe` locally to inspect its streams and lists any embedded subtitle tracks.
+
+## 2. Get timed source subtitles
+
+There are two ways to continue.
+
+### Use subtitles that already exist
+
+Choose the subtitle/caption track you want, confirm that you have the right to process the media, then click **Extract existing subtitles**.
+
+DubLocal converts supported text captions to a normalized SRT file. That normalized SRT is the common input used by later translation and dubbing stages.
+
+Image-only subtitles such as PGS cannot be treated as text. For those, use local transcription instead.
+
+### Create subtitles with Whisper
+
+Open **Local transcription · Whisper**.
+
+The status box tells you whether the `whisper.cpp` engine is ready and which models are installed. The current options are:
+
+| Model | Approximate size | Good for |
+| --- | ---: | --- |
+| Tiny | 75 MiB | quick tests and speed-first work |
+| Base | 142 MiB | recommended starting point |
+| Small | 466 MiB | better accuracy when the extra time/storage is worthwhile |
+
+If your chosen model is not installed, click **Install / verify model**. The model is downloaded only because you asked for it and is checksum-verified before use.
+
+Choose the spoken language or leave **Auto detect**, then click **Transcribe locally**. DubLocal prepares 16 kHz mono audio with FFmpeg and runs whisper.cpp locally. The result is an SRT plus a timed preview.
+
+When Auto detect is used, DubLocal also reads Whisper's detected language and carries it into the translation section when possible.
+
+## 3. Translate the subtitles locally
+
+Once you have an extracted or transcribed SRT, open **Local translation**.
+
+The **Subtitle language** field should usually be filled automatically from the selected caption track or Whisper's detected language. If it says **Auto detect** or is wrong, choose the correct language manually. Translation deliberately does not guess an unknown subtitle language.
+
+Choose **Translate to**.
+
+The status panel shows the route DubLocal will use:
 
 ```text
-~/Applications/DubLocal.app
+English → Hungarian
+Hungarian → English
+Hungarian → English → German
 ```
 
-The launcher opens the local DubLocal interface in your default browser. The page is served only from your Mac on `127.0.0.1`.
+The middle form means DubLocal uses English as a local pivot for a translation between two non-English languages.
 
-If DubLocal is already running, the launcher simply opens it. If you have just updated the code, the launcher can start a clean instance.
+### The first time a route is used
 
-## 2. Choose the source
+Click **Prepare translation**.
 
-### YouTube
+DubLocal then installs the optional local translation Python runtime into its own environment and downloads only the model or models needed for the selected route. The two current models are Apache-2.0 Helsinki-NLP OPUS models, each with roughly 310 MiB of weights.
 
-Select **YouTube**, paste one video URL, and click **Scan source**.
+English ↔ another supported language needs one model. A non-English ↔ non-English route needs both models.
 
-DubLocal reads the video metadata and lists the subtitle/caption tracks YouTube reports for that video. It does not download the full video merely to perform this scan.
+The model downloads are pinned to exact upstream revisions and the safetensors weight file is SHA-256 verified. If verification fails, DubLocal deletes the failed download instead of using it.
 
-### Local file
+### Translate
 
-Select **Local file**, choose the video or audio file, and click **Scan source**.
+Click **Translate subtitles**.
 
-DubLocal uses `ffprobe` to inspect the streams and reports the embedded subtitle tracks it can see.
+DubLocal translates each timed segment locally. The original start and end times are not changed. The result panel shows the original text beside its translation, and **Translated SRT** gives you the new subtitle file.
 
-Common media containers such as MKV, MP4, AVI and audio files are the intended input path. Support is ultimately determined by the local FFmpeg build.
+Translation can use Apple Metal acceleration through PyTorch when the required operations are supported. If that path hits an unsupported MPS operation, DubLocal falls back to CPU for reliability.
 
-## 3. Prefer existing subtitles when they are usable
+There is no cloud translation fallback.
 
-If the source already has a usable text subtitle/caption track:
+### Removing translation models
 
-1. Select the track.
-2. Confirm that you have the right or legal authority to process the media.
-3. Click **Extract existing subtitles**.
+**Remove translation models** removes the downloaded OPUS model folders. It keeps the optional Python translation packages so that a later model reinstall is quicker and less disruptive.
 
-For local media, text subtitles can be converted to SRT through FFmpeg. Image-based subtitle streams are not silently OCRed; DubLocal tells you that they are not directly extractable by the current milestone.
+## What if YouTube says HTTP 429?
 
-For YouTube, DubLocal first tries the caption source reported during the scan. If YouTube temporarily refuses caption delivery, DubLocal reports that clearly instead of pretending the track was missing.
+YouTube occasionally rate-limits caption delivery. DubLocal retries the caption request, but it does not try to defeat the restriction.
 
-## 4. Use local transcription when captions are missing or blocked
+If captions remain blocked, use **Transcribe locally**. DubLocal will request the video's audio only when you explicitly start that fallback. If YouTube is also rate-limiting media delivery, wait and retry later or use a local copy that you are allowed to process.
 
-Expand **Local transcription · Whisper**.
+## Updating DubLocal
 
-If no model is installed yet, choose one:
+Open **DubLocal updates** and use:
 
-| Model | Size | Recommendation |
-| --- | ---: | --- |
-| Tiny | 75 MiB | Fastest, useful for testing |
-| Base | 142 MiB | Best first choice for normal use |
-| Small | 466 MiB | Better accuracy, more time and storage |
+**Check for updates → Install update → Restart DubLocal**
 
-Click **Install / verify model**. The download is explicit; DubLocal does not install model weights behind your back.
+The updater contacts the configured GitHub remote only when you ask. It accepts only a safe fast-forward update and refuses to overwrite local changes.
 
-Then choose the spoken language. **Auto detect** is the normal default. A manual language can help when you already know the source language and want to remove ambiguity.
+If you have just installed an update that adds new optional dependencies, the updater refreshes DubLocal's core environment. Optional model/runtime packages remain opt-in through their own panels.
 
-Click **Transcribe locally**.
+## What M3 does not do yet
 
-DubLocal will:
+M3 stops after producing synchronized source and translated subtitle files. It does not yet create spoken translated audio.
 
-1. obtain the audio source;
-2. convert it locally to 16 kHz mono PCM for whisper.cpp;
-3. run the selected Whisper model locally;
-4. produce an SRT file with timestamps;
-5. show the timed subtitle rows in the UI.
+The next milestone is the local Kokoro TTS backend. Later stages will fit generated speech to subtitle timing, duck the original audio during translated speech and render a preview/final video.
 
-On Apple Silicon, whisper.cpp can use its normal Metal acceleration. Intel Macs use the CPU compatibility path.
+## A useful rule when something goes wrong
 
-## What happens with YouTube HTTP 429?
+Do not reinstall everything immediately. Read the status box first. DubLocal tries to separate failures by layer: source access, captions, Whisper engine/model, translation engine/model, updater, and launcher.
 
-YouTube can rate-limit caption delivery. When that happens, DubLocal does not endlessly retry or crash.
-
-If the caption request is refused, use **Transcribe locally**. DubLocal then tries to obtain only the media audio needed for local transcription.
-
-There is one important limitation: YouTube can rate-limit media delivery too. If YouTube refuses the audio as well, local transcription cannot magically bypass that restriction. Wait and retry later, or use a local copy of media you are allowed to process.
-
-## 5. Read the subtitle result
-
-The output section gives you:
-
-- the generated/extracted subtitle file;
-- a timed table with **Start**, **End** and **Text**;
-- a concise status console explaining what happened.
-
-The current internal timeline uses integer milliseconds. That becomes the stable source for the upcoming translation and dubbing layers, so the same media should not need to be retranscribed just because a later translation changes.
-
-## 6. Manage model storage
-
-The Whisper models are optional and live outside the Git repository.
-
-Use **Remove model** if you want the disk space back. Removing a model does not affect existing SRT files or the DubLocal installation.
-
-DubLocal remains useful for existing-caption extraction even with no Whisper model installed.
-
-## 7. Update DubLocal from the app
-
-Expand **DubLocal updates**.
-
-Use:
-
-1. **Check for updates**
-2. **Install update** if one is available
-3. **Restart DubLocal**
-
-The updater only accepts a clean fast-forward from the configured GitHub upstream. If it detects edits or unusual Git history, it stops and explains why rather than overwriting anything.
-
-This update check is user-initiated; DubLocal does not continuously poll GitHub in the background.
-
-## What DubLocal does not do yet
-
-The current milestone stops at a reliable timed source transcript/subtitle.
-
-Translation, Kokoro voice generation, speech-duration fitting, original-audio ducking and rendered dubbed video are planned next. They will be added on top of the same timestamped timeline rather than replacing the working subtitle/transcription path.
-
-## Practical model choice
-
-Start with **Base**. It is small enough to be convenient and accurate enough to tell whether the workflow suits the material.
-
-Use **Tiny** when speed matters more than accuracy or you are simply testing that everything works. Move to **Small** for more difficult audio when the Base result is not good enough.
-
-## Need help?
-
-Use [Troubleshooting](TROUBLESHOOTING.md) for concrete errors and [Installation](INSTALLATION.md) for setup/update details. Technical implementation notes are kept separately in [Architecture](ARCHITECTURE.md) so the normal user guide stays readable.
+The practical fixes are collected in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
