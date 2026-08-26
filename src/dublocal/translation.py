@@ -15,6 +15,7 @@ from typing import Iterable
 
 from platformdirs import user_cache_dir, user_data_dir
 
+from .dependencies import shared_huggingface_cache
 from .media import DubLocalError
 from .timeline import Segment, parse_srt, segments_to_srt
 
@@ -66,7 +67,8 @@ _MODEL_FILES = [
     "tokenizer_config.json",
     "vocab.json",
 ]
-_VERIFIED_MARKER = ".dublocal-verified.json"
+_LEGACY_VERIFIED_MARKER = ".dublocal-verified.json"
+_REGISTRATION_SUFFIX = ".dublocal-model.json"
 
 _LANGUAGE_ALIASES = {
     "eng": "en",
@@ -134,6 +136,14 @@ def translation_model_path(model_id: str) -> Path:
     if model_id not in TRANSLATION_MODELS:
         raise DubLocalError(f"Unknown translation model: {model_id}")
     return translation_models_dir() / model_id
+
+
+def _registration_marker(model_id: str) -> Path:
+    return translation_models_dir() / f"{model_id}{_REGISTRATION_SUFFIX}"
+
+
+def _legacy_marker(model_id: str) -> Path:
+    return translation_model_path(model_id) / _LEGACY_VERIFIED_MARKER
 
 
 def _new_job_dir(prefix: str) -> Path:
@@ -206,24 +216,30 @@ def install_translation_engine() -> None:
         )
 
 
-def _verification_marker(model_id: str) -> Path:
-    return translation_model_path(model_id) / _VERIFIED_MARKER
+def _read_model_marker(model_id: str) -> dict[str, str] | None:
+    for marker in (_registration_marker(model_id), _legacy_marker(model_id)):
+        if not marker.is_file():
+            continue
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if isinstance(payload, dict):
+            return {str(key): str(value) for key, value in payload.items() if value is not None}
+    return None
 
 
 def _model_valid(model_id: str) -> bool:
     metadata = TRANSLATION_MODELS[model_id]
     directory = translation_model_path(model_id)
+    if not directory.is_dir():
+        return False
     if not all((directory / name).is_file() for name in _MODEL_FILES):
         return False
 
-    marker = _verification_marker(model_id)
-    if not marker.is_file():
+    payload = _read_model_marker(model_id)
+    if not payload:
         return False
-    try:
-        payload = json.loads(marker.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return False
-
     return (
         payload.get("repo_id") == metadata["repo_id"]
         and payload.get("revision") == metadata["revision"]
@@ -231,8 +247,28 @@ def _model_valid(model_id: str) -> bool:
     )
 
 
+def _model_storage(model_id: str) -> str:
+    path = translation_model_path(model_id)
+    if path.is_symlink():
+        return "shared HF cache"
+    if _model_valid(model_id):
+        return "DubLocal legacy copy"
+    return "not installed"
+
+
 def installed_translation_models() -> list[str]:
     return [model_id for model_id in TRANSLATION_MODELS if _model_valid(model_id)]
+
+
+def _remove_model_registration(model_id: str) -> bool:
+    path = translation_model_path(model_id)
+    existed = path.exists() or path.is_symlink() or _registration_marker(model_id).exists()
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.exists():
+        shutil.rmtree(path, ignore_errors=True)
+    _registration_marker(model_id).unlink(missing_ok=True)
+    return existed
 
 
 def install_translation_model(model_id: str) -> Path:
@@ -248,43 +284,51 @@ def install_translation_model(model_id: str) -> Path:
     if _model_valid(model_id):
         return destination
 
-    shutil.rmtree(destination, ignore_errors=True)
-    destination.mkdir(parents=True, exist_ok=True)
+    _remove_model_registration(model_id)
 
     try:
         from huggingface_hub import snapshot_download
 
-        snapshot_download(
-            repo_id=metadata["repo_id"],
-            revision=metadata["revision"],
-            local_dir=str(destination),
-            allow_patterns=_MODEL_FILES,
-        )
+        snapshot = Path(
+            snapshot_download(
+                repo_id=metadata["repo_id"],
+                revision=metadata["revision"],
+                allow_patterns=_MODEL_FILES,
+            )
+        ).resolve()
     except Exception as exc:
-        shutil.rmtree(destination, ignore_errors=True)
         raise DubLocalError(f"Translation model download failed: {exc}") from exc
 
-    weight = destination / "model.safetensors"
+    weight = snapshot / "model.safetensors"
     if not weight.is_file() or _sha256(weight) != metadata["weight_sha256"]:
-        shutil.rmtree(destination, ignore_errors=True)
         raise DubLocalError(
             "Downloaded translation weights failed checksum verification. "
-            "The model was deleted rather than used."
+            "DubLocal refused to register the shared model cache."
         )
 
-    missing = [name for name in _MODEL_FILES if not (destination / name).is_file()]
+    missing = [name for name in _MODEL_FILES if not (snapshot / name).is_file()]
     if missing:
-        shutil.rmtree(destination, ignore_errors=True)
         raise DubLocalError(
             "The translation model download is incomplete: " + ", ".join(missing)
         )
 
-    _verification_marker(model_id).write_text(
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        destination.symlink_to(snapshot, target_is_directory=True)
+    except OSError as exc:
+        raise DubLocalError(
+            "DubLocal downloaded/located the shared translation model but could not link it into the app data folder: "
+            f"{exc}"
+        ) from exc
+
+    _registration_marker(model_id).write_text(
         json.dumps(
             {
                 "repo_id": metadata["repo_id"],
                 "revision": metadata["revision"],
                 "weight_sha256": metadata["weight_sha256"],
+                "storage": "huggingface-shared-cache",
+                "shared_path": str(snapshot),
             },
             indent=2,
             sort_keys=True,
@@ -298,9 +342,7 @@ def install_translation_model(model_id: str) -> Path:
 def remove_translation_models() -> int:
     removed = 0
     for model_id in TRANSLATION_MODELS:
-        path = translation_model_path(model_id)
-        if path.exists():
-            shutil.rmtree(path, ignore_errors=True)
+        if _remove_model_registration(model_id):
             removed += 1
     return removed
 
@@ -348,9 +390,11 @@ def translation_manager_status(
     lines = [f"[engine] {translation_engine_status()}"]
     for model_id, metadata in TRANSLATION_MODELS.items():
         state = "installed" if model_id in installed else "not installed"
+        storage = _model_storage(model_id)
         lines.append(
-            f"[model] {metadata['label']} · {state} · {metadata['weight_size']} · {metadata['license']}"
+            f"[model] {metadata['label']} · {state} · {metadata['weight_size']} · {metadata['license']} · {storage}"
         )
+    lines.append(f"[shared cache] {shared_huggingface_cache()}")
     lines.append(f"[route] {translation_route(source_language, target_language)}")
     return "```text\n" + "\n".join(lines) + "\n```"
 
