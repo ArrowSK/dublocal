@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from html import escape
 from typing import Any
 
 import gradio as gr
@@ -187,7 +186,7 @@ def scan_source(source_type: str, youtube_url: str, local_file: str | None):
             interactive=bool(choices),
         )
         return _summary(info), selector, info
-    except Exception as exc:  # UI boundary: convert backend errors to a readable status.
+    except Exception as exc:
         message = str(exc) if isinstance(exc, DubLocalError) else f"Unexpected error: {exc}"
         return _error_status(message), gr.Dropdown(choices=[], value=None, interactive=False), {}
 
@@ -217,7 +216,7 @@ def extract_selected(info: dict[str, Any], track_value: str | None, rights_confi
 
 
 def build_app() -> gr.Blocks:
-    with gr.Blocks(css=MATRIX_CSS, title="DubLocal_") as demo:
+    with gr.Blocks(title="DubLocal_") as demo:
         gr.HTML(
             """
             <div class="dl-header">
@@ -300,6 +299,7 @@ def main() -> None:
         inbrowser=True,
         server_name="127.0.0.1",
         show_error=False,
+        css=MATRIX_CSS,
     )
 
 
