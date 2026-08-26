@@ -4,7 +4,12 @@
 
 DubLocal is meant to feel like a small Mac utility, not a Python project. Once installed, start it with **DubLocal.app** and use the local browser window it opens.
 
-This guide covers what the current M3 build actually does: source/caption discovery, local Whisper transcription, local subtitle translation, in-app updating/repair and reuse of compatible local dependencies.
+The interface is now split into two top-level areas:
+
+- **Main** — process the current video/audio job.
+- **Settings** — maintain DubLocal itself and optional local AI resources.
+
+Inside **Settings** there are three subtabs: **Updates**, **Model Manager**, and **Local Resources**.
 
 > There is no packaged GitHub Release yet. `v0.3.0.dev0` is the current development build on `main`. See [CHANGELOG.md](../CHANGELOG.md) for the build history.
 
@@ -13,6 +18,8 @@ This guide covers what the current M3 build actually does: source/caption discov
 Local video/audio files are not uploaded to a cloud transcription or translation service. Whisper and OPUS translation run on your Mac.
 
 YouTube is different because the source itself is remote: DubLocal has to contact YouTube to inspect the video, request captions, or fetch audio when you explicitly start local transcription. Process only media you have the right or legal authority to use.
+
+# Main
 
 ## 1. Choose the source
 
@@ -36,9 +43,15 @@ Image-only subtitle formats such as PGS are not silently OCR'd. Use local transc
 
 ### Local Whisper transcription
 
-Open **Local transcription · Whisper**.
+Open **Local transcription · Whisper** on Main.
 
-The status box shows whether `whisper.cpp` is ready and which Whisper models are installed.
+Choose the Whisper model and spoken language, then click **Transcribe locally**.
+
+Model installation/removal is intentionally not mixed into the processing screen. If the selected model is missing, go to:
+
+**Settings → Model Manager → Whisper**
+
+The current Whisper choices are:
 
 | Model | Approximate size | Best use |
 | --- | ---: | --- |
@@ -46,19 +59,17 @@ The status box shows whether `whisper.cpp` is ready and which Whisper models are
 | Base | 142 MiB | recommended starting point |
 | Small | 466 MiB | better accuracy when extra time/storage is acceptable |
 
-If a model is missing, click **Install / verify model**. DubLocal downloads it only because you asked and verifies its checksum before use.
-
-Choose the spoken language or leave **Auto detect**, then click **Transcribe locally**. FFmpeg prepares 16 kHz mono audio and `whisper.cpp` creates the timestamped SRT locally.
-
-When Auto detect is used, DubLocal carries Whisper's detected language into the translation section where possible.
+FFmpeg prepares 16 kHz mono audio and `whisper.cpp` creates the timestamped SRT locally. With **Auto detect**, Whisper's detected language is carried into translation where possible.
 
 ## 3. Translate locally
 
-After extraction or transcription, open **Local translation**.
+After extraction or transcription, open **Local translation** on Main.
 
-Choose **Subtitle language** and **Translate to**. The source language is normally filled from the caption metadata or Whisper's detected language; if it is unknown, choose it manually.
+Choose **Subtitle language** and **Translate to**, then click **Translate subtitles**.
 
-DubLocal shows the route it will use, for example:
+The source language is normally filled from caption metadata or Whisper. If it is unknown, choose it manually.
+
+Possible local routes include:
 
 ```text
 English → Hungarian
@@ -68,63 +79,23 @@ Hungarian → English → German
 
 The last route means that two non-English languages are translated locally through English.
 
-### Prepare translation
+If the required model is not installed, use **Settings → Model Manager → OPUS · subtitle translation**.
 
-Click **Prepare translation** the first time a route needs resources.
-
-DubLocal follows a **reuse first, install second** policy:
-
-- if the needed Python translation stack already exists in DubLocal's own environment, it uses it;
-- if a compatible stack exists in a recognized external environment (for example another local AI application), DubLocal can use that Python through an isolated worker process rather than copying its packages into DubLocal;
-- OPUS model snapshots use the normal shared Hugging Face cache, so the exact pinned model can be reused if another compatible app has already downloaded it;
-- only missing resources are obtained.
-
-The two current OPUS models are Apache-2.0 and roughly 310 MiB each. Exact revisions and SHA-256 values are recorded in `MODEL_LICENSES.json`.
-
-DubLocal never injects one virtual environment's `site-packages` into another. That would be fragile. Cross-application runtime reuse happens only through a separate process with a narrow input/output contract.
-
-### Translate
-
-Click **Translate subtitles**.
-
-The output preview shows the original and translated text side by side. The timestamps are preserved exactly, and **Translated SRT** gives you the translated file.
-
-On Apple Silicon, the translation stack can use MPS when the required operations are supported and fall back to CPU if necessary.
+The output preview shows original and translated text side by side. Timestamps are preserved exactly, and **Translated SRT** gives you the translated file.
 
 There is no silent cloud translation fallback.
 
-### Removing translation models
+# Settings
 
-**Remove translation models** removes DubLocal's registration/link (or an older private DubLocal copy). It deliberately does **not** delete an underlying shared Hugging Face cache snapshot, because another local application may still rely on it.
+## Updates
 
-## Reusable local resources
-
-Open **Reusable local resources** to see what DubLocal found on the Mac.
-
-The panel currently reports:
-
-- FFmpeg and ffprobe;
-- `whisper-cli`;
-- the shared Hugging Face cache location;
-- a compatible Kokoro Python runtime if one is found in a known local environment.
-
-Kokoro voice generation itself arrives in M4. The point of detecting it now is to avoid building M4 around the assumption that every application must install a second copy of the same heavy stack.
-
-## YouTube HTTP 429
-
-YouTube can temporarily rate-limit caption or media delivery. DubLocal retries normal caption delivery but does not try to evade the restriction.
-
-If captions remain blocked, use **Transcribe locally**. If YouTube also refuses audio delivery, wait and retry later or use a local copy you are allowed to process.
-
-## Updating DubLocal
-
-Open **DubLocal updates & repair**.
+Open **Settings → Updates**.
 
 For a normal clean installation:
 
 **Check for updates → Install update → Restart DubLocal**
 
-The status now shows three separate identities: the running DubLocal version, the local Git checkout and official GitHub `main`. This catches the common case where files have updated but the running environment is stale.
+The updater distinguishes the running DubLocal package, the local Git checkout, and official GitHub `main`.
 
 Normal update rules are intentionally strict:
 
@@ -133,30 +104,78 @@ Normal update rules are intentionally strict:
 - tracked local edits are never overwritten by a normal update;
 - local commits or diverged history are not rewritten automatically.
 
-## Repair installation
+### Repair installation
 
-Use **Repair installation** when the updater reports that the checkout/runtime is inconsistent, or tracked DubLocal program files have been modified.
+Use **Repair installation** when the checkout/runtime is inconsistent or tracked DubLocal program files were modified.
 
-If tracked program files must be replaced, tick the repair confirmation. DubLocal then:
+If tracked files need replacement, tick the repair confirmation first. DubLocal then saves a patch backup, restores official tracked files, refreshes the managed Python core, verifies the import/version, and schedules a clean restart.
 
-1. saves the current tracked-file diff as a patch in `~/.dublocal/repair-backups/`;
-2. restores official tracked program files from GitHub `main`;
-3. refreshes the managed Python core;
-4. verifies that DubLocal imports from the expected checkout and reports the expected version;
-5. schedules a clean restart.
+Repair does **not** delete Whisper/translation models, the shared Hugging Face cache, generated jobs or untracked user files.
 
-Repair does **not** delete Whisper/translation models, the shared Hugging Face cache, generated jobs or untracked user files. It also refuses to rewrite local commits/diverged Git history.
+## Model Manager
 
-## What M3 does not do yet
+Open **Settings → Model Manager** to install, verify or remove optional AI models.
 
-M3 stops at synchronized source and translated subtitle files. It does not yet synthesize the translated voice track.
+This is the answer to the common question: **“How do I install the translation model?”**
 
-M4 is the local Kokoro TTS milestone. It will build on the reusable-runtime mechanism above so that a compatible Kokoro installation already present on the Mac can be used through an isolated worker instead of needlessly installed again.
+### Whisper
 
-Later milestones add timing adaptation, original-audio ducking, preview and final video rendering.
+Choose Tiny, Base or Small and click **Install / verify model**. DubLocal downloads only the requested model and verifies its checksum.
 
-## If something goes wrong
+### OPUS translation
 
-Do not reinstall everything immediately. Read the nearest status panel first. DubLocal tries to keep source access, captions, Whisper, translation, dependency reuse, updater and launcher failures separate.
+Choose the model set that matches the kind of translation you need:
+
+| Model set | What it enables | Approximate weights |
+| --- | --- | ---: |
+| English → supported languages | English subtitles into Hungarian/German/etc. | 310 MiB |
+| Supported languages → English | Hungarian/German/etc. into English | 310 MiB |
+| Non-English ↔ non-English | both directions through an English pivot | 620 MiB total |
+
+Then click **Install / verify required model(s)**.
+
+DubLocal follows a **reuse first, install second** policy:
+
+- if a compatible translation Python runtime already exists locally, it can be used through an isolated worker process;
+- OPUS snapshots use the normal Hugging Face cache;
+- if the exact pinned snapshot is already present, DubLocal registers/reuses it rather than storing another copy;
+- only missing resources are obtained.
+
+The current OPUS models are Apache-2.0. Exact revisions and SHA-256 values are recorded in `MODEL_LICENSES.json`.
+
+Removing DubLocal's translation models removes its registration/private legacy copy but deliberately does not erase an underlying shared Hugging Face cache snapshot another application may still use.
+
+### Kokoro
+
+Kokoro voice generation arrives in M4. The Model Manager already reserves a Kokoro section, while **Local Resources** detects compatible existing installations so M4 can reuse one instead of installing a second copy.
+
+## Local Resources
+
+Open **Settings → Local Resources** to see what DubLocal can safely reuse on the Mac.
+
+The panel currently reports:
+
+- FFmpeg and ffprobe;
+- `whisper-cli`;
+- the shared Hugging Face cache location;
+- compatible external Python runtimes such as an existing Kokoro environment.
+
+Python virtual environments stay isolated. DubLocal never appends another application's `site-packages` into its own interpreter. Supported cross-application reuse happens through a small separate-process worker.
+
+# YouTube HTTP 429
+
+YouTube can temporarily rate-limit caption or media delivery. DubLocal retries ordinary caption delivery but does not try to evade the restriction.
+
+If captions remain blocked, use **Transcribe locally**. If YouTube also refuses audio delivery, wait and retry later or use a local copy you are allowed to process.
+
+# What M3 does not do yet
+
+M3 stops at synchronized source and translated subtitle files.
+
+M4 adds local Kokoro voice generation. M5 adds voice timing/audio mixing and stream-copy media output, including the choice between making the DubLocal mix the primary audio track or adding it as a second selectable audio stream without unnecessarily re-encoding compatible video.
+
+# If something goes wrong
+
+Do not reinstall everything immediately. Read the nearest status panel first. DubLocal keeps source access, captions, Whisper, translation, dependency reuse, updater and launcher failures separate where possible.
 
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for practical recovery steps.
