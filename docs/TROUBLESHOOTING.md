@@ -1,84 +1,41 @@
 # DubLocal troubleshooting
 
-This page is for concrete problems. Start with the symptom you actually see; avoid reinstalling everything unless the specific fix says to.
+Most DubLocal problems belong to one layer: launcher, source access, subtitles, Whisper, translation or updates. Fix the layer that failed; do not delete the whole installation unless there is evidence the whole environment is damaged.
 
-## YouTube says HTTP 429 / Too Many Requests
+## DubLocal.app opens nothing
 
-This means YouTube is temporarily refusing the caption or media request. It is not a DubLocal launcher failure.
+First use **Stop DubLocal.app**, then reopen **DubLocal.app** and choose **Stop All & Launch**.
 
-What to do:
-
-- If caption extraction fails, try **Transcribe locally** instead.
-- If local transcription also reports a YouTube rate limit, YouTube is refusing the audio request too. Wait and retry later, or use a local copy of media you are allowed to process.
-- Repeated rapid retries can make rate limiting worse, so do not hammer the same request continuously.
-
-DubLocal does not bypass YouTube access controls or rate limits.
-
-## The updater says local changes were detected
-
-The in-app updater refuses to overwrite a dirty Git checkout.
-
-This is deliberate. It protects developer edits and also catches accidental changes inside the installation folder.
-
-From Terminal, inspect the checkout:
-
-```bash
-cd ~/dublocal
-git status
-```
-
-If the changes are files you intentionally edited, keep them and review/update manually.
-
-If the only changes are known accidental modifications and you are certain they can be discarded, restore only those named files rather than resetting the whole repository blindly. For example:
-
-```bash
-git restore path/to/file
-```
-
-Then reopen **DubLocal updates** and check again.
-
-Avoid `git reset --hard` as a generic troubleshooting step; it can destroy work.
-
-## The updater says the branch diverged or is ahead of GitHub
-
-That means the checkout contains Git history that is not a simple older copy of the configured upstream.
-
-DubLocal will not decide which commits to keep. Use Git manually or review the checkout with someone who understands the local changes. Automatic update becomes available again once the branch is a clean fast-forward candidate.
-
-## DubLocal.app opens but the page does not load
-
-Check the launcher log:
+The launcher log is:
 
 ```text
 ~/.dublocal/logs/dublocal.log
 ```
 
-The launcher normally waits for `http://127.0.0.1:7861` to respond before opening the page.
-
-If an old or stuck process exists, reopen **DubLocal.app** and choose **Stop All & Launch**.
-
-## The launcher says the Python environment is missing
-
-The `.venv` inside the DubLocal checkout is missing or incomplete.
-
-Run the installer again:
+If the log says the Python environment is missing, rerun the installer from the repository:
 
 ```bash
 cd ~/dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-The installer can create the environment again without deleting Whisper models stored outside the repository.
+## A generated SRT shows a Gradio file-access error
 
-## Python 3.11+ is missing
+DubLocal-generated files should live under DubLocal's own jobs cache, which the launcher explicitly exposes to the local Gradio server.
 
-The installer can offer to install Python 3.11 through Homebrew when Homebrew is available.
+If an older build shows a red Gradio `Error` block after successful transcription, update DubLocal and restart it. This exact compatibility issue was fixed by allowing only DubLocal's generated jobs directory rather than broad user folders.
 
-If Homebrew is not available, install Python 3.11 or newer through a normal macOS Python distribution and rerun the installer.
+## YouTube returns HTTP 429
+
+`429 Too Many Requests` means YouTube is temporarily rate-limiting the request.
+
+For caption requests, DubLocal retries with backoff. If YouTube still refuses the captions, use **Transcribe locally** instead. That fallback requests audio only after you explicitly start it.
+
+If YouTube also rate-limits media delivery, DubLocal will not try to evade the restriction. Wait and retry later or use a local copy you are allowed to process.
 
 ## FFmpeg or ffprobe is missing
 
-Local media inspection, subtitle extraction and transcription audio preparation need FFmpeg.
+Local media inspection, subtitle normalization and Whisper audio preparation need FFmpeg.
 
 Rerun:
 
@@ -87,89 +44,106 @@ cd ~/dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-If Homebrew is available, the installer offers `brew install ffmpeg`.
+If Homebrew is present, the installer can offer `brew install ffmpeg`.
 
-YouTube metadata/caption discovery may still work without FFmpeg, but local media and local transcription will not be complete.
+## whisper.cpp engine missing
 
-## whisper.cpp / whisper-cli is missing
+The Whisper status box will say the engine is missing if `whisper-cli` cannot be found.
 
-Local transcription needs the `whisper-cli` executable.
+Rerun the launcher installer and allow the optional whisper.cpp installation. On Homebrew systems this is the `whisper-cpp` package.
 
-Rerun the installer and allow the optional whisper.cpp engine installation when prompted:
+## Whisper model missing
 
-```bash
-cd ~/dublocal
-zsh scripts/macos/install-launcher.sh
-```
+This is different from the engine being missing. The engine can be installed while no AI weights are installed.
 
-Existing-caption extraction does not require whisper.cpp.
+In **Local transcription · Whisper**, choose a model and click **Install / verify model**. Base is the recommended first model.
 
-## A Whisper model is not installed
+## Whisper model checksum fails
 
-Open **Local transcription · Whisper**, choose Tiny/Base/Small and click **Install / verify model**.
+DubLocal deletes a downloaded Whisper model if its checksum does not match the expected upstream hash. Do not rename or force the partial file into place.
 
-The app intentionally does not download a model automatically.
-
-## A Whisper model fails checksum verification
-
-DubLocal deletes the failed download rather than using it.
-
-Try the install again. If it repeatedly fails, do not manually rename or force the partial file into place; the upstream file or download path may need investigation.
+Retry later. If the failure is repeatable, the upstream file may have changed and DubLocal's model registry should be reviewed before accepting it.
 
 ## Transcription is slow
 
-Transcription speed depends on model size, audio duration and Mac hardware.
+Long movies take time, especially with larger models.
 
-Try **Base** before **Small**. For a quick functional test, use **Tiny**.
+Apple Silicon normally uses whisper.cpp's Metal path. Intel Macs deliberately use a conservative CPU path. Tiny is the speed-first Whisper option; Base is the normal starting point; Small trades more time and storage for accuracy.
 
-Apple Silicon follows whisper.cpp's Metal path. Intel Macs use the CPU path, so longer files can take noticeably more time.
+## Subtitle language says Auto detect after extraction
 
-## Local subtitles are listed but cannot be extracted
+DubLocal can infer the language only when the caption/embedded stream provides a language code that maps to the M3 allowlist.
 
-The track may be image-based (for example, PGS). M2 does not OCR image subtitle streams.
+If **Local translation → Subtitle language** remains **Auto detect**, choose the correct language manually before preparing translation. Translation will not guess an unknown source language silently.
 
-Use local speech transcription if that is appropriate for the content. OCR support is a separate future capability.
+## “Local translation is not prepared yet”
 
-## The subtitle output looks empty or incomplete
+Translation dependencies are optional by design. Choose the source and target languages, then click **Prepare translation**.
 
-First determine which path produced it:
+On first use, DubLocal installs its optional local translation Python stack and downloads only the OPUS model route required for the selected languages.
 
-- existing subtitle extraction: try another listed subtitle track if one exists;
-- Whisper transcription: try a larger model or set the spoken language manually instead of Auto.
+If the status says the packages were installed but the running process cannot see them yet, use **Restart DubLocal** once, reopen the same media/subtitle workflow, and click **Prepare translation** again.
 
-If the source audio itself is quiet, noisy, mixed with music or contains overlapping speakers, transcription quality can degrade.
+## Translation model missing
 
-## Git pull says local changes would be overwritten
-
-That is the command-line version of the updater safety block.
-
-Run:
-
-```bash
-cd ~/dublocal
-git status
-```
-
-Review exactly which files changed. Restore only files you know are accidental, then pull again.
-
-## macOS Terminal shows an unrelated .zprofile error
-
-A shell startup message such as:
+The status panel shows two model roles:
 
 ```text
-~/.zprofile:... command not found
+Many languages → English
+English → many languages
 ```
 
-comes from the user's shell configuration, not from DubLocal itself. It should be fixed separately if it is annoying, but it is only a DubLocal blocker if it prevents normal commands such as `git`, `python`, `brew`, or `zsh` from running.
+English ↔ another supported language needs one of them. Translation between two non-English languages uses both because M3 pivots locally through English.
 
-## Where to report a reproducible bug
+Click **Prepare translation** with the desired source/target pair. DubLocal installs only the model(s) that route requires.
 
-When opening a GitHub issue, include:
+## Translation model download or checksum fails
 
-- what you clicked;
-- whether the source was YouTube or local media;
-- the exact error shown inside DubLocal;
-- macOS version and Apple Silicon/Intel;
-- the relevant tail of `~/.dublocal/logs/dublocal.log` if the launcher failed.
+M3 downloads pinned safetensors revisions and verifies the ~310 MiB weight file with SHA-256.
 
-Do not upload copyrighted media, private URLs, authentication cookies, or other sensitive data just to demonstrate a bug.
+If the checksum fails, DubLocal deletes that model folder instead of loading it. Retry the download. A repeatable mismatch should be treated as an upstream/model-registry change, not bypassed.
+
+## Translation is slow or briefly uses high memory
+
+The OPUS models are local neural translation models. DubLocal loads the required model for a translation pass and releases it afterward.
+
+On Apple Silicon, PyTorch uses MPS when available. If a Marian operation is unsupported on MPS, DubLocal falls back to CPU rather than failing the whole translation. A non-English → non-English translation also runs two model passes, so it is naturally slower than an English ↔ other-language route.
+
+## Translation quality is awkward
+
+M3 is deliberately a lightweight local baseline, not a claim of human-level literary translation. Each subtitle segment is translated while its timing boundary stays fixed, which is useful for dubbing alignment but gives the model less cross-scene context.
+
+Do not change timestamps merely to improve wording. A later subtitle editor milestone can support manual text correction while preserving the source timing model.
+
+## The in-app updater says local changes were detected
+
+This is a safety stop, not an updater failure. DubLocal will not overwrite a dirty Git checkout.
+
+If you intentionally edited the source, review those changes with Git before updating. If you did not intend to edit anything, inspect the reported repository rather than using a force/reset command blindly.
+
+The installer no longer changes executable bits on tracked scripts, so a normal modern install should not dirty the repository.
+
+## The updater says the branch diverged or is ahead of GitHub
+
+Automatic update is disabled because your checkout contains history that a fast-forward cannot safely replace.
+
+That is a developer/Git state and needs manual review. DubLocal intentionally does not merge, rebase or discard commits automatically.
+
+## Update installed, but the UI still looks old
+
+Click **Restart DubLocal** after installing an update. If an older process is still responding, launch `DubLocal.app` and choose **Stop All & Launch**.
+
+## I removed a model by mistake
+
+Nothing else is damaged. Whisper and translation models are stored separately from the application code. Choose the model/route again and reinstall it from the relevant panel.
+
+## Still stuck?
+
+When reporting a problem, the most useful information is:
+
+- the exact text in DubLocal's status box;
+- whether the source is YouTube or a local file;
+- which action you clicked immediately before the error;
+- for launcher/startup problems only, the relevant tail of `~/.dublocal/logs/dublocal.log`.
+
+Avoid posting copyrighted media, private file paths you do not want public, account cookies or authentication tokens in a GitHub issue.
