@@ -2,7 +2,7 @@
 
 Local-first macOS app for subtitle generation, translation, and AI voice-over dubbing from YouTube and local media.
 
-> Status: early development. Milestone 1 already provides source inspection, subtitle discovery/extraction, and a simple Matrix-inspired Gradio UI. Translation, transcription fallback, dubbing, and packaging come next.
+> Status: early development. Milestone 1 provides source inspection, subtitle discovery/extraction, a restrained Matrix-inspired Gradio UI, and a native branded macOS launcher.
 
 ## Principles
 
@@ -24,20 +24,42 @@ Implemented now:
 - clear handling of image-based subtitle streams rather than silently pretending OCR worked;
 - rights-confirmation gate before extraction;
 - Matrix-inspired, restrained dark/green Gradio interface;
+- native `DubLocal.app` launcher plus `Stop DubLocal.app`;
+- original DubLocal application artwork generated into a proper macOS `.icns` during installation;
 - automated tests for the media foundation.
 
-## Quick start for development
+## Install on macOS
 
 Requirements:
 
-- macOS;
+- macOS 13+ is the initial support target;
 - Python 3.11+;
-- FFmpeg/ffprobe available on `PATH`.
+- FFmpeg/ffprobe for local media features.
 
-With Homebrew:
+Clone once and run the installer:
 
 ```bash
-brew install ffmpeg
+git clone https://github.com/ArrowSK/dublocal.git
+cd dublocal
+zsh scripts/macos/install-launcher.sh
+```
+
+The installer creates/refreshes the local `.venv`, installs DubLocal, checks FFmpeg, generates the branded icon from the repository artwork, and creates:
+
+```text
+~/Applications/DubLocal.app
+~/Applications/Stop DubLocal.app
+```
+
+After that, normal use is through `DubLocal.app`; Terminal is not required for launching the UI. The launcher opens the local service on `127.0.0.1:7861`, keeps runtime logs under `~/.dublocal/`, reuses an already-running instance, and offers a clean restart after code updates.
+
+Detailed installation and update instructions are in `docs/INSTALLATION.md`.
+
+## Developer launch
+
+For development without the macOS launcher:
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -45,9 +67,7 @@ python -m pip install -e .
 dublocal
 ```
 
-DubLocal opens locally in your default browser and binds to `127.0.0.1`; it is not exposed to your LAN by default.
-
-A future release will remove the Homebrew/Python setup from the normal-user workflow and ship as a proper macOS application.
+The developer entry point binds only to `127.0.0.1` by default.
 
 ## Planned workflow
 
@@ -78,7 +98,7 @@ preview / SRT / VTT / audio / video export
 7. ☐ Kokoro TTS backend
 8. ☐ Timing and audio ducking
 9. ☐ Rendered preview/export
-10. ☐ macOS packaging and release automation
+10. ◐ macOS packaging and release automation
 
 Architecture details are in `docs/ARCHITECTURE.md`.
 
