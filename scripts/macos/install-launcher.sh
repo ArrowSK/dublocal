@@ -19,7 +19,6 @@ VENV="$REPO_ROOT/.venv"
 PYTHON="$VENV/bin/python"
 
 mkdir -p "$APPLICATIONS_DIR" "$BUILD_DIR"
-chmod +x "$LAUNCH_SCRIPT" "$STOP_SCRIPT" "$SCRIPT_DIR/install-launcher.sh"
 
 ask_yes_no() {
   local prompt="$1"
@@ -115,17 +114,34 @@ fi
 
 if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
   echo
-  echo "FFmpeg/ffprobe were not found. YouTube caption discovery can still work,"
-  echo "but local media inspection/extraction requires FFmpeg."
+  echo "FFmpeg/ffprobe were not found. Local media and transcription audio preparation need FFmpeg."
   if command -v brew >/dev/null 2>&1; then
     if ask_yes_no "Install FFmpeg with Homebrew now?" yes; then
       brew install ffmpeg
     else
-      echo "Skipping FFmpeg. Install it later before processing local media."
+      echo "Skipping FFmpeg. Local media/transcription will remain unavailable until it is installed."
     fi
   else
     echo "Homebrew was not found, so FFmpeg was not installed automatically."
   fi
+fi
+
+if ! command -v whisper-cli >/dev/null 2>&1; then
+  echo
+  echo "whisper.cpp is the optional local transcription engine."
+  echo "Models are NOT bundled and remain opt-in inside DubLocal."
+  if command -v brew >/dev/null 2>&1; then
+    if ask_yes_no "Install the whisper.cpp engine with Homebrew now?" yes; then
+      brew install whisper-cpp
+    else
+      echo "Skipping whisper.cpp. Existing-caption extraction still works."
+      echo "Rerun this installer later to enable local transcription."
+    fi
+  else
+    echo "Homebrew was not found, so the whisper.cpp engine was not installed automatically."
+  fi
+else
+  echo "whisper.cpp engine found: $(command -v whisper-cli)"
 fi
 
 build_icon() {
@@ -198,8 +214,8 @@ EOF
   set_plist_value "$plist" "CFBundleName" "string" "$display_name"
   set_plist_value "$plist" "CFBundleDisplayName" "string" "$display_name"
   set_plist_value "$plist" "CFBundleIdentifier" "string" "$bundle_id"
-  set_plist_value "$plist" "CFBundleShortVersionString" "string" "0.1"
-  set_plist_value "$plist" "CFBundleVersion" "string" "1"
+  set_plist_value "$plist" "CFBundleShortVersionString" "string" "0.2"
+  set_plist_value "$plist" "CFBundleVersion" "string" "2"
   /usr/bin/touch "$output"
 }
 
@@ -212,5 +228,6 @@ echo "  $LAUNCH_APP"
 echo "  $STOP_APP"
 echo
 echo "The launcher uses the branded DubLocal icon and opens the local UI on port 7861."
+echo "Whisper models remain opt-in from the Local transcription panel."
 echo "Logs: ~/.dublocal/logs/dublocal.log"
 echo "You can drag DubLocal.app from ~/Applications to the Dock."
