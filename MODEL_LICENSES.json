@@ -47,6 +47,36 @@
       "download_on_demand": true,
       "size": "466 MiB",
       "sha1": "55356645c2b361a969dfd0ef2c5a50d530afd8d5"
+    },
+    {
+      "id": "opus-mt-mul-en-safetensors",
+      "backend": "transformers-marian",
+      "upstream": "Helsinki-NLP/opus-mt-mul-en",
+      "revision": "0f17725b72877e346bbcf9c28b842de32436a397",
+      "file": "model.safetensors",
+      "license": "Apache-2.0",
+      "commercial_use": true,
+      "redistribution": true,
+      "bundled": false,
+      "download_on_demand": true,
+      "weight_size": "310 MiB",
+      "sha256": "8b8ff7a54cd65dd0015c620755dd62f956796035d2cafd43446e960e13c79c28",
+      "role": "Allowlisted multilingual source languages to English"
+    },
+    {
+      "id": "opus-mt-en-mul-safetensors",
+      "backend": "transformers-marian",
+      "upstream": "Helsinki-NLP/opus-mt-en-mul",
+      "revision": "d41ab23bbe31592b09f084b7063f1460a84600aa",
+      "file": "model.safetensors",
+      "license": "Apache-2.0",
+      "commercial_use": true,
+      "redistribution": true,
+      "bundled": false,
+      "download_on_demand": true,
+      "weight_size": "310 MiB",
+      "sha256": "dd4c874ecad8853d94415c21937c7e35ea09cc22f178b63821294ed010121436",
+      "role": "English to allowlisted multilingual target languages"
     }
   ]
 }
