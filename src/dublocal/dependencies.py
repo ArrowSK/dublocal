@@ -17,10 +17,31 @@ class PythonRuntime:
     modules: tuple[str, ...]
 
 
-
 def _repository_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
+
+def _python_from_entrypoint(name: str) -> Path | None:
+    """Resolve the Python interpreter behind a console script when possible."""
+
+    executable = shutil.which(name)
+    if not executable:
+        return None
+    path = Path(executable)
+    try:
+        with path.open("rb") as handle:
+            first = handle.readline(1024).decode("utf-8", errors="ignore").strip()
+    except OSError:
+        return None
+    if not first.startswith("#!"):
+        return None
+    raw = first[2:].strip()
+    # `#!/path/to/python` is the useful virtualenv case. `/usr/bin/env python`
+    # does not identify a separate environment and is therefore ignored.
+    if not raw or raw.startswith("/usr/bin/env ") or " " in raw:
+        return None
+    candidate = Path(raw).expanduser()
+    return candidate if candidate.is_file() else None
 
 
 def _candidate_pythons() -> list[tuple[Path, str]]:
@@ -34,30 +55,45 @@ def _candidate_pythons() -> list[tuple[Path, str]]:
         if value:
             candidates.append((Path(value).expanduser(), "Configured external runtime"))
 
-    common_roots = [
-        root.parent / "narroam-studio",
-        root.parent / "NarRoam-Studio",
-        root.parent / "kokoroo",
-        root.parent / "Kokoroo",
-        root.parent / "kokoro",
-        root.parent / "Kokoro",
-        home / "narroam-studio",
-        home / "NarRoam-Studio",
-        home / "kokoroo",
-        home / "Kokoroo",
-        home / "kokoro",
-        home / "Kokoro",
-        home / "Developer" / "narroam-studio",
-        home / "Developer" / "kokoroo",
-        home / "Projects" / "narroam-studio",
-        home / "Projects" / "kokoroo",
-    ]
-    for base in common_roots:
-        candidates.append((base / ".venv" / "bin" / "python", base.name))
+    names = (
+        "narroam-studio",
+        "NarRoam-Studio",
+        "NarRoam Studio",
+        "kokoroo",
+        "Kokoroo",
+        "kokoro",
+        "Kokoro",
+        "chatterbox",
+        "Chatterbox",
+    )
+    parents = (
+        root.parent,
+        home,
+        home / "Developer",
+        home / "Projects",
+        home / "Documents",
+        home / "Code",
+        home / "src",
+        home / ".virtualenvs",
+        home / ".venvs",
+        home / "venvs",
+    )
+    for parent in parents:
+        for name in names:
+            base = parent / name
+            candidates.append((base / ".venv" / "bin" / "python", base.name))
+            candidates.append((base / "venv" / "bin" / "python", base.name))
+            # Named venv roots such as ~/.venvs/kokoro already are the venv.
+            candidates.append((base / "bin" / "python", base.name))
 
     pipx = home / ".local" / "pipx" / "venvs"
     for name in ("kokoro", "kokoro-tts", "kokoroo", "chatterbox"):
         candidates.append((pipx / name / "bin" / "python", f"pipx:{name}"))
+
+    for command in ("kokoro", "kokoroo", "chatterbox"):
+        python = _python_from_entrypoint(command)
+        if python:
+            candidates.append((python, f"{command} console environment"))
 
     seen: set[Path] = set()
     result: list[tuple[Path, str]] = []
@@ -71,7 +107,6 @@ def _candidate_pythons() -> list[tuple[Path, str]]:
         seen.add(resolved)
         result.append((resolved, label))
     return result
-
 
 
 def _probe_python(python: Path, modules: Iterable[str]) -> tuple[str, ...] | None:
@@ -101,7 +136,6 @@ def _probe_python(python: Path, modules: Iterable[str]) -> tuple[str, ...] | Non
     return found
 
 
-
 def discover_python_runtime(
     required_modules: Iterable[str],
     *,
@@ -119,7 +153,6 @@ def discover_python_runtime(
     return None
 
 
-
 def preferred_python_for(required_modules: Iterable[str]) -> PythonRuntime | None:
     """Return a compatible existing Python runtime without modifying it.
 
@@ -128,7 +161,6 @@ def preferred_python_for(required_modules: Iterable[str]) -> PythonRuntime | Non
     """
 
     return discover_python_runtime(required_modules, allow_current=True)
-
 
 
 def shared_huggingface_cache() -> Path:
@@ -142,7 +174,6 @@ def shared_huggingface_cache() -> Path:
     if xdg:
         return Path(xdg).expanduser() / "huggingface" / "hub"
     return Path.home() / ".cache" / "huggingface" / "hub"
-
 
 
 def local_resource_status() -> str:
@@ -159,7 +190,11 @@ def local_resource_status() -> str:
 
     kokoro = discover_python_runtime(("kokoro",), allow_current=True)
     if kokoro:
-        location = "current DubLocal venv" if kokoro.python.resolve() == Path(sys.executable).resolve() else str(kokoro.python)
+        location = (
+            "current DubLocal venv"
+            if kokoro.python.resolve() == Path(sys.executable).resolve()
+            else f"{kokoro.label} · {kokoro.python}"
+        )
         lines.append(f"[kokoro] reusable runtime detected · {location}")
     else:
         lines.append("[kokoro] no reusable Python runtime detected yet · M4 can install or link one later")
