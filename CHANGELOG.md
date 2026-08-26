@@ -19,8 +19,12 @@ M3 turns the timestamped subtitle timeline from M2 into a fully local translatio
 - Whisper Auto-detected language handoff into the translation workflow.
 - Shared Hugging Face cache reuse: an identical pinned model already downloaded by another compatible local app can be reused instead of stored a second time.
 - Compatible external Python-runtime discovery. Heavy stacks already present in another known local environment can be reused through an isolated worker process rather than mixing virtual environments.
-- Reusable-resource panel showing FFmpeg, ffprobe, whisper.cpp, the Hugging Face cache and detected Kokoro runtime availability.
+- Reusable-resource reporting for FFmpeg, ffprobe, whisper.cpp, Hugging Face cache and detected Kokoro runtime availability.
 - **Repair installation** for Git-based development installs, modeled on NarRoam Studio's recovery behavior.
+- New top-level **Main** and **Settings** navigation.
+- **Settings → Updates**, **Settings → Model Manager**, and **Settings → Local Resources** subtabs.
+- Whisper and OPUS installation/removal moved out of the processing flow into the dedicated Model Manager.
+- Translation Model Manager presets for English → supported languages, supported languages → English, and non-English ↔ non-English routes.
 
 ### Update and repair changes
 
@@ -46,6 +50,10 @@ DubLocal now prefers reuse over duplication where that is technically safe:
 - packages from one virtual environment are never injected into another virtual environment's interpreter.
 
 This same external-runtime mechanism is intended for M4 Kokoro integration.
+
+### Planned output behavior recorded for M5
+
+Dubbed-media export will avoid unnecessary video re-encoding. Compatible source video will be stream-copied while DubLocal creates/re-encodes only the new mixed audio track. The user will be able to choose between making the DubLocal mix the primary/default audio stream or adding it as a second selectable audio track while preserving the original audio.
 
 ## v0.2.0.dev0 — M2 Local Transcription
 
