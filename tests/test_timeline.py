@@ -1,4 +1,10 @@
-from dublocal.timeline import format_timestamp, parse_srt, parse_timestamp
+from dublocal.timeline import (
+    Segment,
+    format_timestamp,
+    parse_srt,
+    parse_timestamp,
+    segments_to_srt,
+)
 
 
 def test_parse_timestamp_round_trip():
@@ -28,3 +34,18 @@ Next segment.
     assert segments[0].text == "Hello world.\nSecond line."
     assert segments[1].start_ms == 5000
     assert segments[1].end_ms == 6125
+
+
+def test_segments_to_srt_round_trips_exact_timings():
+    original = [
+        Segment(index=7, start_ms=1250, end_ms=3900, text="Translated line."),
+        Segment(index=8, start_ms=5000, end_ms=6125, text="Second translated line."),
+    ]
+
+    serialized = segments_to_srt(original)
+    restored = parse_srt(serialized)
+
+    assert [(item.index, item.start_ms, item.end_ms, item.text) for item in restored] == [
+        (7, 1250, 3900, "Translated line."),
+        (8, 5000, 6125, "Second translated line."),
+    ]
