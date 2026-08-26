@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+from platformdirs import user_cache_dir
 
 from .app import MATRIX_CSS, build_app
 
@@ -12,9 +15,17 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _gradio_allowed_paths() -> list[str]:
+    """Expose only DubLocal's generated job files to the local Gradio UI."""
+
+    jobs_dir = Path(user_cache_dir("DubLocal")) / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    return [str(jobs_dir.resolve())]
+
+
 def main() -> None:
     port = int(os.getenv("DUBLOCAL_PORT", "7861"))
-    inbrowser = _env_bool("DUBLOCAL_INBROWSER", False)
+    inbrowser = _env_bool("DUBLOCAL_INBROWSER", True)
 
     demo = build_app()
     demo.queue(default_concurrency_limit=1).launch(
@@ -23,6 +34,7 @@ def main() -> None:
         server_port=port,
         show_error=False,
         css=MATRIX_CSS,
+        allowed_paths=_gradio_allowed_paths(),
     )
 
 
