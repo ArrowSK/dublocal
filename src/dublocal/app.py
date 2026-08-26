@@ -20,6 +20,13 @@ from .transcription import (
     remove_whisper_model,
     transcribe_source,
 )
+from .updater import (
+    UpdateError,
+    check_for_updates,
+    format_update_status,
+    install_update,
+    schedule_restart,
+)
 
 
 MATRIX_CSS = r"""
@@ -337,6 +344,51 @@ def transcribe_selected(
         return None, [], _error_status(message)
 
 
+def check_updates_ui() -> str:
+    try:
+        return format_update_status(check_for_updates(fetch_remote=True))
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, UpdateError) else f"Unexpected updater error: {exc}"
+        return _error_status(message)
+
+
+def install_update_ui() -> str:
+    try:
+        result = install_update()
+        if not result.changed:
+            return (
+                "```text\n"
+                "[status] DubLocal is already up to date\n"
+                "[restart] not required\n"
+                "```"
+            )
+        return (
+            "```text\n"
+            "[done] update installed from GitHub\n"
+            f"[from] {result.previous_revision[:12]}\n"
+            f"[to]   {result.current_revision[:12]}\n"
+            "[next] click Restart DubLocal to load the new code\n"
+            "```"
+        )
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, UpdateError) else f"Unexpected updater error: {exc}"
+        return _error_status(message)
+
+
+def restart_ui() -> str:
+    try:
+        schedule_restart()
+        return (
+            "```text\n"
+            "[restart] restarting DubLocal with the current installation\n"
+            "[note] this page may briefly disconnect and reopen\n"
+            "```"
+        )
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, UpdateError) else f"Unexpected restart error: {exc}"
+        return _error_status(message)
+
+
 def build_app() -> gr.Blocks:
     with gr.Blocks(title="DubLocal_") as demo:
         gr.HTML(
@@ -420,6 +472,25 @@ def build_app() -> gr.Blocks:
             label="Timed subtitle preview",
         )
 
+        with gr.Accordion("DubLocal updates", open=False):
+            update_status = gr.Markdown(
+                "```text\n[updates] click Check for updates when you want DubLocal to contact GitHub\n[safety] local changes are never overwritten automatically\n```",
+                elem_classes=["console"],
+            )
+            with gr.Row():
+                check_update_button = gr.Button("Check for updates", variant="secondary")
+                install_update_button = gr.Button("Install update", variant="secondary")
+                restart_button = gr.Button("Restart DubLocal", variant="primary")
+            gr.HTML(
+                """
+                <div class="dl-note">
+                  Updates are user-initiated. DubLocal fetches its configured GitHub branch, accepts only a clean
+                  fast-forward update, refreshes the current Python environment, and asks you to restart before the
+                  new code is used. Developer checkouts with local edits or divergent commits are blocked for safety.
+                </div>
+                """
+            )
+
         gr.HTML(
             """
             <div class="dl-note">
@@ -459,6 +530,18 @@ def build_app() -> gr.Blocks:
             fn=transcribe_selected,
             inputs=[source_state, rights, whisper_model, source_language],
             outputs=[subtitle_output, subtitle_preview, status],
+        )
+        check_update_button.click(
+            fn=check_updates_ui,
+            outputs=[update_status],
+        )
+        install_update_button.click(
+            fn=install_update_ui,
+            outputs=[update_status],
+        )
+        restart_button.click(
+            fn=restart_ui,
+            outputs=[update_status],
         )
 
     return demo
