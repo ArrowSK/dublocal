@@ -5,33 +5,37 @@
 <h1 align="center">DubLocal_</h1>
 
 <p align="center">
-  Local subtitles, translation and voice-over tooling for macOS.<br>
+  Local subtitles, translation and AI voice-over tooling for macOS.<br>
   Your media stays on your Mac unless you explicitly use a remote source such as YouTube.
 </p>
 
 <p align="center">
-  <strong>Current development build: v0.3.0.dev0 · M3 Local Translation</strong><br>
+  <strong>Current development build: v0.4.0.dev0 · M4 Local Voice</strong><br>
   macOS 13+ · Apple Silicon and Intel · Apache-2.0
 </p>
 
 ---
 
-DubLocal is for a simple problem: you have a video or audio file — or a YouTube link you are allowed to process — and you want timed subtitles in another language without sending the media through a cloud transcription or translation service.
+DubLocal is for a simple problem: you have a video or audio file — or a YouTube link you are allowed to process — and you want subtitles, translation and a local synthetic voice track without sending the media through a cloud transcription, translation or TTS service.
 
-The long-term goal is local AI voice-over dubbing. The current build already covers source/caption acquisition, local Whisper transcription and local subtitle translation.
+M4 now covers source/caption acquisition, local Whisper transcription, local OPUS subtitle translation and local Kokoro voice generation. It deliberately stops before changing the original movie soundtrack; timing fit, ducking/mixing and media remuxing come next.
 
-## Latest development build — v0.3.0.dev0 / M3
+## Latest development build — v0.4.0.dev0 / M4
 
-M3 adds local subtitle translation on top of the timestamped M2 timeline and improves real-world local installation management:
+M4 adds:
 
-- local OPUS subtitle translation with exact timing preservation;
-- shared Hugging Face model-cache reuse instead of unnecessary duplicate model copies;
-- safe discovery/reuse of compatible external Python runtimes;
-- in-app **Repair installation** for modified/stale Git-based installs;
-- dedicated **Main** and **Settings** areas;
-- **Settings → Updates**, **Model Manager**, and **Local Resources** subtabs.
+- Kokoro local TTS;
+- reuse of an existing compatible Kokoro virtual environment through an isolated worker process;
+- fallback installation into DubLocal only when no reusable runtime exists;
+- official language/voice selection;
+- voice-only WAV generation from source or translated subtitles;
+- per-segment WAVs plus a JSON generation manifest;
+- exact subtitle-start placement in the generated voice track;
+- overflow reporting when synthetic speech is longer than its subtitle window;
+- explicit Kokoro preparation under **Settings → Model Manager**;
+- a macOS venv-discovery fix so environments such as `~/narroam-studio/.venv/bin/python` are not lost by resolving their Python symlink.
 
-There is currently **no packaged GitHub Release**. `v0.3.0.dev0` is the latest development build on `main`. See [CHANGELOG.md](CHANGELOG.md) for the build history.
+There is currently **no packaged GitHub Release**. `v0.4.0.dev0` is the latest development build on `main` once this milestone is merged. See [CHANGELOG.md](CHANGELOG.md) for the build history.
 
 ## What works today
 
@@ -40,9 +44,9 @@ There is currently **no packaged GitHub Release**. `v0.3.0.dev0` is the latest d
 | Media input | ✅ | YouTube URL or local video/audio |
 | Existing subtitles | ✅ | Finds embedded/local and YouTube caption tracks |
 | Missing captions | ✅ | Creates timestamped subtitles locally with whisper.cpp |
-| Subtitle translation | ✅ M3 | Translates the timed SRT locally with optional OPUS models |
-| AI voice | Next | Kokoro local TTS backend |
-| Dubbing mix | Planned | Timing fit, original-audio ducking and speech overlay |
+| Subtitle translation | ✅ | Translates the timed SRT locally with optional OPUS models |
+| AI voice | ✅ M4 | Generates a local Kokoro voice-only WAV from an SRT timeline |
+| Timing / soundtrack mix | Next | Fit speech into subtitle windows and duck/mix original audio |
 | Media export | Planned | Stream-copy compatible video; replace/add dubbed audio track |
 
 ## Main vs Settings
@@ -55,30 +59,57 @@ Use **Main** for the current job:
 
 1. Choose **YouTube** or **Local file** and scan it.
 2. Extract an existing subtitle track or run **Transcribe locally**.
-3. Choose the subtitle language and target language.
-4. Click **Translate subtitles**.
+3. Translate the SRT if needed.
+4. Open **Local voice · Kokoro**.
+5. Choose whether to narrate the translated or source subtitles.
+6. Choose a supported Kokoro language/voice and click **Generate voice track**.
+7. Listen to/download the voice-only WAV and review which subtitle windows are too short for the generated speech.
+
+M4 keeps the subtitle start times intact. If a generated line is longer than its current subtitle window, DubLocal reports the overrun instead of silently time-stretching or rewriting the text. M5 handles timing adaptation.
 
 ### Settings
 
 Use **Settings** for the application itself:
 
 - **Updates** — check/install updates, repair installation, restart.
-- **Model Manager** — install/verify/remove Whisper and OPUS translation models; Kokoro joins here in M4.
+- **Model Manager** — install/verify/remove Whisper and OPUS models and prepare/verify Kokoro.
 - **Local Resources** — inspect FFmpeg, ffprobe, whisper.cpp, Hugging Face cache and reusable external Python runtimes.
 
-So, to install a translation model now:
+To install a translation model:
 
 **Settings → Model Manager → OPUS · subtitle translation → choose model set → Install / verify required model(s)**
 
-English → another supported language needs one ~310 MiB model. Another supported language → English needs the opposite ~310 MiB model. Non-English ↔ non-English uses both through an English pivot.
+To prepare Kokoro:
+
+**Settings → Model Manager → Kokoro · voice generation → choose language/voice → Prepare / verify Kokoro**
+
+DubLocal first looks for a compatible external Kokoro environment. If one exists, it is used through a separate Python worker rather than copied into DubLocal.
 
 ## Reuse first, install second
 
 DubLocal deliberately avoids duplicating large local dependencies when safe reuse is possible.
 
-System tools such as **FFmpeg**, **ffprobe** and **whisper.cpp** are used where they are already installed. Translation models use the standard shared Hugging Face cache. If the exact pinned OPUS snapshot already exists because another compatible local app downloaded it, DubLocal registers that same snapshot instead of storing a second copy.
+System tools such as **FFmpeg**, **ffprobe** and **whisper.cpp** are used where they are already installed. OPUS and Kokoro model assets use the normal shared Hugging Face cache.
 
-Python virtual environments are isolation boundaries. DubLocal never imports another application's `site-packages` directly. Compatible external runtimes can instead be used through isolated worker processes. This mechanism already supports M3 translation and is the basis for reusing an existing Kokoro installation in M4.
+Python virtual environments remain isolation boundaries. DubLocal never imports another application's `site-packages` into its own interpreter. Instead, supported backends run an isolated worker with that environment's own Python executable.
+
+M4 also fixes a subtle macOS issue: venv Python executables are often symlinks to the same framework Python. DubLocal now preserves the venv path itself rather than resolving the symlink and accidentally treating separate environments as one.
+
+## Kokoro language coverage in M4
+
+Official Kokoro support exposed by DubLocal is:
+
+- American English;
+- British English;
+- Spanish;
+- French;
+- Hindi;
+- Italian;
+- Japanese;
+- Brazilian Portuguese;
+- Mandarin Chinese.
+
+This means a translated subtitle target such as **Hungarian, Russian or German can still be generated as subtitles, but not voiced by official Kokoro**. DubLocal does not silently use the wrong frontend. Additional local TTS backends can fill those language gaps later.
 
 ## Install on macOS
 
@@ -113,19 +144,19 @@ Normal updates accept only a clean fast-forward from official `ArrowSK/dublocal`
 
 **Repair installation** is the explicit recovery path. It can save modified tracked program files as a patch backup, restore official files, refresh/verify the managed Python core and restart cleanly without deleting models, caches, generated jobs or untracked user files.
 
-## Supported M3 translation languages
+## Supported M3/M4 translation languages
 
-The current UI allowlist is:
+The current translation UI allowlist is:
 
 English, Hungarian, Russian, German, French, Spanish, Italian, Portuguese, Polish, Ukrainian, Serbian and Croatian.
 
-The underlying OPUS models cover more languages, but DubLocal intentionally exposes a smaller tested set first.
+The translation language list is broader than Kokoro's voice-language list. Translation and TTS are deliberately separate backends.
 
 ## Planned dubbed-media output
 
 DubLocal will not re-encode video merely because a dubbed audio stream is being created. Where the source codec/container is compatible, FFmpeg will stream-copy the original video and process only the new audio.
 
-The planned output choice is:
+The planned M5 output choice is:
 
 - **Replace primary audio — default:** make the DubLocal mixed soundtrack the default/primary audio stream while keeping music/effects underneath the translated speech.
 - **Add dubbed audio as second track:** preserve the original audio unchanged and add the DubLocal mix as another selectable audio stream.
@@ -138,7 +169,7 @@ MKV will be preferred for maximum multi-track preservation; MP4 remains availabl
 ~/dublocal/                         cloned application source
 ~/Library/.../DubLocal/models/      DubLocal model registrations / legacy local models
 ~/.cache/huggingface/hub/           normal shared Hugging Face model cache (default)
-~/Library/Caches/.../DubLocal/jobs/ generated/intermediate job files
+~/Library/Caches/.../DubLocal/jobs/ generated SRTs, segment WAVs, voice tracks and manifests
 ~/.dublocal/logs/                   launcher log
 ~/.dublocal/repair-backups/         patch backups created by Repair installation
 ```
@@ -148,7 +179,7 @@ Exact platform data/cache locations are resolved using `platformdirs`; `HF_HOME`
 ## Documentation
 
 - [Changelog](CHANGELOG.md) — current development build and milestone history.
-- [User guide](docs/USER_GUIDE.md) — Main, Settings, Model Manager and normal day-to-day workflow.
+- [User guide](docs/USER_GUIDE.md) — Main, Settings, models and normal day-to-day workflow.
 - [Installation](docs/INSTALLATION.md) — launcher, first install, updates and repair.
 - [Troubleshooting](docs/TROUBLESHOOTING.md) — practical recovery steps.
 - [Architecture](docs/ARCHITECTURE.md) — local pipeline and reusable-backend design.
@@ -157,13 +188,13 @@ Exact platform data/cache locations are resolved using `platformdirs`; `HF_HOME`
 ## Roadmap
 
 ```text
-M1  Source + existing captions                         ✅
-M2  Local transcription / Whisper                      ✅ validated
-M3  Local subtitle translation + Settings/Model Manager ✅ current
-M4  Kokoro local voice generation                      next
-M5  Voice timing + audio mix + stream-copy export      planned
-M6  Preview + final rendered/remuxed media              planned
-M7  Signed/notarized Mac packaging                     planned
+M1  Source + existing captions                          ✅
+M2  Local transcription / Whisper                       ✅ validated
+M3  Local subtitle translation + Settings/Model Manager ✅
+M4  Kokoro local voice generation                       ✅ implementation
+M5  Voice timing + audio mix + stream-copy export       next
+M6  Preview + final rendered/remuxed media               planned
+M7  Signed/notarized Mac packaging                      planned
 ```
 
 ## Legal note
