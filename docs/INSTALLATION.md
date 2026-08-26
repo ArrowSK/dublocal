@@ -1,19 +1,16 @@
-# Install DubLocal on macOS
+# Installing DubLocal on macOS
 
-This page is the careful version of the installer instructions. If you just want the short path, it is three Terminal commands and then normal use happens through **DubLocal.app**.
+DubLocal currently uses a Git checkout as its application source, but after the first setup it behaves like a normal local Mac utility: you launch **DubLocal.app**, update it from inside the app, and manage optional AI models from the relevant panels.
 
-## What you end up with
+The first installation is the only part that should normally require Terminal.
 
-After installation you will have:
+## What you need
 
-```text
-~/Applications/DubLocal.app
-~/Applications/Stop DubLocal.app
-```
+The initial support target is macOS 13 or newer on Apple Silicon or Intel.
 
-`DubLocal.app` starts the local service and opens it in your browser. `Stop DubLocal.app` stops the background DubLocal process.
+DubLocal needs Python 3.11+, FFmpeg/ffprobe for media work, and `whisper.cpp` if you want local transcription. The installer can bootstrap Python and offer FFmpeg/whisper.cpp through Homebrew when Homebrew is already available.
 
-DubLocal listens only on `127.0.0.1:7861` by default, so the UI is available on your Mac rather than exposed to your home network.
+You do **not** need PyTorch, Transformers or translation models just to install and launch DubLocal. M3 translation remains optional and is prepared later from inside the app.
 
 ## First installation
 
@@ -25,64 +22,84 @@ cd dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-That is the only installation command you should need.
+The installer walks through the required local pieces, creates DubLocal's private Python environment and builds the branded Mac launchers:
 
-### What the installer does
+```text
+~/Applications/DubLocal.app
+~/Applications/Stop DubLocal.app
+```
 
-The installer works through the dependencies in a predictable order:
+If Python 3.11+ is missing and Homebrew is available, the installer can offer to install it. It also checks FFmpeg and `whisper-cli` and can offer the corresponding Homebrew packages.
 
-1. Finds Python 3.11 or newer. If it is missing and Homebrew is available, DubLocal can offer to install Python 3.11.
-2. Creates a private `.venv` inside the DubLocal checkout.
-3. Installs the DubLocal Python package into that environment.
-4. Checks FFmpeg/ffprobe, used for media inspection, subtitle extraction and transcription audio preparation.
-5. Checks `whisper-cli`, used for local transcription, and can offer `brew install whisper-cpp` when Homebrew is present.
-6. Does **not** download any Whisper model weights.
-7. Builds the branded `.icns` icon from `assets/macos/DubLocal.svg` using macOS system tools.
-8. Creates the two launcher apps in `~/Applications`.
+The installer does not silently download Whisper or translation model weights.
 
-The launcher installer intentionally stops if the branded icon cannot be generated rather than silently installing a generic icon.
+## After installation
 
-## Apple Silicon and Intel Macs
+Open `~/Applications/DubLocal.app`. You can drag it to the Dock if you want.
 
-Both are supported by the current transcription backend.
+The launcher starts DubLocal only on:
 
-On Apple Silicon, DubLocal leaves whisper.cpp's normal Metal acceleration path enabled. On Intel Macs, it uses the conservative CPU path for compatibility. The same subtitle workflow is available on both; transcription speed will differ.
+```text
+http://127.0.0.1:7861
+```
 
-## Install a Whisper model only when you need one
+That address is local to your Mac. It is deliberately separate from other local apps and is not a public Gradio share link.
 
-Open **DubLocal.app**, then expand **Local transcription · Whisper**.
+The launcher offers three choices:
 
-Choose a model and click **Install / verify model**:
+- **Launch / Open** — open the existing instance or start DubLocal if it is not running.
+- **Stop All & Launch** — stop DubLocal processes and start a clean instance. This is useful after an update.
+- **Cancel** — do nothing.
 
-| Model | Approx. size | Best use |
-| --- | ---: | --- |
-| Tiny | 75 MiB | Fast tests and lighter hardware |
-| Base | 142 MiB | Recommended starting point |
-| Small | 466 MiB | Better accuracy when you can wait longer |
+`Stop DubLocal.app` stops DubLocal without requiring Terminal.
 
-The model is downloaded only after you press the button. DubLocal verifies the upstream checksum before using it.
+## Install a Whisper model only when you need transcription
 
-**Remove model** deletes that model from the Mac without removing DubLocal itself.
+Inside DubLocal open **Local transcription · Whisper**.
 
-You do not need a Whisper model to extract subtitles that already exist in the source.
+Choose Tiny, Base or Small and click **Install / verify model**. Base (~142 MiB) is the recommended starting point.
 
-## Updating DubLocal from inside the app
+Whisper models are stored outside the Git checkout and survive normal application updates.
 
-Once this updater version is installed, normal updates do not require Terminal.
+## Prepare local translation only when you need it
 
-Expand **DubLocal updates** and use the buttons in order:
+M3 adds a second optional layer. After you have an extracted or transcribed SRT, open **Local translation**, choose the subtitle language and target language, then click **Prepare translation**.
 
-1. **Check for updates** — fetches the configured GitHub upstream and compares revisions.
-2. **Install update** — applies a fast-forward-only Git update and refreshes the current Python environment.
-3. **Restart DubLocal** — restarts through the launcher and loads the new code.
+On first use this installs the optional local translation runtime into DubLocal's `.venv`:
 
-The updater is intentionally conservative. It will refuse to continue if it sees local file changes, local-only commits or divergent Git history. It never runs a destructive reset and never overwrites developer work to make an update succeed.
+```text
+PyTorch
+Transformers
+SentencePiece
+safetensors
+```
 
-GitHub is contacted only when you press **Check for updates** or **Install update**.
+It then downloads only the pinned Apache-2.0 OPUS model route required by your language choice:
 
-## Manual update fallback
+```text
+many languages → English    ~310 MiB
+English → many languages    ~310 MiB
+```
 
-If the in-app updater is unavailable, the manual path remains:
+English ↔ another language uses one model. Two non-English languages use both models because M3 pivots locally through English.
+
+The weight file is SHA-256 checked before use. Translation models are stored in the normal macOS application-data area, outside `~/dublocal`.
+
+Nothing is sent to a cloud translation API as a fallback.
+
+## Updating after the first installation
+
+Normal updates should now be done inside DubLocal.
+
+Open **DubLocal updates** and use:
+
+**Check for updates → Install update → Restart DubLocal**
+
+The updater performs a Git fetch, checks that your installation is a clean fast-forward, installs the new code, refreshes the core Python package and then lets you restart through the existing launcher.
+
+It will refuse to overwrite local changes or resolve a diverged Git history automatically.
+
+If the in-app updater itself is unavailable because you are on a very old build, the manual recovery path is:
 
 ```bash
 cd ~/dublocal
@@ -90,19 +107,15 @@ git pull
 zsh scripts/macos/install-launcher.sh
 ```
 
-Rerunning the installer refreshes the Python package, checks the external engines and recreates the launcher/icon. It does not delete installed Whisper models.
+## Where DubLocal keeps things
 
-If `git pull` says local changes would be overwritten, do not use `git reset --hard` unless you know exactly what those changes are. See [Troubleshooting](TROUBLESHOOTING.md#the-updater-says-local-changes-were-detected) instead.
-
-## Where DubLocal stores things
-
-The cloned source code normally lives at:
+The repository contains application code:
 
 ```text
 ~/dublocal/
 ```
 
-Runtime state and logs live under:
+Launcher runtime state and logs live under:
 
 ```text
 ~/.dublocal/
@@ -114,20 +127,12 @@ The main launcher log is:
 ~/.dublocal/logs/dublocal.log
 ```
 
-Whisper model weights are stored outside the Git repository in the normal macOS application-data location selected by `platformdirs`. That keeps Git updates separate from models and future projects.
+AI models and temporary processing jobs use normal macOS application-data/cache paths selected by `platformdirs`. They are intentionally kept outside the repository so updates do not delete them or make the Git checkout dirty.
 
-## Uninstalling
+## Uninstalling the development build
 
-For the current development-stage install, remove the launcher apps and checkout only if you no longer need them:
+There is not yet a signed `.dmg` uninstaller. If you decide to remove this development build, stop DubLocal first. The code checkout, launchers, optional models and cache are deliberately separate, so each can be removed independently.
 
-```text
-~/Applications/DubLocal.app
-~/Applications/Stop DubLocal.app
-~/dublocal/
-```
+A future signed/notarized packaging milestone will replace this developer-oriented installation with a conventional Mac distribution.
 
-Optional model data and runtime logs live separately, so deleting the repository alone does not silently delete large downloaded models. A proper packaged uninstaller is planned for the release stage.
-
-## Next
-
-For day-to-day use, continue with the [User Guide](USER_GUIDE.md). If something fails, use [Troubleshooting](TROUBLESHOOTING.md) before reinstalling anything.
+If installation fails, use [TROUBLESHOOTING.md](TROUBLESHOOTING.md) before deleting the environment and starting over.
