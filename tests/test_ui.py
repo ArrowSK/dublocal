@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dublocal.ui import (
     _suggest_voice_controls,
+    _translation_preview_rows,
+    _translation_result_note,
     _translation_route_languages,
     _voice_dropdown,
     build_app,
@@ -12,6 +14,14 @@ def test_translation_model_routes():
     assert _translation_route_languages("en-to-many") == ("en", "hu")
     assert _translation_route_languages("many-to-en") == ("hu", "en")
     assert _translation_route_languages("both") == ("hu", "de")
+
+
+def test_translation_preview_puts_target_text_before_source():
+    rows = [["00:00:01,000", "00:00:02,000", "Hello", "Привет"]]
+    assert _translation_preview_rows(rows) == [
+        ["00:00:01,000", "00:00:02,000", "Привет", "Hello"]
+    ]
+    assert _translation_result_note(rows) == "[translation] 1/1 segment(s) differ from the source"
 
 
 def test_voice_dropdown_uses_language_default():
