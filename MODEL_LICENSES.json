@@ -2,7 +2,51 @@
   "schema_version": 1,
   "policy": {
     "default": "deny",
-    "require_explicit_metadata_before_distribution": true
+    "require_explicit_metadata_before_distribution": true,
+    "models_download_on_user_request_only": true
   },
-  "models": []
+  "models": [
+    {
+      "id": "whisper-tiny",
+      "backend": "whisper.cpp",
+      "upstream": "ggerganov/whisper.cpp",
+      "file": "ggml-tiny.bin",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+      "license": "MIT",
+      "commercial_use": true,
+      "redistribution": true,
+      "bundled": false,
+      "download_on_demand": true,
+      "size": "75 MiB",
+      "sha1": "bd577a113a864445d4c299885e0cb97d4ba92b5f"
+    },
+    {
+      "id": "whisper-base",
+      "backend": "whisper.cpp",
+      "upstream": "ggerganov/whisper.cpp",
+      "file": "ggml-base.bin",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+      "license": "MIT",
+      "commercial_use": true,
+      "redistribution": true,
+      "bundled": false,
+      "download_on_demand": true,
+      "size": "142 MiB",
+      "sha1": "465707469ff3a37a2b9b8d8f89f2f99de7299dac"
+    },
+    {
+      "id": "whisper-small",
+      "backend": "whisper.cpp",
+      "upstream": "ggerganov/whisper.cpp",
+      "file": "ggml-small.bin",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+      "license": "MIT",
+      "commercial_use": true,
+      "redistribution": true,
+      "bundled": false,
+      "download_on_demand": true,
+      "size": "466 MiB",
+      "sha1": "55356645c2b361a969dfd0ef2c5a50d530afd8d5"
+    }
+  ]
 }
