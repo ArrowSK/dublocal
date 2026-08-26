@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# DubLocal runtime data
+.dublocal/
+models/
+projects/
+exports/
+*.log
+
+# Editors
+.vscode/
+.idea/
