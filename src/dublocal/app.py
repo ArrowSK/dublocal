@@ -1,10 +1,25 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import gradio as gr
 
-from .media import DubLocalError, extract_subtitle, inspect_local_media, inspect_youtube
+from .media import (
+    DubLocalError,
+    YoutubeRateLimitError,
+    extract_subtitle,
+    inspect_local_media,
+    inspect_youtube,
+)
+from .timeline import parse_srt, segments_to_rows
+from .transcription import (
+    WHISPER_MODELS,
+    install_whisper_model,
+    model_manager_status,
+    remove_whisper_model,
+    transcribe_source,
+)
 
 
 MATRIX_CSS = r"""
@@ -107,6 +122,25 @@ button.secondary {
 """
 
 
+LANGUAGE_CHOICES = [
+    ("Auto detect", "auto"),
+    ("English", "en"),
+    ("Hungarian", "hu"),
+    ("Russian", "ru"),
+    ("German", "de"),
+    ("French", "fr"),
+    ("Spanish", "es"),
+    ("Italian", "it"),
+    ("Portuguese", "pt"),
+    ("Polish", "pl"),
+    ("Ukrainian", "uk"),
+    ("Serbian", "sr"),
+    ("Croatian", "hr"),
+]
+
+MODEL_CHOICES = [(metadata["label"], model_id) for model_id, metadata in WHISPER_MODELS.items()]
+
+
 def _duration_label(seconds: float | None) -> str:
     if seconds is None:
         return "unknown duration"
@@ -153,9 +187,9 @@ def _summary(info: dict[str, Any]) -> str:
         ]
 
     if tracks:
-        lines.append("[next] choose a subtitle track and extract")
+        lines.append("[next] extract an existing caption, or transcribe locally below")
     else:
-        lines.append("[next] no captions found — local transcription fallback is M2")
+        lines.append("[fallback] no usable captions found · local transcription is available below")
     return "```text\n" + "\n".join(lines) + "\n```"
 
 
@@ -166,6 +200,17 @@ def _error_status(message: str) -> str:
 def _toggle_source(source_type: str):
     youtube = source_type == "YouTube"
     return gr.Textbox(visible=youtube), gr.File(visible=not youtube)
+
+
+def _preview_srt(path: str | Path) -> list[list[str]]:
+    subtitle = Path(path)
+    if subtitle.suffix.lower() != ".srt" or not subtitle.is_file():
+        return []
+    try:
+        segments = parse_srt(subtitle.read_text(encoding="utf-8", errors="replace"))
+    except ValueError:
+        return []
+    return segments_to_rows(segments)
 
 
 def scan_source(source_type: str, youtube_url: str, local_file: str | None):
@@ -185,34 +230,111 @@ def scan_source(source_type: str, youtube_url: str, local_file: str | None):
             value=value,
             interactive=bool(choices),
         )
-        return _summary(info), selector, info
+        return _summary(info), selector, info, []
     except Exception as exc:
         message = str(exc) if isinstance(exc, DubLocalError) else f"Unexpected error: {exc}"
-        return _error_status(message), gr.Dropdown(choices=[], value=None, interactive=False), {}
+        return (
+            _error_status(message),
+            gr.Dropdown(choices=[], value=None, interactive=False),
+            {},
+            [],
+        )
 
 
 def extract_selected(info: dict[str, Any], track_value: str | None, rights_confirmed: bool):
     if not rights_confirmed:
-        return None, _error_status("Confirm that you have the right or legal authority to process this media.")
+        return None, [], _error_status(
+            "Confirm that you have the right or legal authority to process this media."
+        )
     if not info:
-        return None, _error_status("Scan a source first.")
+        return None, [], _error_status("Scan a source first.")
     if not track_value:
-        return None, _error_status(
-            "No extractable subtitle track is selected. M2 will add local transcription when captions are absent."
+        return None, [], (
+            "```text\n"
+            "[fallback] no caption track is selected\n"
+            "[next] install a Whisper model if needed, then click Transcribe locally\n"
+            "```"
         )
 
     try:
         output = extract_subtitle(info, track_value)
-        return str(output), (
+        return str(output), _preview_srt(output), (
             "```text\n"
             "[done] subtitle extraction complete\n"
             f"[output] {output.name}\n"
-            "[next] translation and transcription are intentionally not faked in M1\n"
+            "[next] M3 will add translation\n"
+            "```"
+        )
+    except YoutubeRateLimitError as exc:
+        return None, [], (
+            "```text\n"
+            f"[caption] {exc}\n"
+            "[fallback] local Whisper transcription is ready below\n"
             "```"
         )
     except Exception as exc:
         message = str(exc) if isinstance(exc, DubLocalError) else f"Unexpected error: {exc}"
-        return None, _error_status(message)
+        return None, [], _error_status(message)
+
+
+def install_selected_model(model_id: str):
+    try:
+        path = install_whisper_model(model_id)
+        return model_manager_status(), (
+            "```text\n"
+            f"[done] Whisper {model_id} installed and checksum verified\n"
+            f"[model] {path.name}\n"
+            "[next] scan media and click Transcribe locally\n"
+            "```"
+        )
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, DubLocalError) else f"Unexpected error: {exc}"
+        return model_manager_status(), _error_status(message)
+
+
+def remove_selected_model(model_id: str):
+    try:
+        removed = remove_whisper_model(model_id)
+        action = "removed" if removed else "was not installed"
+        return model_manager_status(), (
+            "```text\n"
+            f"[model] Whisper {model_id} {action}\n"
+            "```"
+        )
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, DubLocalError) else f"Unexpected error: {exc}"
+        return model_manager_status(), _error_status(message)
+
+
+def transcribe_selected(
+    info: dict[str, Any],
+    rights_confirmed: bool,
+    model_id: str,
+    language: str,
+):
+    if not rights_confirmed:
+        return None, [], _error_status(
+            "Confirm that you have the right or legal authority to process this media."
+        )
+    if not info:
+        return None, [], _error_status("Scan a source first.")
+
+    try:
+        result = transcribe_source(info, model_id=model_id, language=language)
+        rows = segments_to_rows(result.segments)
+        return str(result.srt_path), rows, (
+            "```text\n"
+            "[done] local transcription complete\n"
+            f"[engine] whisper.cpp · model {result.model_id}\n"
+            f"[language] {result.language}\n"
+            f"[segments] {len(result.segments)}\n"
+            f"[output] {result.srt_path.name}\n"
+            "[next] M3 will translate this timeline without retranscribing\n"
+            "```"
+        )
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, DubLocalError) else f"Unexpected error: {exc}"
+        return None, [], _error_status(message)
 
 
 def build_app() -> gr.Blocks:
@@ -248,7 +370,7 @@ def build_app() -> gr.Blocks:
 
         with gr.Group():
             subtitle_track = gr.Dropdown(
-                label="Subtitle / caption track",
+                label="Existing subtitle / caption track",
                 choices=[],
                 interactive=False,
             )
@@ -256,19 +378,53 @@ def build_app() -> gr.Blocks:
                 label="I have the right or legal authority to process this media",
                 value=False,
             )
-            extract_button = gr.Button("Extract subtitles", variant="secondary")
+            extract_button = gr.Button("Extract existing subtitles", variant="secondary")
+
+        with gr.Accordion("Local transcription · Whisper", open=True):
+            model_status = gr.Markdown(model_manager_status(), elem_classes=["console"])
+            with gr.Row():
+                whisper_model = gr.Dropdown(
+                    label="Whisper model",
+                    choices=MODEL_CHOICES,
+                    value="base",
+                )
+                source_language = gr.Dropdown(
+                    label="Spoken language",
+                    choices=LANGUAGE_CHOICES,
+                    value="auto",
+                )
+            with gr.Row():
+                install_model_button = gr.Button("Install / verify model", variant="secondary")
+                remove_model_button = gr.Button("Remove model", variant="secondary")
+                transcribe_button = gr.Button("Transcribe locally", variant="primary")
+            gr.HTML(
+                """
+                <div class="dl-note">
+                  Models are optional and downloaded only when you request them. Base is the recommended starting point.
+                  Apple Silicon uses whisper.cpp Metal acceleration; Intel Macs use the CPU compatibility path.
+                </div>
+                """
+            )
 
         status = gr.Markdown(
-            "```text\n[ready] choose a source and scan it\n[mode] M1 · existing subtitle acquisition\n```",
+            "```text\n[ready] choose a source and scan it\n[mode] M2 · captions + local transcription\n```",
             elem_classes=["console"],
         )
         subtitle_output = gr.File(label="Subtitle output", interactive=False)
+        subtitle_preview = gr.Dataframe(
+            headers=["Start", "End", "Text"],
+            datatype=["str", "str", "str"],
+            value=[],
+            interactive=False,
+            wrap=True,
+            label="Timed subtitle preview",
+        )
 
         gr.HTML(
             """
             <div class="dl-note">
-              M1 deliberately stops at reliable caption discovery/extraction. The next milestone adds local transcription
-              when captions are missing, followed by translation, Kokoro TTS, timing and audio mixing.
+              M2 produces a reusable timestamped subtitle timeline locally. Translation, Kokoro voice generation,
+              timing adaptation and audio mixing are later milestones and are not simulated here.
             </div>
             """
         )
@@ -282,12 +438,27 @@ def build_app() -> gr.Blocks:
         scan_button.click(
             fn=scan_source,
             inputs=[source_type, youtube_url, local_file],
-            outputs=[status, subtitle_track, source_state],
+            outputs=[status, subtitle_track, source_state, subtitle_preview],
         )
         extract_button.click(
             fn=extract_selected,
             inputs=[source_state, subtitle_track, rights],
-            outputs=[subtitle_output, status],
+            outputs=[subtitle_output, subtitle_preview, status],
+        )
+        install_model_button.click(
+            fn=install_selected_model,
+            inputs=[whisper_model],
+            outputs=[model_status, status],
+        )
+        remove_model_button.click(
+            fn=remove_selected_model,
+            inputs=[whisper_model],
+            outputs=[model_status, status],
+        )
+        transcribe_button.click(
+            fn=transcribe_selected,
+            inputs=[source_state, rights, whisper_model, source_language],
+            outputs=[subtitle_output, subtitle_preview, status],
         )
 
     return demo
