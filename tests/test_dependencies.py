@@ -34,6 +34,27 @@ def test_discovers_compatible_external_python_runtime(monkeypatch, tmp_path: Pat
     assert runtime.modules == ("kokoro",)
 
 
+def test_python_from_entrypoint_uses_absolute_shebang(monkeypatch, tmp_path: Path):
+    python = tmp_path / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    command = tmp_path / "bin" / "kokoro"
+    command.parent.mkdir(parents=True)
+    command.write_text(f"#!{python}\nprint('stub')\n", encoding="utf-8")
+
+    monkeypatch.setattr(dependencies.shutil, "which", lambda name: str(command))
+
+    assert dependencies._python_from_entrypoint("kokoro") == python
+
+
+def test_python_from_entrypoint_ignores_env_shebang(monkeypatch, tmp_path: Path):
+    command = tmp_path / "kokoro"
+    command.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    monkeypatch.setattr(dependencies.shutil, "which", lambda name: str(command))
+
+    assert dependencies._python_from_entrypoint("kokoro") is None
+
+
 def test_shared_huggingface_cache_respects_environment(monkeypatch, tmp_path: Path):
     explicit = tmp_path / "shared-hf"
     monkeypatch.setenv("HF_HUB_CACHE", str(explicit))
