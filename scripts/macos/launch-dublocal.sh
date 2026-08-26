@@ -1,6 +1,8 @@
 #!/bin/zsh
 set -u
 
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PYTHON="$REPO_ROOT/.venv/bin/python"
