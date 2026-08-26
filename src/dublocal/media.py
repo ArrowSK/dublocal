@@ -1,0 +1,292 @@
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Any
+
+from platformdirs import user_cache_dir
+from yt_dlp import YoutubeDL
+
+
+TEXT_SUBTITLE_CODECS = {
+    "ass",
+    "mov_text",
+    "ssa",
+    "srt",
+    "subrip",
+    "text",
+    "webvtt",
+}
+
+
+class DubLocalError(RuntimeError):
+    """Base error presented to the user."""
+
+
+class ToolMissingError(DubLocalError):
+    """Raised when a required local executable is missing."""
+
+
+def _require_tool(name: str) -> str:
+    path = shutil.which(name)
+    if not path:
+        raise ToolMissingError(
+            f"Required tool '{name}' was not found. During development, install FFmpeg "
+            "with `brew install ffmpeg`. A future packaged release will manage this for you."
+        )
+    return path
+
+
+def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        message = (exc.stderr or exc.stdout or str(exc)).strip()
+        raise DubLocalError(message) from exc
+
+
+def _new_job_dir(prefix: str) -> Path:
+    root = Path(user_cache_dir("DubLocal", ensure_exists=True)) / "jobs"
+    root.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f"{prefix}-", dir=root))
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def inspect_local_media(path: str | Path) -> dict[str, Any]:
+    media_path = Path(path).expanduser().resolve()
+    if not media_path.exists() or not media_path.is_file():
+        raise DubLocalError("The selected local file no longer exists.")
+
+    ffprobe = _require_tool("ffprobe")
+    result = _run(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-show_format",
+            "-show_streams",
+            "-of",
+            "json",
+            str(media_path),
+        ]
+    )
+    probe = json.loads(result.stdout)
+
+    streams: list[dict[str, Any]] = []
+    subtitle_tracks: list[dict[str, Any]] = []
+
+    for raw in probe.get("streams", []):
+        tags = raw.get("tags") or {}
+        stream = {
+            "index": raw.get("index"),
+            "codec_type": raw.get("codec_type"),
+            "codec_name": raw.get("codec_name") or "unknown",
+            "language": tags.get("language") or "und",
+            "title": tags.get("title") or "",
+            "channels": raw.get("channels"),
+            "width": raw.get("width"),
+            "height": raw.get("height"),
+        }
+        streams.append(stream)
+
+        if stream["codec_type"] == "subtitle":
+            index = int(stream["index"])
+            codec = str(stream["codec_name"])
+            language = str(stream["language"])
+            title = str(stream["title"])
+            text_capable = codec in TEXT_SUBTITLE_CODECS
+            details = [language, codec]
+            if title:
+                details.append(title)
+            if not text_capable:
+                details.append("image-based / extraction unsupported in M1")
+            subtitle_tracks.append(
+                {
+                    "value": f"local:{index}",
+                    "label": " · ".join(details),
+                    "index": index,
+                    "codec": codec,
+                    "language": language,
+                    "title": title,
+                    "text_capable": text_capable,
+                }
+            )
+
+    format_info = probe.get("format") or {}
+    return {
+        "kind": "local",
+        "path": str(media_path),
+        "title": media_path.name,
+        "duration": _safe_float(format_info.get("duration")),
+        "format_name": format_info.get("format_long_name") or format_info.get("format_name"),
+        "size": media_path.stat().st_size,
+        "streams": streams,
+        "subtitle_tracks": subtitle_tracks,
+    }
+
+
+def inspect_youtube(url: str) -> dict[str, Any]:
+    clean_url = (url or "").strip()
+    if not clean_url:
+        raise DubLocalError("Paste a YouTube URL first.")
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+    }
+    with YoutubeDL(options) as ydl:
+        info = ydl.extract_info(clean_url, download=False)
+
+    if not info or info.get("_type") == "playlist":
+        raise DubLocalError("DubLocal currently accepts one video at a time, not playlists.")
+
+    subtitle_tracks: list[dict[str, Any]] = []
+    manual = info.get("subtitles") or {}
+    automatic = info.get("automatic_captions") or {}
+
+    for language in sorted(manual):
+        subtitle_tracks.append(
+            {
+                "value": f"yt:manual:{language}",
+                "label": f"{language} · creator captions",
+                "language": language,
+                "source": "manual",
+                "formats": [item.get("ext") for item in manual.get(language, []) if item.get("ext")],
+            }
+        )
+
+    for language in sorted(automatic):
+        subtitle_tracks.append(
+            {
+                "value": f"yt:auto:{language}",
+                "label": f"{language} · automatic captions",
+                "language": language,
+                "source": "auto",
+                "formats": [
+                    item.get("ext") for item in automatic.get(language, []) if item.get("ext")
+                ],
+            }
+        )
+
+    return {
+        "kind": "youtube",
+        "url": info.get("webpage_url") or clean_url,
+        "id": info.get("id"),
+        "title": info.get("title") or "Untitled YouTube video",
+        "uploader": info.get("uploader") or info.get("channel") or "",
+        "duration": _safe_float(info.get("duration")),
+        "subtitle_tracks": subtitle_tracks,
+    }
+
+
+def extract_local_subtitle(info: dict[str, Any], track_value: str) -> Path:
+    if info.get("kind") != "local":
+        raise DubLocalError("Internal source mismatch: expected a local file.")
+    try:
+        _, raw_index = track_value.split(":", 1)
+        stream_index = int(raw_index)
+    except (AttributeError, ValueError) as exc:
+        raise DubLocalError("Invalid subtitle-track selection.") from exc
+
+    track = next(
+        (item for item in info.get("subtitle_tracks", []) if item.get("index") == stream_index),
+        None,
+    )
+    if not track:
+        raise DubLocalError("The selected subtitle track is no longer available.")
+    if not track.get("text_capable"):
+        raise DubLocalError(
+            "This is an image-based subtitle stream. M1 deliberately does not OCR it. "
+            "The transcription fallback will cover this in the next milestone."
+        )
+
+    ffmpeg = _require_tool("ffmpeg")
+    output_dir = _new_job_dir("local-subtitle")
+    output = output_dir / "captions.srt"
+    _run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(info["path"]),
+            "-map",
+            f"0:{stream_index}",
+            "-c:s",
+            "srt",
+            str(output),
+        ]
+    )
+    if not output.exists() or output.stat().st_size == 0:
+        raise DubLocalError("FFmpeg completed but did not create a subtitle file.")
+    return output
+
+
+def extract_youtube_subtitle(info: dict[str, Any], track_value: str) -> Path:
+    if info.get("kind") != "youtube":
+        raise DubLocalError("Internal source mismatch: expected YouTube.")
+
+    try:
+        _, source, language = track_value.split(":", 2)
+    except (AttributeError, ValueError) as exc:
+        raise DubLocalError("Invalid YouTube caption selection.") from exc
+
+    if source not in {"manual", "auto"}:
+        raise DubLocalError("Unknown YouTube caption source.")
+
+    output_dir = _new_job_dir("youtube-subtitle")
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "outtmpl": str(output_dir / "%(id)s.%(ext)s"),
+        "subtitleslangs": [language],
+        "subtitlesformat": "vtt/best",
+        "writesubtitles": source == "manual",
+        "writeautomaticsub": source == "auto",
+    }
+
+    with YoutubeDL(options) as ydl:
+        ydl.extract_info(str(info["url"]), download=True)
+
+    preferred_suffixes = [".vtt", ".srt", ".ass", ".ttml", ".srv3", ".srv2", ".srv1"]
+    candidates = [path for path in output_dir.iterdir() if path.is_file()]
+    candidates.sort(
+        key=lambda path: preferred_suffixes.index(path.suffix)
+        if path.suffix in preferred_suffixes
+        else len(preferred_suffixes)
+    )
+    if not candidates:
+        raise DubLocalError(
+            "yt-dlp reported the caption track but did not produce a subtitle file. "
+            "YouTube may have changed the track or restricted access."
+        )
+    return candidates[0]
+
+
+def extract_subtitle(info: dict[str, Any], track_value: str) -> Path:
+    kind = info.get("kind")
+    if kind == "local":
+        return extract_local_subtitle(info, track_value)
+    if kind == "youtube":
+        return extract_youtube_subtitle(info, track_value)
+    raise DubLocalError("Scan a source before extracting subtitles.")
