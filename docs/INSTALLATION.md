@@ -7,9 +7,10 @@ DubLocal is designed to behave like a normal local Mac app after its first insta
 - macOS 13 or newer is the initial support target.
 - Python 3.11 or newer.
 - Internet access during the initial Python package installation.
-- FFmpeg/ffprobe for local media inspection and extraction. The installer can offer to install FFmpeg through Homebrew when Homebrew is already present.
+- FFmpeg/ffprobe for local media inspection, subtitle extraction and transcription-audio preparation.
+- `whisper.cpp` / `whisper-cli` for M2 local transcription.
 
-Apple Silicon and Intel Macs are both intended to be supported. Later AI backends may have different performance characteristics.
+The installer can bootstrap Python with Homebrew when needed and can offer to install FFmpeg and whisper.cpp when Homebrew is already present. Apple Silicon and Intel Macs are both supported by the M2 backend; Apple Silicon keeps whisper.cpp Metal acceleration enabled, while Intel uses the conservative CPU path.
 
 ## Install
 
@@ -23,15 +24,29 @@ zsh scripts/macos/install-launcher.sh
 
 The installer:
 
-1. finds Python 3.11+;
+1. finds Python 3.11+ and can offer Homebrew Python when missing;
 2. creates `.venv` inside the repository if necessary;
 3. installs/refreshes DubLocal in that environment;
-4. checks for FFmpeg/ffprobe;
-5. generates the macOS `.icns` icon from the original `assets/macos/DubLocal.svg` artwork using macOS system tools;
-6. creates `~/Applications/DubLocal.app`;
-7. creates `~/Applications/Stop DubLocal.app`.
+4. checks for FFmpeg/ffprobe and can offer `brew install ffmpeg`;
+5. checks for `whisper-cli` and can offer `brew install whisper-cpp`;
+6. does **not** download Whisper model weights;
+7. generates the macOS `.icns` icon from the original `assets/macos/DubLocal.svg` artwork using macOS system tools;
+8. creates `~/Applications/DubLocal.app`;
+9. creates `~/Applications/Stop DubLocal.app`.
 
 The installer intentionally aborts if the branded icon cannot be generated rather than silently installing a generic app icon.
+
+## Install a Whisper model
+
+Launch DubLocal and open the **Local transcription · Whisper** panel. Choose one of the allowlisted multilingual models and click **Install / verify model**:
+
+- Tiny — 75 MiB, fastest;
+- Base — 142 MiB, recommended starting point;
+- Small — 466 MiB, better accuracy but slower/larger.
+
+Models are downloaded only after this explicit action, are stored outside the Git repository under the user's normal macOS application-data location, and are checksum-verified before use. **Remove model** deletes the selected local model without affecting DubLocal itself.
+
+The app remains usable for existing-caption extraction when no Whisper model is installed.
 
 ## Using the launcher
 
@@ -61,6 +76,8 @@ The main log is:
 ~/.dublocal/logs/dublocal.log
 ```
 
+Whisper models are stored in the macOS application-data directory selected by `platformdirs`; they are intentionally not stored inside the cloned repository.
+
 ## Updating
 
 From the cloned repository:
@@ -70,4 +87,6 @@ git pull
 zsh scripts/macos/install-launcher.sh
 ```
 
-Rerunning the installer refreshes the Python package and recreates the launcher/icon without deleting future optional models or user projects stored outside the repository.
+Rerunning the installer refreshes the Python package, checks external engines, and recreates the launcher/icon without deleting installed Whisper models or future user projects.
+
+The current installer no longer changes executable bits on tracked repository scripts, so running it should not dirty the Git working tree.
