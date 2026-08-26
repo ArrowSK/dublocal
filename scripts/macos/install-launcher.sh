@@ -1,6 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 APPLICATIONS_DIR="$HOME/Applications"
@@ -42,6 +44,35 @@ find_python() {
       return 0
     fi
   done
+
+  for path in \
+    /opt/homebrew/opt/python@3.13/bin/python3.13 \
+    /opt/homebrew/opt/python@3.12/bin/python3.12 \
+    /opt/homebrew/opt/python@3.11/bin/python3.11 \
+    /usr/local/opt/python@3.13/bin/python3.13 \
+    /usr/local/opt/python@3.12/bin/python3.12 \
+    /usr/local/opt/python@3.11/bin/python3.11; do
+    if [[ -x "$path" ]] && "$path" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+install_python_with_homebrew() {
+  if ! command -v brew >/dev/null 2>&1; then
+    return 1
+  fi
+
+  echo
+  echo "Python 3.11+ was not found."
+  if ask_yes_no "Install Python 3.11 with Homebrew now?" yes; then
+    brew install python@3.11
+    export PATH="$(brew --prefix python@3.11)/bin:$PATH"
+    return 0
+  fi
   return 1
 }
 
@@ -52,9 +83,24 @@ ensure_core() {
 
 if [[ ! -x "$PYTHON" ]]; then
   PYTHON_BASE="$(find_python || true)"
+
   if [[ -z "$PYTHON_BASE" ]]; then
+    if install_python_with_homebrew; then
+      PYTHON_BASE="$(find_python || true)"
+    fi
+  fi
+
+  if [[ -z "$PYTHON_BASE" ]]; then
+    echo
     echo "DubLocal requires Python 3.11 or newer."
-    echo "Install Python 3.11+ and rerun:"
+    if command -v brew >/dev/null 2>&1; then
+      echo "Python installation was skipped or did not complete."
+    else
+      echo "Homebrew is not installed, so DubLocal cannot bootstrap Python automatically yet."
+      echo "Install Python 3.11+ from python.org, then rerun this installer."
+    fi
+    echo
+    echo "Rerun:"
     echo "  zsh scripts/macos/install-launcher.sh"
     exit 1
   fi
