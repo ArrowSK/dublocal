@@ -20,6 +20,15 @@ from .transcription import (
     remove_whisper_model,
     transcribe_source,
 )
+from .translation import (
+    TRANSLATION_LANGUAGES,
+    normalise_language_code,
+    prepare_translation,
+    remove_translation_models,
+    translate_srt,
+    translated_segments_to_rows,
+    translation_manager_status,
+)
 from .updater import (
     UpdateError,
     check_for_updates,
@@ -144,7 +153,9 @@ LANGUAGE_CHOICES = [
     ("Serbian", "sr"),
     ("Croatian", "hr"),
 ]
-
+TARGET_LANGUAGE_CHOICES = [
+    (metadata["label"], code) for code, metadata in TRANSLATION_LANGUAGES.items()
+]
 MODEL_CHOICES = [(metadata["label"], model_id) for model_id, metadata in WHISPER_MODELS.items()]
 
 
@@ -220,6 +231,18 @@ def _preview_srt(path: str | Path) -> list[list[str]]:
     return segments_to_rows(segments)
 
 
+def _selected_track_language(info: dict[str, Any], track_value: str | None) -> str:
+    if not track_value:
+        return "auto"
+    track = next(
+        (item for item in info.get("subtitle_tracks", []) if item.get("value") == track_value),
+        None,
+    )
+    if not track:
+        return "auto"
+    return normalise_language_code(str(track.get("language") or "auto"))
+
+
 def scan_source(source_type: str, youtube_url: str, local_file: str | None):
     try:
         if source_type == "YouTube":
@@ -252,36 +275,38 @@ def extract_selected(info: dict[str, Any], track_value: str | None, rights_confi
     if not rights_confirmed:
         return None, [], _error_status(
             "Confirm that you have the right or legal authority to process this media."
-        )
+        ), "", "auto"
     if not info:
-        return None, [], _error_status("Scan a source first.")
+        return None, [], _error_status("Scan a source first."), "", "auto"
     if not track_value:
         return None, [], (
             "```text\n"
             "[fallback] no caption track is selected\n"
             "[next] install a Whisper model if needed, then click Transcribe locally\n"
             "```"
-        )
+        ), "", "auto"
 
     try:
         output = extract_subtitle(info, track_value)
+        language = _selected_track_language(info, track_value)
         return str(output), _preview_srt(output), (
             "```text\n"
             "[done] subtitle extraction complete\n"
             f"[output] {output.name}\n"
-            "[next] M3 will add translation\n"
+            f"[language] {language}\n"
+            "[next] translate this timeline locally below, or keep the original SRT\n"
             "```"
-        )
+        ), str(output), language
     except YoutubeRateLimitError as exc:
         return None, [], (
             "```text\n"
             f"[caption] {exc}\n"
             "[fallback] local Whisper transcription is ready below\n"
             "```"
-        )
+        ), "", "auto"
     except Exception as exc:
         message = str(exc) if isinstance(exc, DubLocalError) else f"Unexpected error: {exc}"
-        return None, [], _error_status(message)
+        return None, [], _error_status(message), "", "auto"
 
 
 def install_selected_model(model_id: str):
@@ -322,21 +347,87 @@ def transcribe_selected(
     if not rights_confirmed:
         return None, [], _error_status(
             "Confirm that you have the right or legal authority to process this media."
-        )
+        ), "", "auto"
     if not info:
-        return None, [], _error_status("Scan a source first.")
+        return None, [], _error_status("Scan a source first."), "", "auto"
 
     try:
         result = transcribe_source(info, model_id=model_id, language=language)
         rows = segments_to_rows(result.segments)
+        detected = normalise_language_code(result.language)
         return str(result.srt_path), rows, (
             "```text\n"
             "[done] local transcription complete\n"
             f"[engine] whisper.cpp · model {result.model_id}\n"
-            f"[language] {result.language}\n"
+            f"[language] {detected}\n"
             f"[segments] {len(result.segments)}\n"
             f"[output] {result.srt_path.name}\n"
-            "[next] M3 will translate this timeline without retranscribing\n"
+            "[next] translate this timeline locally below, or keep the original SRT\n"
+            "```"
+        ), str(result.srt_path), detected
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, DubLocalError) else f"Unexpected error: {exc}"
+        return None, [], _error_status(message), "", "auto"
+
+
+def translation_status_ui(source_language: str, target_language: str) -> str:
+    try:
+        return translation_manager_status(source_language, target_language)
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, DubLocalError) else f"Unexpected error: {exc}"
+        return _error_status(message)
+
+
+def prepare_translation_ui(source_language: str, target_language: str):
+    try:
+        installed = prepare_translation(source_language, target_language)
+        names = ", ".join(installed)
+        return translation_manager_status(source_language, target_language), (
+            "```text\n"
+            "[done] local translation is ready\n"
+            f"[models] {names}\n"
+            "[next] click Translate subtitles\n"
+            "```"
+        )
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, DubLocalError) else f"Unexpected error: {exc}"
+        return translation_manager_status(source_language, target_language), _error_status(message)
+
+
+def remove_translation_models_ui(source_language: str, target_language: str):
+    try:
+        removed = remove_translation_models()
+        return translation_manager_status(source_language, target_language), (
+            "```text\n"
+            f"[models] removed {removed} local translation model folder(s)\n"
+            "[engine] optional Python translation packages were kept\n"
+            "```"
+        )
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, DubLocalError) else f"Unexpected error: {exc}"
+        return translation_manager_status(source_language, target_language), _error_status(message)
+
+
+def translate_selected(
+    subtitle_path: str,
+    source_language: str,
+    target_language: str,
+):
+    if not subtitle_path:
+        return None, [], _error_status(
+            "Extract or transcribe subtitles first. Translation reuses that timed SRT."
+        )
+
+    try:
+        result = translate_srt(subtitle_path, source_language, target_language)
+        rows = translated_segments_to_rows(result.segments)
+        return str(result.srt_path), rows, (
+            "```text\n"
+            "[done] local subtitle translation complete\n"
+            f"[route] {result.route}\n"
+            f"[segments] {len(result.segments)} · original timings preserved\n"
+            f"[output] {result.srt_path.name}\n"
+            "[next] M4 will add local Kokoro voice generation\n"
             "```"
         )
     except Exception as exc:
@@ -401,6 +492,7 @@ def build_app() -> gr.Blocks:
         )
 
         source_state = gr.State({})
+        subtitle_path_state = gr.State("")
 
         with gr.Group():
             source_type = gr.Radio(
@@ -459,18 +551,64 @@ def build_app() -> gr.Blocks:
             )
 
         status = gr.Markdown(
-            "```text\n[ready] choose a source and scan it\n[mode] M2 · captions + local transcription\n```",
+            "```text\n[ready] choose a source and scan it\n[mode] M3 · captions + local transcription + local translation\n```",
             elem_classes=["console"],
         )
-        subtitle_output = gr.File(label="Subtitle output", interactive=False)
+        subtitle_output = gr.File(label="Source subtitle output", interactive=False)
         subtitle_preview = gr.Dataframe(
             headers=["Start", "End", "Text"],
             datatype=["str", "str", "str"],
             value=[],
             interactive=False,
             wrap=True,
-            label="Timed subtitle preview",
+            label="Timed source subtitle preview",
         )
+
+        with gr.Accordion("Local translation", open=True):
+            with gr.Row():
+                translation_source_language = gr.Dropdown(
+                    label="Subtitle language",
+                    choices=LANGUAGE_CHOICES,
+                    value="auto",
+                )
+                translation_target_language = gr.Dropdown(
+                    label="Translate to",
+                    choices=TARGET_LANGUAGE_CHOICES,
+                    value="en",
+                )
+            translation_status = gr.Markdown(
+                translation_manager_status("auto", "en"),
+                elem_classes=["console"],
+            )
+            with gr.Row():
+                prepare_translation_button = gr.Button(
+                    "Prepare translation",
+                    variant="secondary",
+                )
+                remove_translation_button = gr.Button(
+                    "Remove translation models",
+                    variant="secondary",
+                )
+                translate_button = gr.Button("Translate subtitles", variant="primary")
+            gr.HTML(
+                """
+                <div class="dl-note">
+                  Translation is entirely local and optional. The first preparation installs the local translation
+                  runtime and only the Apache-2.0 OPUS model(s) needed for the selected language route. English ↔ another
+                  language needs one ~310 MiB model; translation between two non-English languages uses English as a
+                  local pivot and needs both models. There is no silent cloud fallback.
+                </div>
+                """
+            )
+            translated_output = gr.File(label="Translated SRT", interactive=False)
+            translated_preview = gr.Dataframe(
+                headers=["Start", "End", "Original", "Translation"],
+                datatype=["str", "str", "str", "str"],
+                value=[],
+                interactive=False,
+                wrap=True,
+                label="Translated subtitle preview",
+            )
 
         with gr.Accordion("DubLocal updates", open=False):
             update_status = gr.Markdown(
@@ -494,8 +632,8 @@ def build_app() -> gr.Blocks:
         gr.HTML(
             """
             <div class="dl-note">
-              M2 produces a reusable timestamped subtitle timeline locally. Translation, Kokoro voice generation,
-              timing adaptation and audio mixing are later milestones and are not simulated here.
+              M3 produces reusable source and translated timed subtitle files locally. Kokoro voice generation,
+              timing adaptation, audio mixing and rendered video are later milestones and are not simulated here.
             </div>
             """
         )
@@ -514,7 +652,13 @@ def build_app() -> gr.Blocks:
         extract_button.click(
             fn=extract_selected,
             inputs=[source_state, subtitle_track, rights],
-            outputs=[subtitle_output, subtitle_preview, status],
+            outputs=[
+                subtitle_output,
+                subtitle_preview,
+                status,
+                subtitle_path_state,
+                translation_source_language,
+            ],
         )
         install_model_button.click(
             fn=install_selected_model,
@@ -529,7 +673,40 @@ def build_app() -> gr.Blocks:
         transcribe_button.click(
             fn=transcribe_selected,
             inputs=[source_state, rights, whisper_model, source_language],
-            outputs=[subtitle_output, subtitle_preview, status],
+            outputs=[
+                subtitle_output,
+                subtitle_preview,
+                status,
+                subtitle_path_state,
+                translation_source_language,
+            ],
+        )
+        translation_source_language.change(
+            fn=translation_status_ui,
+            inputs=[translation_source_language, translation_target_language],
+            outputs=[translation_status],
+            queue=False,
+        )
+        translation_target_language.change(
+            fn=translation_status_ui,
+            inputs=[translation_source_language, translation_target_language],
+            outputs=[translation_status],
+            queue=False,
+        )
+        prepare_translation_button.click(
+            fn=prepare_translation_ui,
+            inputs=[translation_source_language, translation_target_language],
+            outputs=[translation_status, status],
+        )
+        remove_translation_button.click(
+            fn=remove_translation_models_ui,
+            inputs=[translation_source_language, translation_target_language],
+            outputs=[translation_status, status],
+        )
+        translate_button.click(
+            fn=translate_selected,
+            inputs=[subtitle_path_state, translation_source_language, translation_target_language],
+            outputs=[translated_output, translated_preview, status],
         )
         check_update_button.click(
             fn=check_updates_ui,
