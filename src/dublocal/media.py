@@ -36,12 +36,16 @@ class ToolMissingError(DubLocalError):
     """Raised when a required local executable is missing."""
 
 
+class YoutubeRateLimitError(DubLocalError):
+    """Raised when YouTube temporarily refuses caption delivery."""
+
+
 def _require_tool(name: str) -> str:
     path = shutil.which(name)
     if not path:
         raise ToolMissingError(
-            f"Required tool '{name}' was not found. During development, install FFmpeg "
-            "with `brew install ffmpeg`. A future packaged release will manage this for you."
+            f"Required tool '{name}' was not found. Rerun the DubLocal launcher installer "
+            "to install/check local media dependencies."
         )
     return path
 
@@ -119,7 +123,7 @@ def inspect_local_media(path: str | Path) -> dict[str, Any]:
             if title:
                 details.append(title)
             if not text_capable:
-                details.append("image-based / extraction unsupported in M1")
+                details.append("image-based · use local transcription")
             subtitle_tracks.append(
                 {
                     "value": f"local:{index}",
@@ -237,8 +241,8 @@ def extract_local_subtitle(info: dict[str, Any], track_value: str) -> Path:
         raise DubLocalError("The selected subtitle track is no longer available.")
     if not track.get("text_capable"):
         raise DubLocalError(
-            "This is an image-based subtitle stream. M1 deliberately does not OCR it. "
-            "The transcription fallback will cover this in the next milestone."
+            "This subtitle stream is image-based and cannot be extracted as text. "
+            "Use Local transcription below to create timestamped subtitles from the audio."
         )
 
     ffmpeg = _require_tool("ffmpeg")
@@ -330,10 +334,9 @@ def _download_youtube_caption_direct(
                 break
 
     if last_429 is not None:
-        raise DubLocalError(
-            "YouTube temporarily rate-limited subtitle delivery (HTTP 429). "
-            "DubLocal retried with backoff, but YouTube is still refusing this caption request. "
-            "Wait a few minutes and try again. Local transcription will become the automatic fallback in M2."
+        raise YoutubeRateLimitError(
+            "YouTube temporarily rate-limited caption delivery (HTTP 429). "
+            "Use Local transcription below to create subtitles from the media audio instead."
         ) from last_429
     return None
 
@@ -378,9 +381,9 @@ def extract_youtube_subtitle(info: dict[str, Any], track_value: str) -> Path:
     except Exception as exc:
         message = str(exc)
         if "429" in message or "Too Many Requests" in message:
-            raise DubLocalError(
-                "YouTube temporarily rate-limited subtitle delivery (HTTP 429). "
-                "Wait a few minutes and retry. Local transcription will become the automatic fallback in M2."
+            raise YoutubeRateLimitError(
+                "YouTube temporarily rate-limited caption delivery (HTTP 429). "
+                "Use Local transcription below to create subtitles from the media audio instead."
             ) from exc
         raise DubLocalError(f"YouTube subtitle extraction failed: {message}") from exc
 
@@ -394,7 +397,7 @@ def extract_youtube_subtitle(info: dict[str, Any], track_value: str) -> Path:
     if not candidates:
         raise DubLocalError(
             "yt-dlp reported the caption track but did not produce a subtitle file. "
-            "YouTube may have changed the track or restricted access."
+            "Use Local transcription if the caption remains unavailable."
         )
     return candidates[0]
 
