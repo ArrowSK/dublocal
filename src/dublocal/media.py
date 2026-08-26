@@ -4,8 +4,11 @@ import json
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from platformdirs import user_cache_dir
 from yt_dlp import YoutubeDL
@@ -20,6 +23,9 @@ TEXT_SUBTITLE_CODECS = {
     "text",
     "webvtt",
 }
+
+YOUTUBE_SUBTITLE_EXTENSIONS = ["vtt", "srt", "ttml", "srv3", "srv2", "srv1", "ass", "json3"]
+YOUTUBE_RETRY_DELAYS = (2, 5, 10)
 
 
 class DubLocalError(RuntimeError):
@@ -139,6 +145,23 @@ def inspect_local_media(path: str | Path) -> dict[str, Any]:
     }
 
 
+def _normalise_youtube_formats(items: list[dict[str, Any]]) -> list[dict[str, str]]:
+    formats: list[dict[str, str]] = []
+    for item in items:
+        url = item.get("url")
+        ext = item.get("ext")
+        if not url or not ext:
+            continue
+        formats.append(
+            {
+                "url": str(url),
+                "ext": str(ext),
+                "name": str(item.get("name") or ""),
+            }
+        )
+    return formats
+
+
 def inspect_youtube(url: str) -> dict[str, Any]:
     clean_url = (url or "").strip()
     if not clean_url:
@@ -149,6 +172,7 @@ def inspect_youtube(url: str) -> dict[str, Any]:
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": True,
+        "extractor_retries": 3,
     }
     with YoutubeDL(options) as ydl:
         info = ydl.extract_info(clean_url, download=False)
@@ -161,26 +185,26 @@ def inspect_youtube(url: str) -> dict[str, Any]:
     automatic = info.get("automatic_captions") or {}
 
     for language in sorted(manual):
+        formats = _normalise_youtube_formats(manual.get(language, []))
         subtitle_tracks.append(
             {
                 "value": f"yt:manual:{language}",
                 "label": f"{language} · creator captions",
                 "language": language,
                 "source": "manual",
-                "formats": [item.get("ext") for item in manual.get(language, []) if item.get("ext")],
+                "formats": formats,
             }
         )
 
     for language in sorted(automatic):
+        formats = _normalise_youtube_formats(automatic.get(language, []))
         subtitle_tracks.append(
             {
                 "value": f"yt:auto:{language}",
                 "label": f"{language} · automatic captions",
                 "language": language,
                 "source": "auto",
-                "formats": [
-                    item.get("ext") for item in automatic.get(language, []) if item.get("ext")
-                ],
+                "formats": formats,
             }
         )
 
@@ -192,6 +216,7 @@ def inspect_youtube(url: str) -> dict[str, Any]:
         "uploader": info.get("uploader") or info.get("channel") or "",
         "duration": _safe_float(info.get("duration")),
         "subtitle_tracks": subtitle_tracks,
+        "http_headers": dict(info.get("http_headers") or {}),
     }
 
 
@@ -240,6 +265,79 @@ def extract_local_subtitle(info: dict[str, Any], track_value: str) -> Path:
     return output
 
 
+def _youtube_track(info: dict[str, Any], track_value: str) -> dict[str, Any]:
+    track = next(
+        (item for item in info.get("subtitle_tracks", []) if item.get("value") == track_value),
+        None,
+    )
+    if not track:
+        raise DubLocalError("The selected YouTube caption track is no longer available.")
+    return track
+
+
+def _preferred_youtube_formats(track: dict[str, Any]) -> list[dict[str, str]]:
+    formats = list(track.get("formats") or [])
+    rank = {ext: index for index, ext in enumerate(YOUTUBE_SUBTITLE_EXTENSIONS)}
+    formats.sort(key=lambda item: rank.get(item.get("ext", ""), len(rank)))
+    return formats
+
+
+def _download_youtube_caption_direct(
+    info: dict[str, Any], track: dict[str, Any], output_dir: Path
+) -> Path | None:
+    formats = _preferred_youtube_formats(track)
+    if not formats:
+        return None
+
+    headers = {
+        "User-Agent": (
+            info.get("http_headers", {}).get("User-Agent")
+            or "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        )
+    }
+    for key, value in (info.get("http_headers") or {}).items():
+        if value:
+            headers[str(key)] = str(value)
+
+    last_429: HTTPError | None = None
+    for candidate in formats:
+        url = candidate.get("url")
+        ext = candidate.get("ext") or "vtt"
+        if not url:
+            continue
+
+        output = output_dir / f"captions.{ext}"
+        delays = (0, *YOUTUBE_RETRY_DELAYS)
+        for attempt, delay in enumerate(delays, start=1):
+            if delay:
+                time.sleep(delay)
+            try:
+                request = Request(url, headers=headers)
+                with urlopen(request, timeout=30) as response:
+                    payload = response.read()
+                if payload:
+                    output.write_bytes(payload)
+                    return output
+            except HTTPError as exc:
+                if exc.code == 429:
+                    last_429 = exc
+                    if attempt < len(delays):
+                        continue
+                    break
+                break
+            except (URLError, TimeoutError):
+                break
+
+    if last_429 is not None:
+        raise DubLocalError(
+            "YouTube temporarily rate-limited subtitle delivery (HTTP 429). "
+            "DubLocal retried with backoff, but YouTube is still refusing this caption request. "
+            "Wait a few minutes and try again. Local transcription will become the automatic fallback in M2."
+        ) from last_429
+    return None
+
+
 def extract_youtube_subtitle(info: dict[str, Any], track_value: str) -> Path:
     if info.get("kind") != "youtube":
         raise DubLocalError("Internal source mismatch: expected YouTube.")
@@ -252,7 +350,13 @@ def extract_youtube_subtitle(info: dict[str, Any], track_value: str) -> Path:
     if source not in {"manual", "auto"}:
         raise DubLocalError("Unknown YouTube caption source.")
 
+    track = _youtube_track(info, track_value)
     output_dir = _new_job_dir("youtube-subtitle")
+
+    direct = _download_youtube_caption_direct(info, track, output_dir)
+    if direct is not None:
+        return direct
+
     options = {
         "quiet": True,
         "no_warnings": True,
@@ -263,10 +367,22 @@ def extract_youtube_subtitle(info: dict[str, Any], track_value: str) -> Path:
         "subtitlesformat": "vtt/best",
         "writesubtitles": source == "manual",
         "writeautomaticsub": source == "auto",
+        "retries": 3,
+        "extractor_retries": 3,
+        "sleep_interval_subtitles": 2,
     }
 
-    with YoutubeDL(options) as ydl:
-        ydl.extract_info(str(info["url"]), download=True)
+    try:
+        with YoutubeDL(options) as ydl:
+            ydl.extract_info(str(info["url"]), download=True)
+    except Exception as exc:
+        message = str(exc)
+        if "429" in message or "Too Many Requests" in message:
+            raise DubLocalError(
+                "YouTube temporarily rate-limited subtitle delivery (HTTP 429). "
+                "Wait a few minutes and retry. Local transcription will become the automatic fallback in M2."
+            ) from exc
+        raise DubLocalError(f"YouTube subtitle extraction failed: {message}") from exc
 
     preferred_suffixes = [".vtt", ".srt", ".ass", ".ttml", ".srv3", ".srv2", ".srv1"]
     candidates = [path for path in output_dir.iterdir() if path.is_file()]
