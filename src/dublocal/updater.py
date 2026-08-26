@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -136,7 +137,8 @@ def format_update_status(status: UpdateStatus) -> str:
         lines.append("[safety] local changes detected · update blocked until they are resolved")
     elif status.diverged:
         lines.append(
-            f"[safety] local branch has diverged · {status.ahead} ahead / {status.behind} behind · manual Git review required"
+            "[safety] local branch has diverged · "
+            f"{status.ahead} ahead / {status.behind} behind · manual Git review required"
         )
     elif status.ahead > 0:
         lines.append(f"[status] local checkout is {status.ahead} commit(s) ahead of GitHub")
@@ -163,7 +165,8 @@ def install_update() -> UpdateResult:
         )
     if status.ahead > 0:
         raise UpdateError(
-            "This checkout contains local commits that are not on GitHub. Automatic update is disabled for safety."
+            "This checkout contains local commits that are not on GitHub. "
+            "Automatic update is disabled for safety."
         )
     if status.behind == 0:
         return UpdateResult(
@@ -209,7 +212,7 @@ def schedule_restart() -> None:
     command = (
         "sleep 1; "
         "DUBLOCAL_LAUNCH_ACTION=restart "
-        f"/bin/zsh {subprocess.list2cmdline([str(launcher)])}"
+        f"/bin/zsh {shlex.quote(str(launcher))}"
     )
     env = os.environ.copy()
     subprocess.Popen(
