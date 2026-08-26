@@ -1,8 +1,8 @@
 # DubLocal architecture
 
-**Current development build: v0.3.0.dev0 / M3 Local Translation.**
+**Current development build: v0.4.0.dev0 / M4 Local Voice.**
 
-DubLocal is intentionally split into replaceable stages. The Gradio UI coordinates work, while media access, transcription, translation, future TTS and rendering remain separate modules.
+DubLocal is split into replaceable stages. The Gradio UI coordinates work, while media access, transcription, translation, TTS and later media rendering remain separate modules.
 
 That separation matters because each stage has different dependencies, licences, failure modes and performance characteristics. It also lets DubLocal reuse compatible resources already present on a Mac without merging unrelated application environments.
 
@@ -23,20 +23,21 @@ Subtitle acquisition
         ↓
 Normalized timed Segment[]
         ↓
-M3 local translation
-  ├─ source → English
-  ├─ English → target
-  └─ source → English → target
+M3 local translation (optional)
         ↓
-Translated timed SRT
+Source or translated SRT
         ↓
-M4 local TTS
+M4 Kokoro TTS
+  ├─ isolated compatible Python runtime
+  ├─ per-segment WAV assets
+  ├─ generation manifest
+  └─ synchronized voice-only WAV
         ↓
-Timing / duration fitting
+M5 timing / duration fitting
         ↓
 Original-audio ducking + speech overlay
         ↓
-Preview / render / export
+Stream-copy/remux or render/export
 ```
 
 ## Design rules
@@ -44,16 +45,17 @@ Preview / render / export
 1. The UI orchestrates jobs but does not implement codecs/model inference itself.
 2. Media input functions return serializable source descriptions used by UI state.
 3. Expensive models are optional. The base application must launch without Whisper, translation or TTS weights installed.
-4. Optional heavy Python stacks are not automatically duplicated if a compatible runtime can be reused safely through an isolated worker process.
+4. Optional heavy Python stacks are not duplicated when a compatible runtime can be reused safely through an isolated worker process.
 5. Virtual-environment `site-packages` directories are never mixed into another application's interpreter.
-6. Shared model caches are preferred for identical pinned snapshots; application-specific registrations remain lightweight and removable.
-7. Every downloadable model needs explicit licence/revision/checksum metadata.
+6. Shared model caches are preferred when the exact compatible assets can be reused.
+7. Every downloadable model needs explicit licence/revision/checksum metadata before packaged distribution.
 8. YouTube access remains separate from local-file processing and never implements DRM/access-control circumvention.
 9. Intermediate outputs live in DubLocal job directories so later stages can reuse them without regenerating unrelated work.
 10. A failed optional backend must not disable simpler workflows.
 11. Expensive fallback actions are explicit; DubLocal does not silently start large downloads or inference.
 12. Subtitle timing is stable data. Translation changes text, not source timestamps.
-13. Normal app updates never overwrite local tracked edits. Repair is a separate, explicit recovery operation with backup and history safeguards.
+13. Normal app updates never overwrite local tracked edits. Repair is a separate recovery operation with backup/history safeguards.
+14. Adding or replacing audio must not imply video re-encoding. M5 prefers video stream-copy whenever the container/codec combination allows it.
 
 ## M1 — media and caption foundation
 
@@ -81,7 +83,7 @@ Integer milliseconds avoid floating-point timing drift. `parse_srt()` and `segme
 
 ## M3 — local subtitle translation
 
-`src/dublocal/translation.py` is the first translation backend. The current route uses two Apache-2.0 Helsinki-NLP OPUS/Marian models:
+`src/dublocal/translation.py` uses two Apache-2.0 Helsinki-NLP OPUS/Marian models:
 
 ```text
 many allowlisted languages → English
@@ -92,69 +94,112 @@ English ↔ another language requires one model. Non-English ↔ non-English tra
 
 Exact Hugging Face revisions containing safetensors weights are pinned and the main weight SHA-256 is verified before registration.
 
-### Shared model storage
+New M3 installs use the normal shared Hugging Face cache and create a lightweight DubLocal registration. Removing the DubLocal registration deliberately does not erase the shared snapshot.
 
-New M3 installs use `huggingface_hub.snapshot_download()` with the normal Hugging Face cache rather than a private `local_dir`. This means the exact same repo/revision snapshot can be reused by multiple compatible local applications.
+Translation can run in DubLocal's own optional runtime or through `src/dublocal/translation_worker.py` under a compatible external Python environment.
 
-After verification, DubLocal creates a lightweight application-data symlink/registration pointing to that snapshot. Removing the model from DubLocal removes the registration/link but intentionally does not erase the shared Hugging Face snapshot. Legacy private DubLocal model folders remain readable for backwards compatibility.
+## Reusable Python runtimes
 
-### Reusable Python runtimes
-
-`src/dublocal/dependencies.py` discovers controlled local resources. It can recognize:
+`src/dublocal/dependencies.py` discovers controlled local resources:
 
 - system executables (`ffmpeg`, `ffprobe`, `whisper-cli`);
 - the standard/shared Hugging Face cache;
 - compatible Python environments in known local application/project locations or explicitly supplied through `DUBLOCAL_EXTERNAL_PYTHONS`.
 
-A Python virtual environment is treated as an isolation boundary. DubLocal never appends another environment's `site-packages` to `sys.path`.
+### macOS venv identity
 
-For M3 translation, if the current DubLocal venv does not contain PyTorch/Transformers/SentencePiece/safetensors but a recognized external Python does, translation can run through `src/dublocal/translation_worker.py`. The worker receives a small JSON request, loads the verified local model, returns translated strings as JSON, and exits. This permits actual dependency reuse without cross-contaminating the two environments.
+A macOS venv commonly contains a `bin/python` symlink pointing to a framework Python binary. Two different venvs may therefore resolve to the same real executable even though running the two symlink paths produces different `sys.prefix`/`site-packages` environments.
 
-If no compatible runtime exists, **Prepare translation** installs the optional translation extra into DubLocal's own venv.
-
-This worker architecture is intended to be reused by M4 Kokoro so an existing compatible Kokoro installation can be used without installing a second copy.
-
-### Translation inference
-
-Direct and worker inference use `AutoTokenizer` and `AutoModelForSeq2SeqLM` with `local_files_only=True`, `trust_remote_code=False` and safetensors. Apple Silicon prefers MPS; if a Marian operation fails on MPS, the pass falls back to CPU.
-
-The current UI allowlist is English, Hungarian, Russian, German, French, Spanish, Italian, Portuguese, Polish, Ukrainian, Serbian and Croatian.
-
-### M3 translated segment view
-
-Translation uses a parallel record rather than mutating source segments:
+Earlier discovery resolved those symlinks and could accidentally collapse separate venvs into one identity. M4 preserves the absolute venv entry-point path without resolving the symlink. This is required for reliable reuse of environments such as:
 
 ```text
-TranslatedSegment
-  index: int
-  start_ms: int
-  end_ms: int
-  source_text: str
-  translated_text: str
+~/dublocal/.venv/bin/python
+~/narroam-studio/.venv/bin/python
 ```
 
-This keeps source text available for side-by-side review and guarantees that translated SRT generation preserves the original timing.
+They may share the same underlying framework Python while still being different package environments.
 
-A future project record can layer speaker/TTS data on top of these primitives:
+## M4 — Kokoro local voice generation
 
-```json
-{
-  "id": "000123",
-  "start_ms": 74220,
-  "end_ms": 77840,
-  "source_language": "en",
-  "source_text": "Where are you going?",
-  "target_language": "de",
-  "target_text": "Wohin gehst du?",
-  "speaker": null,
-  "tts_asset": null,
-  "status": "translated"
-}
+M4 adds `src/dublocal/tts.py` and `src/dublocal/kokoro_worker.py`.
+
+### Runtime policy
+
+The Kokoro runtime requirement is probed as a compatible set of modules (`kokoro`, NumPy, PyTorch and Hugging Face Hub).
+
+Preparation order is:
+
+```text
+compatible existing runtime?
+  ├─ yes → reuse it unchanged through worker process
+  └─ no  → install DubLocal's optional [kokoro] extra
 ```
+
+No external `site-packages` path is appended to DubLocal's interpreter.
+
+### Worker boundary
+
+`kokoro_worker.py` is intentionally self-contained enough to be executed by the selected external Python directly:
+
+```text
+external-python kokoro_worker.py request.json response.json
+```
+
+The request contains the Kokoro language frontend, voice, speed, model repo, output folder and subtitle segment texts. The worker loads Kokoro locally, chooses CUDA/MPS/CPU, falls back from MPS to CPU when necessary, writes one 24 kHz mono PCM WAV per segment, then returns JSON metadata.
+
+The worker writes into DubLocal's own job directory; it does not modify the external application's files or environment.
+
+### Voice-only timeline assembly
+
+M4 keeps the source SRT start times. `tts.py` places each generated segment at its original `start_ms` and builds one voice-only WAV.
+
+A generated voice line can be longer than its subtitle slot. M4 does not hide that. It records:
+
+```text
+voice_duration_ms
+slot_ms
+overflow_ms
+```
+
+If two generated segments overlap, the M4 voice-only preview mixes the overlap rather than shifting the later subtitle off its original start time. M5 uses the recorded overrun information to fit speech more intelligently.
+
+The voice timeline mixer uses a NumPy memory-mapped float buffer so long programs do not require the full output waveform to live in RAM at once.
+
+### M4 outputs
+
+A voice job contains:
+
+```text
+segments/segment-000001.wav
+segments/segment-000002.wav
+...
+voice-<language>-<voice>.wav
+voice-manifest.json
+```
+
+The manifest records runtime identity, device, official model repo, language/frontend, voice, speed, source SRT and per-segment timing/duration data.
+
+### Kokoro language boundary
+
+Official Kokoro frontends exposed by M4 are American English, British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin Chinese.
+
+Translation and TTS capability are separate. A successful translation to Hungarian, Russian or German does not make Kokoro capable of pronouncing that language. DubLocal therefore leaves those targets subtitle-only rather than silently using an incorrect frontend.
+
+## Main / Settings UI split
+
+`src/dublocal/ui.py` keeps the processing path under **Main** and maintenance under **Settings**.
+
+Settings contains:
+
+- **Updates**;
+- **Model Manager** (Whisper, OPUS, Kokoro);
+- **Local Resources**.
+
+The Main tab contains source/caption handling, transcription, translation and M4 voice generation, but not model install/remove operations.
 
 ## Updates, repair and launcher runtime
 
-`src/dublocal/updater.py` now distinguishes three identities:
+`src/dublocal/updater.py` distinguishes three identities:
 
 ```text
 running Python package
@@ -162,21 +207,32 @@ local Git checkout
 official origin/main
 ```
 
-Normal updates verify that `origin` resolves to `ArrowSK/dublocal`, require the `main` branch, allow only clean fast-forwards, refresh the managed editable package and validate its imported version/module path.
+Normal updates verify official origin/main, require a clean fast-forward, refresh the managed editable package and validate its imported version/module path.
 
-**Repair installation** is deliberately separate from normal update. If the managed runtime is stale it can refresh it in place. If tracked source files are modified and the user explicitly permits replacement, repair first writes a binary Git patch to `~/.dublocal/repair-backups/`, then restores tracked files from official `origin/main`, refreshes/verifies the core and schedules a clean restart. It does not delete untracked files or data/model/cache directories, and it refuses to rewrite local commits/diverged history.
+**Repair installation** can back up modified tracked files as a Git patch, restore official tracked source, refresh/verify the core and restart without deleting models, shared caches, generated jobs or untracked user files. It refuses to rewrite local commits/diverged history.
 
-`src/dublocal/launcher_runtime.py` launches Gradio with only DubLocal's generated jobs directory added to Gradio's allowed paths. This permits generated subtitle downloads without exposing arbitrary user directories.
+`src/dublocal/launcher_runtime.py` exposes only DubLocal's generated jobs directory to Gradio's allowed paths so SRT/WAV outputs can be downloaded without exposing arbitrary user directories.
 
-## Still out of scope after M3
+## M5 boundary
+
+M5 begins with the M4 manifest/timeline and adds:
+
+- speech-duration fitting;
+- original-audio ducking/mixing;
+- default **Replace primary audio** mode;
+- optional **Add dubbed audio as second track** mode;
+- language/title/disposition metadata for audio tracks;
+- `-c:v copy` video stream-copy whenever technically compatible;
+- video re-encoding only when the chosen output container/codec combination makes stream-copy impossible, with an explicit user-facing explanation.
+
+True dialogue/source separation is separate from ordinary ducking/overlay and must not be implied until implemented.
+
+## Still out of scope after M4
 
 - OCR for image subtitle streams;
-- local Kokoro TTS generation (M4 next);
 - speaker diarization/multiple voices;
-- dialogue/background separation;
-- speech duration fitting;
-- original-audio ducking and speech overlay;
-- rendered dubbed video;
+- dialogue/background source separation;
+- automatic speech-duration fitting;
+- original-audio ducking/mixing;
+- final remuxed/rendered dubbed media;
 - signed/notarized macOS packaging.
-
-M4 should consume the existing translated/source timeline and reusable-runtime layer rather than reaching back into media acquisition or transcription.

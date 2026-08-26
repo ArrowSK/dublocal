@@ -1,8 +1,8 @@
 # DubLocal troubleshooting
 
-**Applies to current development build v0.3.0.dev0 / M3.** See [CHANGELOG.md](../CHANGELOG.md) for build history.
+**Applies to current development build v0.4.0.dev0 / M4.** See [CHANGELOG.md](../CHANGELOG.md) for build history.
 
-Most DubLocal problems belong to one layer: launcher, source access, subtitles, Whisper, translation, reusable local resources, or updates/repair. Fix the layer that failed; do not delete the whole installation unless there is evidence the whole environment is damaged.
+Most DubLocal problems belong to one layer: launcher, source access, subtitles, Whisper, translation, Kokoro, reusable local resources, or updates/repair. Fix the layer that failed; do not delete the whole installation unless there is evidence the whole environment is damaged.
 
 ## DubLocal.app opens nothing
 
@@ -21,11 +21,11 @@ cd ~/dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-## A generated SRT shows a Gradio file-access error
+## A generated SRT/WAV shows a Gradio file-access error
 
 DubLocal-generated files should live under DubLocal's own jobs cache, which the launcher explicitly exposes to the local Gradio server.
 
-If an older build shows a red Gradio `Error` block after successful transcription, update DubLocal and restart it. This compatibility issue was fixed by allowing only DubLocal's generated jobs directory rather than broad user folders.
+If an old build shows a red Gradio `Error` block after successful generation, update DubLocal and restart it.
 
 ## YouTube returns HTTP 429
 
@@ -37,7 +37,7 @@ If YouTube also rate-limits media delivery, DubLocal will not try to evade the r
 
 ## FFmpeg or ffprobe is missing
 
-DubLocal reuses system/local FFmpeg rather than installing a private copy per feature. Open **Reusable local resources** to see what was detected.
+Open **Settings → Local Resources** to see what was detected.
 
 If FFmpeg is missing, rerun:
 
@@ -54,15 +54,11 @@ The Whisper status box reports this separately from model availability. DubLocal
 
 Rerun the launcher installer and allow the optional Homebrew `whisper-cpp` installation if no copy exists.
 
-## Whisper model missing
+## Whisper model missing or checksum fails
 
-The engine can be installed while no model weights are installed. In **Local transcription · Whisper**, select Tiny/Base/Small and click **Install / verify model**. Base is the normal starting point.
+Use **Settings → Model Manager → Whisper**. Choose Tiny/Base/Small and click **Install / verify model**.
 
-## Whisper model checksum fails
-
-DubLocal deletes a downloaded Whisper model if its checksum differs from the expected upstream hash. Do not rename or force the partial file into place.
-
-Retry later. A repeatable mismatch should be treated as an upstream/model-registry change and reviewed before accepting new weights.
+DubLocal deletes a downloaded Whisper model if its checksum differs from the expected upstream hash. Do not rename or force a partial file into place.
 
 ## Transcription is slow
 
@@ -70,102 +66,148 @@ Long media takes time, especially with larger models. Apple Silicon normally use
 
 Tiny is speed-first; Base is the normal balance; Small trades more time/storage for accuracy.
 
-## Subtitle language says Auto detect after extraction
+## Subtitle language stays Auto detect
 
-DubLocal can infer the language only when the stream/caption metadata maps to the current M3 allowlist.
+DubLocal can infer the language only when stream/caption/Whisper metadata maps to the current allowlist.
 
-If **Local translation → Subtitle language** stays **Auto detect**, choose the correct language manually. Translation deliberately does not guess an unknown source language.
+If **Main → Local translation → Subtitle language** remains **Auto detect**, choose the correct language manually. Translation deliberately does not guess an unknown source language.
 
 ## “Local translation is not prepared yet”
 
-Open **Reusable local resources** first if you are curious what is already present. DubLocal now tries to reuse a compatible translation runtime from a known external local environment before installing another PyTorch/Transformers stack into its own venv.
+Open **Settings → Local Resources** if you want to see what is already available, then use **Settings → Model Manager → OPUS · subtitle translation**.
 
-If no compatible runtime exists, **Prepare translation** installs the optional stack into DubLocal's environment. If installation succeeds but the current process cannot see it immediately, restart DubLocal once and prepare again.
+DubLocal first looks for a compatible external translation runtime. If none exists, preparing translation installs the optional stack into DubLocal's environment.
 
-## Why doesn't DubLocal simply import packages from another app's venv?
+## Translation model missing / duplicate download concern
 
-Because Python virtual environments are dependency-isolation boundaries. Adding another application's `site-packages` to DubLocal's import path can combine incompatible Torch, Transformers or other library versions and break both applications.
-
-Where reuse is supported, DubLocal starts the compatible external Python as a separate worker process. M3 translation already supports this. M4 Kokoro is designed to use the same mechanism.
-
-## Translation model missing
-
-The status panel shows two model roles:
+The two current model roles are:
 
 ```text
 Many languages → English
 English → many languages
 ```
 
-English ↔ another supported language needs one; non-English ↔ non-English needs both because M3 pivots through English.
+English ↔ another supported language needs one. Non-English ↔ non-English needs both because the route pivots through English.
 
-Click **Prepare translation** for the selected route.
+OPUS models use the normal Hugging Face shared cache. If the exact repository/revision snapshot already exists, it is reused instead of storing another full copy.
 
-## “Prepare translation” appears to download a model I already have
+Removing a translation model removes DubLocal's registration/private legacy copy but deliberately does not erase the shared HF snapshot.
 
-M3 uses the normal Hugging Face shared cache. If the **same repository and pinned revision** already exist in that cache, Hugging Face should reuse the local snapshot rather than download/store another full copy.
+## Translation model checksum fails
 
-A similarly named model at a different revision is not treated as interchangeable because DubLocal verifies a specific weight SHA-256. Open **Reusable local resources** to see the shared cache path, and the translation status shows whether a registered model is using the shared HF cache or an older DubLocal-local copy.
+M3/M4 translation uses pinned safetensors revisions and verifies the main weight file with SHA-256. A failed snapshot is not registered for use.
 
-## Translation model download or checksum fails
+Do not bypass a repeatable mismatch; it should be reviewed as an upstream/model-registry change.
 
-M3 uses pinned safetensors revisions and verifies the main weight file with SHA-256. A failed snapshot is not registered for use.
+## Translation is slow or awkward
 
-Do not bypass a repeatable checksum mismatch; it should be reviewed as an upstream/model-registry change.
+The OPUS models are a lightweight local baseline, not human literary translation. Non-English → non-English uses two passes and is slower.
 
-## Removing a translation model did not free all disk space
+Subtitle boundaries stay fixed. That is deliberate because later voice/timing stages depend on a stable timeline.
 
-That can be intentional. New M3 installs register models from the shared Hugging Face cache. **Remove translation models** removes DubLocal's registration/link, but does not delete the shared cache snapshot because another local application may rely on it.
+# Kokoro / M4
 
-Shared-cache cleanup should be handled separately and deliberately, not as a side effect of removing a model from DubLocal.
+## Local Resources says Kokoro is not detected, but another app has Kokoro
 
-## Translation is slow or briefly uses high memory
+M4 fixes a macOS virtualenv-discovery bug where `venv/bin/python` symlinks could be resolved to the same framework Python and different venvs were accidentally treated as one environment.
 
-The OPUS models are local neural translation models. DubLocal loads the required model for a pass and releases it afterward.
+After updating to M4, use **Settings → Local Resources → Rescan local resources**.
 
-Apple Silicon can use MPS. If a Marian operation fails on MPS, DubLocal falls back to CPU. A non-English → non-English route performs two model passes and is therefore slower.
+A compatible environment must provide all of:
 
-## Translation quality is awkward
+```text
+kokoro
+numpy
+torch
+huggingface_hub
+```
 
-M3 is a lightweight local baseline, not human literary translation. Subtitle segments are translated while their timing boundaries stay fixed, which is useful for later dubbing but gives the model limited cross-scene context.
+DubLocal checks known local project/venv locations and optional configured external Python paths. It does not import another app's `site-packages` directly.
 
-Do not change timing just to improve wording. A later editor can support text correction while preserving the source timing model.
+## Why doesn't DubLocal simply import packages from another app's venv?
+
+Because Python virtual environments are dependency-isolation boundaries. Mixing Torch/Kokoro/Transformers packages from another venv can destabilize both applications.
+
+DubLocal instead runs the compatible external Python as a separate worker process. The worker receives a small JSON request, writes local WAV files/results, and exits.
+
+## “Kokoro is not prepared yet”
+
+Open **Settings → Model Manager → Kokoro · voice generation**.
+
+Choose a language/voice and click **Prepare / verify Kokoro**.
+
+DubLocal first reuses a compatible existing runtime. Only if none exists does it install the optional Kokoro extra into DubLocal's own venv.
+
+Preparing may download missing official model/voice assets into the shared Hugging Face cache.
+
+## Kokoro says the language is unsupported
+
+That is intentional rather than a bug. Official Kokoro exposed in M4 supports:
+
+- American/British English;
+- Spanish;
+- French;
+- Hindi;
+- Italian;
+- Japanese;
+- Brazilian Portuguese;
+- Mandarin Chinese.
+
+Hungarian, Russian and German can be translated by OPUS but are not official Kokoro languages. DubLocal will not silently use the wrong pronunciation frontend.
+
+## Portuguese became Brazilian Portuguese
+
+Kokoro's official Portuguese frontend is Brazilian Portuguese (`pt-BR`). M4 makes that explicit. Generic Portuguese translation remains a subtitle capability; voice generation is labelled **Portuguese · Brazil**.
+
+## Kokoro generation is slow on first use
+
+The first preparation/generation can be slower because the runtime loads PyTorch/Kokoro and may fetch missing model/voice assets into the shared HF cache.
+
+Apple Silicon can use MPS. If the Kokoro/PyTorch combination exposes MPS but an operation fails, the worker retries on CPU rather than crashing the whole DubLocal process.
+
+## Some voice lines overlap in the M4 WAV
+
+M4 preserves every subtitle **start time**. It does not yet speed up, shorten or rewrite long synthetic speech.
+
+If a generated line is longer than its subtitle window, the **Generated voice timeline** table shows an overrun such as `+0.85s`. When two lines overlap, the M4 voice-only preview mixes them instead of shifting the later subtitle off its timestamp.
+
+M5 adds duration fitting. This overlap is therefore diagnostic information, not the final dubbing behavior.
+
+## Why is the M4 output voice-only?
+
+M4 is the TTS milestone. It deliberately does not alter the source soundtrack.
+
+M5 adds original-audio ducking/mixing and stream-copy media output. Compatible video will not be re-encoded just because DubLocal adds/replaces audio.
+
+# Updates / repair
 
 ## The updater reports modified local program files
 
-Normal update is intentionally blocked so your local tracked edits are not overwritten.
+Normal update is blocked so your local tracked edits are not overwritten.
 
-If those edits are accidental or the installation needs recovery, open **DubLocal updates & repair** and use **Repair installation**. When tracked program files need replacement, tick the confirmation first.
+Use **Settings → Updates → Repair installation** only when those edits are accidental or the installation needs recovery. If tracked files need replacement, tick the confirmation first.
 
-Repair saves the current tracked Git diff as a patch under:
+Repair saves the current tracked Git diff under:
 
 ```text
 ~/.dublocal/repair-backups/
 ```
 
-It then restores official tracked program files from `ArrowSK/dublocal` `main`, refreshes the managed Python core, verifies the imported version/path and schedules a clean restart.
-
-Models, shared caches, generated jobs and untracked files are not deleted by this repair path.
+It restores official tracked program files, refreshes the managed Python core, verifies the imported version/path and schedules a clean restart. Models, shared caches, generated jobs and untracked files are not deleted.
 
 ## The updater says the branch diverged or is ahead of GitHub
 
-Automatic update **and repair** are disabled because the checkout contains Git history that DubLocal must not discard automatically.
+Automatic update and repair are disabled because the checkout contains Git history DubLocal must not discard automatically.
 
-This needs manual Git review. Repair does not use force-reset to erase local commits or resolve diverged history.
+This needs manual Git review. Repair does not force-reset local commits.
 
 ## Update check says current, but the running UI/version is old
 
-The current updater compares the running package version with the local checkout version. If Git is already current but the managed Python core is stale, it reports a repair condition rather than incorrectly saying everything is healthy.
-
-Use **Repair installation**; the core will be refreshed and import-checked before restart.
+Use **Settings → Updates → Repair installation**. The updater compares the running package with the local checkout and can repair a stale managed Python core.
 
 ## Update installed, but the UI still looks old
 
 Click **Restart DubLocal**. If an older process is still responding, launch `DubLocal.app` and choose **Stop All & Launch**.
-
-## I removed a model by mistake
-
-Nothing else is damaged. Choose the model/route again and prepare/install it from the relevant panel. For translation, a still-present shared Hugging Face snapshot can be reused.
 
 ## Still stuck?
 

@@ -21,6 +21,19 @@ def _repository_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _identity_path(path: Path) -> Path:
+    """Return an absolute path without resolving virtualenv symlinks.
+
+    On macOS, ``venv/bin/python`` is commonly a symlink to the same framework
+    interpreter used by several environments. Resolving that symlink erases the
+    virtualenv identity and makes two different environments look identical.
+    Executing the symlink path itself is what activates the correct venv prefix,
+    so discovery must preserve it.
+    """
+
+    return Path(os.path.abspath(os.path.expanduser(str(path))))
+
+
 def _python_from_entrypoint(name: str) -> Path | None:
     """Resolve the Python interpreter behind a console script when possible."""
 
@@ -40,7 +53,7 @@ def _python_from_entrypoint(name: str) -> Path | None:
     # does not identify a separate environment and is therefore ignored.
     if not raw or raw.startswith("/usr/bin/env ") or " " in raw:
         return None
-    candidate = Path(raw).expanduser()
+    candidate = _identity_path(Path(raw))
     return candidate if candidate.is_file() else None
 
 
@@ -98,14 +111,11 @@ def _candidate_pythons() -> list[tuple[Path, str]]:
     seen: set[Path] = set()
     result: list[tuple[Path, str]] = []
     for path, label in candidates:
-        try:
-            resolved = path.expanduser().resolve()
-        except OSError:
+        identity = _identity_path(path)
+        if identity in seen or not identity.is_file() or not os.access(identity, os.X_OK):
             continue
-        if resolved in seen or not resolved.is_file() or not os.access(resolved, os.X_OK):
-            continue
-        seen.add(resolved)
-        result.append((resolved, label))
+        seen.add(identity)
+        result.append((identity, label))
     return result
 
 
@@ -142,14 +152,14 @@ def discover_python_runtime(
     allow_current: bool = True,
 ) -> PythonRuntime | None:
     required = tuple(dict.fromkeys(str(item) for item in required_modules if item))
-    current = Path(sys.executable).resolve()
+    current = _identity_path(Path(sys.executable))
     for python, label in _candidate_pythons():
-        if not allow_current and python == current:
+        if not allow_current and _identity_path(python) == current:
             continue
         found = _probe_python(python, required)
         if found is None or set(found) != set(required):
             continue
-        return PythonRuntime(python=python, label=label, modules=found)
+        return PythonRuntime(python=_identity_path(python), label=label, modules=found)
     return None
 
 
@@ -188,16 +198,19 @@ def local_resource_status() -> str:
     cache_state = "available" if hf_cache.exists() else "will be created on first Hugging Face model use"
     lines.append(f"[huggingface cache] {cache_state} · {hf_cache}")
 
-    kokoro = discover_python_runtime(("kokoro",), allow_current=True)
+    kokoro = discover_python_runtime(
+        ("kokoro", "numpy", "torch", "huggingface_hub"), allow_current=True
+    )
     if kokoro:
+        current = _identity_path(Path(sys.executable))
         location = (
             "current DubLocal venv"
-            if kokoro.python.resolve() == Path(sys.executable).resolve()
+            if _identity_path(kokoro.python) == current
             else f"{kokoro.label} · {kokoro.python}"
         )
         lines.append(f"[kokoro] reusable runtime detected · {location}")
     else:
-        lines.append("[kokoro] no reusable Python runtime detected yet · M4 can install or link one later")
+        lines.append("[kokoro] no compatible reusable runtime detected · Settings → Model Manager can prepare one")
 
     lines.append(
         "[policy] reuse existing executables, shared model caches and compatible external runtimes when safe"

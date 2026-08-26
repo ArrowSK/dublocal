@@ -82,6 +82,20 @@
       "weight_size": "310 MiB",
       "sha256": "dd4c874ecad8853d94415c21937c7e35ea09cc22f178b63821294ed010121436",
       "role": "English to allowlisted multilingual target languages"
+    },
+    {
+      "id": "kokoro-82m-official",
+      "backend": "kokoro",
+      "upstream": "hexgrad/Kokoro-82M",
+      "license": "Apache-2.0",
+      "commercial_use": true,
+      "redistribution": true,
+      "bundled": false,
+      "download_on_demand": true,
+      "storage_policy": "shared_huggingface_cache",
+      "remove_policy": "never_delete_shared_cache_from_dublocal",
+      "revision_policy": "development build follows official upstream repository; pin immutable revision before first packaged release",
+      "role": "M4 local text-to-speech model and official voice assets"
     }
   ]
 }
