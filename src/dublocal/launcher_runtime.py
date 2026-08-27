@@ -6,8 +6,13 @@ from pathlib import Path
 from platformdirs import user_cache_dir
 
 from .job_cache import prune_job_cache
-from .m52 import install_runtime_refinements
-from .ui_v050 import MATRIX_CSS, build_app
+from .m53 import install_runtime_refinements
+from .transcription_v053 import install_transcription_refinements
+
+# Install the transcription wrapper before the UI imports app.py's transcription symbol.
+install_transcription_refinements()
+
+from .ui_v053 import MATRIX_CSS, build_app
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -33,8 +38,9 @@ def main() -> None:
     # user documents. Prune stale/oversized jobs before a new session starts.
     prune_job_cache()
 
-    # Keep the stable M5 public API but install the current timing fitter before any
-    # export job can run.
+    # Keep the stable M5/M5.1 public APIs while installing the current timing and
+    # dialogue-mix implementation. These DSP operations are intentionally lightweight
+    # enough for M1-class Macs and require no additional AI model.
     install_runtime_refinements()
 
     demo = build_app()
