@@ -1,221 +1,167 @@
 # DubLocal troubleshooting
 
-**Applies to current development build v0.4.0.dev0 / M4.** See [CHANGELOG.md](../CHANGELOG.md) for build history.
+**Applies to v0.4.1.dev0 / M4 + M3.1 Contextual Translation.**
 
-Most DubLocal problems belong to one layer: launcher, source access, subtitles, Whisper, translation, Kokoro, reusable local resources, or updates/repair. Fix the layer that failed; do not delete the whole installation unless there is evidence the whole environment is damaged.
+Most DubLocal failures belong to one layer. Fix that layer rather than reinstalling everything.
 
 ## DubLocal.app opens nothing
 
-First use **Stop DubLocal.app**, then reopen **DubLocal.app** and choose **Stop All & Launch**.
+Use **Stop DubLocal.app**, reopen **DubLocal.app**, then choose **Stop All & Launch**.
 
-The launcher log is:
+Launcher log:
 
 ```text
 ~/.dublocal/logs/dublocal.log
 ```
 
-If the log says the Python environment is missing, rerun the installer from the repository:
+If the managed environment is missing, rerun:
 
 ```bash
 cd ~/dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-## A generated SRT/WAV shows a Gradio file-access error
+## Generated SRT/WAV shows a Gradio file-access error
 
-DubLocal-generated files should live under DubLocal's own jobs cache, which the launcher explicitly exposes to the local Gradio server.
+Update DubLocal and restart. Generated outputs must live under DubLocal's own jobs cache, which is explicitly allowed by the local Gradio runtime.
 
-If an old build shows a red Gradio `Error` block after successful generation, update DubLocal and restart it.
+## YouTube HTTP 429
 
-## YouTube returns HTTP 429
+YouTube is temporarily rate-limiting caption/media delivery. DubLocal retries caption retrieval but does not evade the restriction.
 
-`429 Too Many Requests` means YouTube is temporarily rate-limiting the request.
+Use **Transcribe locally** if captions remain blocked. If YouTube also refuses audio, wait or use a local copy you have the right to process.
 
-For captions DubLocal retries with backoff. If YouTube still refuses them, use **Transcribe locally**. That fallback requests audio only after you explicitly start it.
+# Transcription
 
-If YouTube also rate-limits media delivery, DubLocal will not try to evade the restriction. Wait and retry later or use a local copy you are allowed to process.
+## FFmpeg / ffprobe / whisper.cpp missing
 
-## FFmpeg or ffprobe is missing
+Check **Settings → Local Resources** first.
 
-Open **Settings → Local Resources** to see what was detected.
+The macOS installer can offer Homebrew packages for missing media/transcription tools. Whisper models are separate from the `whisper-cli` executable and live under **Settings → Model Manager → Whisper**.
 
-If FFmpeg is missing, rerun:
+## Whisper checksum failure
 
-```bash
-cd ~/dublocal
-zsh scripts/macos/install-launcher.sh
-```
-
-If Homebrew is present, the installer can offer `brew install ffmpeg`.
-
-## whisper.cpp engine missing
-
-The Whisper status box reports this separately from model availability. DubLocal reuses `whisper-cli` wherever the supported local paths expose it.
-
-Rerun the launcher installer and allow the optional Homebrew `whisper-cpp` installation if no copy exists.
-
-## Whisper model missing or checksum fails
-
-Use **Settings → Model Manager → Whisper**. Choose Tiny/Base/Small and click **Install / verify model**.
-
-DubLocal deletes a downloaded Whisper model if its checksum differs from the expected upstream hash. Do not rename or force a partial file into place.
+DubLocal rejects a model whose checksum does not match the registered upstream hash. Retry the install; do not force an unknown/partial file into place.
 
 ## Transcription is slow
 
-Long media takes time, especially with larger models. Apple Silicon normally uses whisper.cpp's Metal path. Intel Macs deliberately use a conservative CPU path.
+Tiny prioritizes speed, Base is the normal starting point, and Small trades more time/storage for accuracy. Apple Silicon normally benefits from whisper.cpp's Metal path; Intel uses CPU.
 
-Tiny is speed-first; Base is the normal balance; Small trades more time/storage for accuracy.
+# Contextual translation — recommended
 
-## Subtitle language stays Auto detect
+## “Contextual translation is not prepared”
 
-DubLocal can infer the language only when stream/caption/Whisper metadata maps to the current allowlist.
+Open:
 
-If **Main → Local translation → Subtitle language** remains **Auto detect**, choose the correct language manually. Translation deliberately does not guess an unknown source language.
+**Settings → Model Manager → Contextual translation · Qwen3 4B → Prepare / verify contextual translation**
 
-## “Local translation is not prepared yet”
+DubLocal will reuse an existing `llama.cpp` command if possible. Otherwise it can install `llama.cpp` through Homebrew, then download/register the pinned ~2.5 GB Qwen3 model in the shared Hugging Face cache.
 
-Open **Settings → Local Resources** if you want to see what is already available, then use **Settings → Model Manager → OPUS · subtitle translation**.
+## Model download is large
 
-DubLocal first looks for a compatible external translation runtime. If none exists, preparing translation installs the optional stack into DubLocal's environment.
+That is expected for Contextual quality. The Q4_K_M GGUF is about 2.5 GB and is downloaded only once when explicitly prepared. The shared Hugging Face cache is used so another compatible local application can reuse the same snapshot.
 
-## Translation model missing / duplicate download concern
+If storage matters more than quality, choose **Fast legacy · OPUS** explicitly instead.
 
-The two current model roles are:
+## Qwen checksum failure
 
-```text
-Many languages → English
-English → many languages
-```
+DubLocal pins an immutable upstream revision and SHA-256. If the file hash does not match, it is not registered.
 
-English ↔ another supported language needs one. Non-English ↔ non-English needs both because the route pivots through English.
+Do not bypass this check. A repeatable mismatch means the registry/upstream state needs review.
 
-OPUS models use the normal Hugging Face shared cache. If the exact repository/revision snapshot already exists, it is reused instead of storing another full copy.
+## `llama.cpp` missing after preparation
 
-Removing a translation model removes DubLocal's registration/private legacy copy but deliberately does not erase the shared HF snapshot.
+Check **Settings → Local Resources**. The panel should show `llama-cli` or `llama ... cli`.
 
-## Translation model checksum fails
+If Homebrew reports success but the app still does not see the executable, restart DubLocal and rescan resources. If it remains missing, include the exact Model Manager error when reporting the problem.
 
-M3/M4 translation uses pinned safetensors revisions and verifies the main weight file with SHA-256. A failed snapshot is not registered for use.
+## Contextual translation is slower than OPUS
 
-Do not bypass a repeatable mismatch; it should be reviewed as an upstream/model-registry change.
+Expected. Qwen3 is doing generative translation with context instead of a small sentence-level Marian pass.
 
-## Translation is slow or awkward
+The quality mode is optimized for dialogue coherence rather than minimum latency. OPUS remains available when speed is the priority.
 
-The OPUS models are a lightweight local baseline, not human literary translation. Non-English → non-English uses two passes and is slower.
+## Why does a long movie use more memory/context?
 
-Subtitle boundaries stay fixed. That is deliberate because later voice/timing stages depend on a stable timeline.
+This is intentional. In v0.4.1.dev0 the input context budget grows with programme duration from roughly 4,096 tokens toward a 24,576-token cap.
+
+The model does not receive the entire movie repeatedly. DubLocal combines:
+
+- nearby source dialogue;
+- sampled programme-wide dialogue;
+- recent translated lines as rolling memory.
+
+The status box shows the active budget before translation starts.
+
+## Translation output is missing/duplicated/misaligned
+
+Contextual translation uses constrained JSON with subtitle IDs. DubLocal validates that every target ID appears exactly once.
+
+If this validation fails, the job stops rather than writing a shifted subtitle file. Report the exact error; do not switch off alignment checks.
+
+## Translation is still awkward
+
+Context greatly improves the information available to the model, but local machine translation is not guaranteed to equal a professional human translator.
+
+Review the side-by-side preview before generating speech or publishing subtitles. If a consistent failure occurs, save a small lawful example of the source/translation and report it; it can be used to improve prompting/context planning.
+
+# Fast legacy OPUS
+
+## Why does OPUS produce literal or strange dialogue?
+
+The legacy engine translates subtitle texts sentence-by-sentence. That is the reason it is no longer the default quality mode.
+
+Use **Contextual quality** for normal dialogue work. Keep OPUS for quick/low-storage jobs.
+
+## OPUS model missing
+
+Use **Settings → Model Manager → Fast legacy translation · OPUS** and install the required direction(s). Non-English ↔ non-English uses two local passes through English.
 
 # Kokoro / M4
 
-## Local Resources says Kokoro is not detected, but another app has Kokoro
+## Another app has Kokoro but DubLocal does not detect it
 
-M4 fixes a macOS virtualenv-discovery bug where `venv/bin/python` symlinks could be resolved to the same framework Python and different venvs were accidentally treated as one environment.
+Use **Settings → Local Resources → Rescan local resources** after updating. A reusable environment must expose `kokoro`, NumPy, PyTorch and Hugging Face Hub.
 
-After updating to M4, use **Settings → Local Resources → Rescan local resources**.
+DubLocal does not import another application's `site-packages`; it invokes that environment's Python as an isolated worker.
 
-A compatible environment must provide all of:
+## Kokoro language unsupported
 
-```text
-kokoro
-numpy
-torch
-huggingface_hub
-```
+Official Kokoro coverage exposed by DubLocal includes American/British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin Chinese.
 
-DubLocal checks known local project/venv locations and optional configured external Python paths. It does not import another app's `site-packages` directly.
+Hungarian, Russian and German can be translated but are not official Kokoro voice languages. This is a TTS limitation, not a translation failure.
 
-## Why doesn't DubLocal simply import packages from another app's venv?
+## Voice lines overlap
 
-Because Python virtual environments are dependency-isolation boundaries. Mixing Torch/Kokoro/Transformers packages from another venv can destabilize both applications.
-
-DubLocal instead runs the compatible external Python as a separate worker process. The worker receives a small JSON request, writes local WAV files/results, and exits.
-
-## “Kokoro is not prepared yet”
-
-Open **Settings → Model Manager → Kokoro · voice generation**.
-
-Choose a language/voice and click **Prepare / verify Kokoro**.
-
-DubLocal first reuses a compatible existing runtime. Only if none exists does it install the optional Kokoro extra into DubLocal's own venv.
-
-Preparing may download missing official model/voice assets into the shared Hugging Face cache.
-
-## Kokoro says the language is unsupported
-
-That is intentional rather than a bug. Official Kokoro exposed in M4 supports:
-
-- American/British English;
-- Spanish;
-- French;
-- Hindi;
-- Italian;
-- Japanese;
-- Brazilian Portuguese;
-- Mandarin Chinese.
-
-Hungarian, Russian and German can be translated by OPUS but are not official Kokoro languages. DubLocal will not silently use the wrong pronunciation frontend.
-
-## Portuguese became Brazilian Portuguese
-
-Kokoro's official Portuguese frontend is Brazilian Portuguese (`pt-BR`). M4 makes that explicit. Generic Portuguese translation remains a subtitle capability; voice generation is labelled **Portuguese · Brazil**.
-
-## Kokoro generation is slow on first use
-
-The first preparation/generation can be slower because the runtime loads PyTorch/Kokoro and may fetch missing model/voice assets into the shared HF cache.
-
-Apple Silicon can use MPS. If the Kokoro/PyTorch combination exposes MPS but an operation fails, the worker retries on CPU rather than crashing the whole DubLocal process.
-
-## Some voice lines overlap in the M4 WAV
-
-M4 preserves every subtitle **start time**. It does not yet speed up, shorten or rewrite long synthetic speech.
-
-If a generated line is longer than its subtitle window, the **Generated voice timeline** table shows an overrun such as `+0.85s`. When two lines overlap, the M4 voice-only preview mixes them instead of shifting the later subtitle off its timestamp.
-
-M5 adds duration fitting. This overlap is therefore diagnostic information, not the final dubbing behavior.
-
-## Why is the M4 output voice-only?
-
-M4 is the TTS milestone. It deliberately does not alter the source soundtrack.
-
-M5 adds original-audio ducking/mixing and stream-copy media output. Compatible video will not be re-encoded just because DubLocal adds/replaces audio.
+M4 preserves subtitle start times and reports overruns rather than silently altering timing. M5 adds duration fitting. Overlap in the M4 voice-only preview is diagnostic, not final dubbing behavior.
 
 # Updates / repair
 
-## The updater reports modified local program files
+## Updater reports modified tracked files
 
-Normal update is blocked so your local tracked edits are not overwritten.
+Normal update refuses to overwrite them. Use **Repair installation** only when the edits are accidental or the installation needs recovery. DubLocal saves a patch backup first when replacement is authorized.
 
-Use **Settings → Updates → Repair installation** only when those edits are accidental or the installation needs recovery. If tracked files need replacement, tick the confirmation first.
-
-Repair saves the current tracked Git diff under:
+Backups:
 
 ```text
 ~/.dublocal/repair-backups/
 ```
 
-It restores official tracked program files, refreshes the managed Python core, verifies the imported version/path and schedules a clean restart. Models, shared caches, generated jobs and untracked files are not deleted.
+## Branch is ahead/diverged
 
-## The updater says the branch diverged or is ahead of GitHub
+Automatic update/repair will not rewrite local Git history. This needs manual Git review.
 
-Automatic update and repair are disabled because the checkout contains Git history DubLocal must not discard automatically.
+## Update installed but UI is old
 
-This needs manual Git review. Repair does not force-reset local commits.
-
-## Update check says current, but the running UI/version is old
-
-Use **Settings → Updates → Repair installation**. The updater compares the running package with the local checkout and can repair a stale managed Python core.
-
-## Update installed, but the UI still looks old
-
-Click **Restart DubLocal**. If an older process is still responding, launch `DubLocal.app` and choose **Stop All & Launch**.
+Click **Restart DubLocal**. If necessary reopen the launcher and choose **Stop All & Launch**.
 
 ## Still stuck?
 
-When reporting a problem, the most useful information is:
+Provide:
 
-- the exact text in DubLocal's nearest status box;
-- whether the source is YouTube or a local file;
-- which action you clicked immediately before the error;
-- for launcher/startup problems only, the relevant tail of `~/.dublocal/logs/dublocal.log`.
+- exact text from the nearest DubLocal status box;
+- source type (YouTube/local);
+- action clicked immediately before the error;
+- launcher log tail only for startup/launcher failures.
 
-Avoid posting copyrighted media, private file paths you do not want public, account cookies or authentication tokens in a GitHub issue.
+Do not post account cookies, authentication tokens, copyrighted media you cannot share, or private paths you do not want public.
