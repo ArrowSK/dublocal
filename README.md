@@ -78,25 +78,17 @@ The actual llama.cpp context/KV allocation is reduced with the profile as well. 
 
 Main shows only **Recommended for this Mac · Lightweight / Balanced / Best quality**. The detailed reason, model and context allocation live in the collapsed engine details and Model Manager.
 
-Contextual translation uses:
+Contextual translation uses nearby dialogue, sampled programme-wide context, recent accepted translations as terminology/style memory, discourse-aware gender/reference handling, idiom/phraseologism translation by meaning/register, metaphor preservation without invented imagery, and an optional senior review pass on the Best-quality profile.
 
-- nearby dialogue;
-- sampled programme-wide context that grows with programme length;
-- recent approved translations as terminology/style memory;
-- discourse-aware gender/reference handling;
-- idiom/phraseologism translation by meaning and register rather than word-for-word substitution;
-- metaphor preservation without inventing new imagery;
-- on the Best-quality profile, a second senior review pass.
-
-DubLocal also validates IDs, timestamps, runtime leakage and wrong-script contamination before writing a translated SRT.
+DubLocal validates IDs, timestamps, runtime leakage and wrong-script contamination before writing a translated SRT.
 
 Automatic captions are not ground truth. If the Original column is already wrong, use local Whisper—especially **Accurate · Large v3 Turbo Q5** for songs, accents and difficult audio—before judging the translator.
 
 ## Automatic voice matching
 
-The automatic voice option is deliberately lightweight. It decodes the original primary audio to a low-rate local analysis stream, estimates the dominant vocal fundamental inside each subtitle window, and maps lower/higher vocal ranges to the available Kokoro voice presets for the selected language.
+The automatic voice option is deliberately lightweight. It decodes the original primary audio to a low-rate local analysis stream, estimates the dominant vocal fundamental inside each subtitle window, and maps lower/higher vocal ranges to available Kokoro voice presets for the selected language.
 
-This does **not** identify a person or infer gender identity. It is an acoustic preset-selection heuristic intended to avoid obvious male/female-style voice mismatches. If a subtitle line contains overlapping speakers, that line still receives one TTS voice. Languages that expose only one Kokoro voice simply use that voice.
+This does **not** identify a person or infer gender identity. It is an acoustic preset-selection heuristic intended to avoid obvious lower/higher voice mismatches. If a subtitle line contains overlapping speakers, that line still receives one TTS voice. Languages that expose only one Kokoro voice simply use that voice.
 
 The same Kokoro model/pipeline stays loaded while segment voice presets change, so automatic two-voice material does not require a second TTS model in memory.
 
@@ -110,33 +102,25 @@ Closed-caption cues remain visible in SRT/VTT because they are useful to viewers
 [LAUGHTER]
 ```
 
-They are not sent to the translator as dialogue and are not spoken by Kokoro. Inline cues are also stripped only from the temporary TTS input, so `[LAUGHS] Hello` becomes spoken `Hello` while the subtitle remains unchanged.
+They are not sent to the translator as dialogue and are not spoken by Kokoro. Inline cues are stripped only from the temporary TTS input, so `[LAUGHS] Hello` becomes spoken `Hello` while the subtitle remains unchanged.
 
 ## Dubbed-media export
 
-Export deliberately separates audio processing from video encoding.
-
-### Stronger dialogue suppression
-
 Professional dubbing normally works from a dialogue-free Music & Effects stem. Consumer YouTube/local files normally contain a married mix, so DubLocal cannot remove only the original human voice without source separation.
 
-v0.5.1 therefore uses the source subtitle timeline as the suppression guide. Original audio stays strongly ducked across each complete source dialogue/singing window—even when the translated TTS line is shorter—rather than jumping back to full volume as soon as generated speech stops. Closely spaced windows are merged to reduce pumping.
+v0.5.1 therefore uses the source subtitle timeline as the suppression guide. Original audio stays strongly ducked across each complete source dialogue/singing window—even when translated TTS is shorter—rather than jumping back to full volume as soon as generated speech stops. Closely spaced windows are merged to reduce pumping.
 
-This remains **ducking + overlay**, not true dialogue/music/effects separation. A future optional separation backend can improve this further without changing the export architecture.
+This remains **ducking + overlay**, not true dialogue/music/effects separation.
 
-### Replace primary audio — default
+**Replace primary audio — default:** DubLocal creates a new mixed soundtrack and makes it the default audio track. Additional original audio tracks are preserved where possible.
 
-DubLocal creates a new mixed soundtrack. The DubLocal mix becomes the default audio track. Additional original audio tracks are preserved where possible.
-
-### Add dubbed audio as second track
-
-All original audio tracks remain untouched and a DubLocal mixed track is appended as another selectable audio stream. It receives language/title metadata and is not forced to default.
+**Add dubbed audio as second track:** all original audio tracks remain untouched and the DubLocal mixed track is appended as another selectable stream with language/title metadata.
 
 ### Original + translated subtitles are packaged, not burned
 
 When generated source and translated SRTs are available, both are embedded as selectable subtitle streams. VLC and similar players can turn them on/off independently. No subtitle is burned into the image.
 
-MKV can also preserve existing source subtitle streams. MP4 packages the generated SRT tracks as `mov_text`; this changes the subtitle stream format only, not the video.
+MKV can preserve existing source subtitle streams. MP4 packages the generated SRT tracks as `mov_text`; this changes the subtitle stream format only, not the video.
 
 ### Video quality
 
@@ -150,13 +134,7 @@ For local files, **Original** keeps the video bit-for-bit with `-c:v copy`. Sele
 
 ### Timing fitting
 
-DubLocal never truncates spoken words. For a voice segment that runs past its subtitle window it:
-
-1. borrows real silence before the next spoken segment when available;
-2. if still needed, applies modest tempo increase up to 1.25×;
-3. reports any line that still cannot fit safely.
-
-### Filenames
+DubLocal never truncates spoken words. For a voice segment that runs past its subtitle window it borrows real silence before the next spoken segment, applies modest tempo increase up to 1.25× only if needed, and reports any line that still cannot fit safely.
 
 Dubbed media uses predictable names such as:
 
@@ -173,10 +151,6 @@ Track Title.dub.en-US.mp4
 
 **Local Resources** — reports reusable FFmpeg/ffprobe, whisper.cpp, llama.cpp, shared Hugging Face cache and compatible isolated Python runtimes.
 
-## Reuse first, install second
-
-DubLocal reuses system executables and shared Hugging Face model assets when safe. It never merges another application's Python environment into its own; compatible Python backends are invoked as isolated worker processes.
-
 ## Temporary files
 
 Temporary YouTube media, voice-analysis audio, transcription WAVs, working subtitles, llama-server logs, TTS segments, fitted voice audio, dubbed mixes and remux outputs live under:
@@ -186,10 +160,6 @@ Temporary YouTube media, voice-analysis audio, transcription WAVs, working subti
 ```
 
 Normal launch removes jobs older than 24 hours and caps this temporary cache at 4 GiB by pruning the oldest jobs first. Persistent model assets and the shared Hugging Face cache are not treated as temporary.
-
-## Kokoro coverage
-
-Official Kokoro language frontends currently exposed include American/British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin Chinese. Translation can support languages that Kokoro cannot voice; DubLocal does not silently use the wrong pronunciation frontend.
 
 ## Install on macOS
 
@@ -218,8 +188,8 @@ The installer creates `~/Applications/DubLocal.app` and `~/Applications/Stop Dub
 ```text
 M1   Source + existing captions                           ✅
 M2   Local transcription / Whisper                        ✅
-M3   Local subtitle translation                          ✅
-M4   Kokoro local voice generation                       ✅
+M3   Local subtitle translation                           ✅
+M4   Kokoro local voice generation                        ✅
 M5   Timing + soundtrack mix + track-aware export         ✅ current
 M6   Rich media preview / optional source separation      planned
 M7   Signed/notarized Mac packaging                       planned
