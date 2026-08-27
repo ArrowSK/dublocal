@@ -39,7 +39,7 @@ def _run(request: dict) -> dict:
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
     language_code = str(request["lang_code"])
-    voice = str(request["voice"])
+    default_voice = str(request["voice"])
     speed = float(request.get("speed", 1.0))
     repo_id = str(request.get("repo_id") or "hexgrad/Kokoro-82M")
     output_dir = Path(request["output_dir"])
@@ -56,9 +56,6 @@ def _run(request: dict) -> dict:
             device=device,
         )
     except Exception:
-        # Some Kokoro/PyTorch combinations can expose an MPS device but fail
-        # while constructing the pipeline. CPU is slower but is the safe local
-        # fallback and keeps the source application's environment untouched.
         if device != "mps":
             raise
         device = "cpu"
@@ -73,10 +70,12 @@ def _run(request: dict) -> dict:
     for item in request.get("segments", []):
         index = int(item["index"])
         text = str(item.get("text") or "").strip()
+        voice = str(item.get("voice") or default_voice)
         if not text:
             generated.append(
                 {
                     "index": index,
+                    "voice": voice,
                     "path": None,
                     "samples": 0,
                     "duration_ms": 0,
@@ -94,7 +93,6 @@ def _run(request: dict) -> dict:
         except Exception:
             if device != "mps":
                 raise
-            # Retry the segment on CPU if a later MPS operation is unsupported.
             device = "cpu"
             pipeline = KPipeline(
                 lang_code=language_code,
@@ -116,6 +114,7 @@ def _run(request: dict) -> dict:
         generated.append(
             {
                 "index": index,
+                "voice": voice,
                 "path": str(output),
                 "samples": sample_count,
                 "duration_ms": int(round(sample_count * 1000 / sample_rate)),
@@ -127,7 +126,7 @@ def _run(request: dict) -> dict:
         "device": device,
         "sample_rate": sample_rate,
         "repo_id": repo_id,
-        "voice": voice,
+        "voice": default_voice,
         "speed": speed,
         "segments": generated,
     }
@@ -144,7 +143,7 @@ def main() -> int:
         request = json.loads(request_path.read_text(encoding="utf-8"))
         response = _run(request)
         code = 0
-    except Exception as exc:  # worker boundary: serialize the failure to DubLocal
+    except Exception as exc:
         response = {
             "ok": False,
             "error": f"{type(exc).__name__}: {exc}",
