@@ -1,17 +1,21 @@
 # DubLocal UX principles
 
-This document captures the product-facing UX rules for `v0.5.0.dev0`.
+This document captures the product-facing UX rules for `v0.5.3.dev0`.
 
-1. **Main is a workflow, not a control panel.** The primary path is `1 Source → 2 Subtitles → 3 Translate → 4 Voice-over → 5 Export`. Detailed engine/model state belongs in Settings or collapsed diagnostics.
-2. **Progressive disclosure.** A user can stop after subtitles, after translation, after voice generation or after final export. Later stages must never be required just to retrieve an earlier useful output.
-3. **Persistent stage state.** Source loading, transcription, translation, voice generation and export keep a clear success/failure status on the same card. Transient browser notifications are supplemental only.
-4. **One visual language.** Green remains the only product accent. Framework/browser orange accents and unrelated warning colors should not dominate the interface.
-5. **Visible version.** Settings always shows the running DubLocal version near the top.
-6. **Long operations report progress.** Downloads, transcription, contextual translation, TTS and M5 render/remux operations expose percentage/ETA when the underlying operation provides meaningful measurable progress. Short atomic operations should not invent fake precision.
-7. **Automatic choices must remain explainable.** Hardware-aware model recommendations and source-language detection should make the normal path simpler, while collapsed details expose what was detected and why.
-8. **Names should look like user files, not cache artifacts.** Downloads use media-derived filenames plus language suffixes instead of generic names such as `captions.srt`.
-9. **Subtitle semantics and speech semantics are different.** Caption cues remain in subtitle files but are silently excluded from TTS input. The UI should not require users to edit SRTs merely to stop Kokoro reading `[MUSIC]` aloud.
-10. **Defaults should be safe and practical.** M5 defaults to a dubbed primary mix and recommends MKV. Video is stream-copied when possible; DubLocal does not silently trigger a long video transcode to satisfy MP4.
-11. **Advanced diagnostics are available but not dominant.** Executable paths, model hashes, context allocation and raw activity consoles remain accessible without occupying the normal workflow.
-12. **No feature loss for simplification.** Reducing visual clutter must not remove existing valid controls or break working earlier stages.
-13. **A failure belongs to one layer.** Translation failure should not hide a completed subtitle file; M5 failure should not invalidate the generated voice WAV; a model-manager problem should not prevent source inspection.
+1. **Main is a workflow, not a control panel.** The primary path is `1 Source → 2 Subtitles → 3 Translate → 4 Voice-over → 5 Export`. Model/runtime detail belongs in Settings or collapsed diagnostics.
+2. **Progressive disclosure.** A user can stop after subtitles, translation, voice generation or final export. Later stages must never be required to retrieve an earlier useful output.
+3. **Packaging is independent from dubbing.** Export must support original media + source subtitles without requiring translation or TTS.
+4. **Persistent stage state.** Source loading, transcription, translation, voice generation and export keep clear success/failure state on the same stage card. Toasts are supplemental.
+5. **One visual language.** Green remains the product accent; framework defaults should not reintroduce unrelated orange states.
+6. **Visible version.** Settings shows the actual running DubLocal version near the top.
+7. **Long operations report meaningful progress.** Downloads, transcription, translation, TTS and render/remux expose percentage/ETA when the underlying operation permits it. Do not invent fake precision.
+8. **Automatic choices must remain explainable.** Hardware-aware model recommendations, Auto source-language resolution and Auto voice matching simplify the normal path while collapsed details explain the decision.
+9. **Names should look like user files.** Downloads use source-derived filenames plus language/dub suffixes rather than cache-oriented names.
+10. **Subtitle semantics and speech semantics differ.** Caption cues stay in subtitle files but are silently excluded from TTS input.
+11. **Defaults should protect quality and hardware.** Local Original video stays stream-copy; low-memory Macs get conservative model/context/recovery limits; no heavy source-separation model is introduced silently.
+12. **Uncertainty beats fabricated content.** ASR recovery may leave a gap when evidence is weak; the UI should report the safeguard rather than quietly inserting plausible text.
+13. **Stable perceived loudness matters.** A dubbed soundtrack should not become dramatically louder merely because no DubLocal line is active at that moment.
+14. **Timing should follow the source window.** Variable per-line speed is preferable to a single global TTS speed, but pathological stretching should be surfaced rather than hidden.
+15. **Advanced diagnostics are available but not dominant.** Paths, hashes, context allocation and raw consoles remain accessible without occupying the normal workflow.
+16. **No feature loss for simplification.** Reducing visual clutter must not remove valid capabilities or break earlier stages.
+17. **A failure belongs to one layer.** Translation failure must not hide a completed subtitle file; export failure must not invalidate a voice WAV; model management must not block source inspection.

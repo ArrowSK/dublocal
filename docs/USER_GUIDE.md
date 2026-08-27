@@ -1,10 +1,8 @@
 # DubLocal user guide
 
-**Current development build: v0.5.2.dev0 — Transcription + Timing Reliability**
+**Current development build: v0.5.3.dev0 — M5 Stabilization**
 
-DubLocal is meant to feel like a small Mac utility, not an AI console. The normal workflow stays on **Main**. Updates, models and reusable local resources stay under **Settings**.
-
-There is no packaged DMG/GitHub Release yet. Development builds update from official `main` inside the app.
+DubLocal is designed to feel like a small Mac utility rather than an AI control panel. The normal workflow stays on **Main**; maintenance lives under **Settings**.
 
 # Main
 
@@ -12,226 +10,176 @@ There is no packaged DMG/GitHub Release yet. Development builds update from offi
 
 Choose **YouTube** or **Local file**, then click **Load source**.
 
-The Source card stays visible and confirms what is loaded, for example:
+A persistent card confirms readiness, for example:
 
 `✓ Loaded · OK · YouTube · Title · 6:15 · 2 caption tracks`
 
-For a local file, DubLocal inspects the streams with ffprobe. For YouTube, the first load inspects metadata and captions without downloading the full video.
+YouTube inspection does not download the full video at this stage. Local files are inspected with ffprobe.
 
 ## 2 · Subtitles
 
-Subtitles are a complete output. Translation is optional.
+Subtitles are a complete output. You never need to translate or dub just to get an SRT.
 
-Choose an existing text subtitle/caption track and click **Use existing subtitles**, or open the Whisper section and click **Transcribe locally**.
-
-The persistent status confirms the result, for example:
-
-`✓ Transcribed · OK · 34 timed segments · en · SRT ready to download`
-
-### Automatic language identification
-
-When Whisper detects a supported language, DubLocal carries that language into **3 · Translate → From** automatically. Existing subtitle-track language metadata is used the same way.
-
-DubLocal normalizes both ISO codes such as `en` and labels such as `English`. Loading a new source clears the previous job's remembered language.
-
-If the language genuinely cannot be identified, DubLocal leaves **From** at Auto and asks you to choose it instead of guessing.
-
-### Anti-hallucination speech detection
-
-Whisper can occasionally invent speech over instrumental intros, silence or other non-vocal material. v0.5.2 uses the official whisper.cpp **Silero VAD v6.2.0** auxiliary speech detector when the installed `whisper-cli` supports it.
-
-The VAD asset is tiny (about 0.9 MiB), local, MIT licensed and downloaded on demand. It limits Whisper to detected speech regions instead of continuously decoding the whole soundtrack. DubLocal also limits long-form text carry-over and uses a slightly stricter no-speech threshold, which reduces self-reinforcing repeated phrases.
-
-This is especially relevant to music videos: an instrumental intro should normally stay silent in the transcript instead of producing plausible-sounding invented dialogue. If the local whisper.cpp build is too old for VAD, transcription still works with the conservative decoder settings, but updating whisper.cpp is recommended.
-
-### Download format and filenames
-
-SRT is the default. VTT and TXT are also available. Changing format reuses the existing timeline; transcription does not run again.
-
-Files exposed for download use the loaded media title/filename and a language suffix:
+Use an existing text caption track or **Transcribe locally**. The result appears immediately as a downloadable SRT/VTT/TXT with a source-derived filename such as:
 
 ```text
 My Movie.en.srt
-My Movie.es.vtt
-Interview.hu.txt
+Interview.hu.vtt
 ```
 
-Translated subtitles use the target language, for example `My Movie.ru.srt`.
+### Language detection
 
-### Whisper models
+Whisper/track metadata is carried into **Translate → From** where possible. If **From = Auto** remains selected, contextual translation can identify the dominant subtitle language with the same local Qwen runtime before translating.
 
-- **Base · 142 MiB** — normal default.
-- **Small · 466 MiB** — stronger but slower.
-- **Accurate · Large v3 Turbo Q5 · 547 MiB** — preferred for songs, accents, noisy material and obviously damaged automatic captions.
+Loading a new source clears the previous job's language state.
 
-Install optional Whisper models under **Settings → Model Manager → Whisper**. The small VAD speech-detector asset is prepared automatically on demand and appears in the Whisper status block.
+### Whisper model choice
 
-YouTube automatic captions are not ground truth. If the Original column already contains nonsense, improve the source transcript first rather than expecting the translator to reconstruct missing words.
+- **Base · 142 MiB** — practical normal default.
+- **Small · 466 MiB** — stronger, slower.
+- **Accurate · Large v3 Turbo Q5 · 547 MiB** — preferred for songs, accents, noisy audio and poor automatic captions.
+
+### Anti-ghosting and missing words
+
+Whisper can fail in opposite directions: invent speech or miss difficult words. v0.5.3 keeps the anti-hallucination policy conservative and adds targeted recovery rather than globally loosening the decoder.
+
+DubLocal can:
+
+- use Silero VAD for compatible ordinary-speech paths;
+- disable rolling text context for the Accurate music profile so one bad lyric cannot seed a long repetition loop;
+- detect severe near-duplicate subtitle storms and isolate/recheck them;
+- suppress a severe range if an independent retry remains untrustworthy;
+- selectively recheck sparse lines and short internal gaps;
+- accept missing-word recovery only when **two isolated no-context passes agree closely**;
+- reject candidates that merely repeat a neighbouring subtitle.
+
+On Apple Silicon below 12 GiB, additional recovery is capped at 3 regions / 24 seconds. DubLocal prefers an uncertain gap over invented dialogue.
 
 ## 3 · Translate
 
-The normal choice is **Recommended for this Mac · Lightweight / Balanced / Best quality**.
-
-DubLocal detects Mac architecture and memory locally and chooses a conservative Qwen3/llama.cpp profile. Model details stay collapsed so Main remains simple.
-
-Current defaults:
+The normal choice is **Recommended for this Mac**.
 
 ```text
-Apple Silicon < 12 GB     Qwen3 4B · single pass · 8k input cap
-Apple Silicon 12–23 GB    Qwen3 8B · single pass · 16k input cap
-Apple Silicon 24 GB+      Qwen3 8B · review on · up to 24k input
-Intel < 24 GB             Qwen3 4B · smaller context
-Intel 24 GB+              Qwen3 8B · reduced context · single pass
+Apple Silicon <12 GB      Qwen3 4B · single pass · 8k
+Apple Silicon 12–23 GB    Qwen3 8B · single pass · 16k
+Apple Silicon 24 GB+      Qwen3 8B · review · up to 24k
+Intel <24 GB              Qwen3 4B · smaller context
+Intel 24 GB+              Qwen3 8B · reduced context
 ```
 
-The llama.cpp runtime context itself is reduced with the profile, not only the prompt length.
+The llama.cpp runtime allocation scales with the recommendation too; this prevents an 8 GB M1 from reserving an unnecessarily large KV cache.
 
-Contextual translation uses nearby dialogue, sampled programme-wide context and recent accepted translations. The prompt/review explicitly checks:
+Contextual translation uses neighbouring dialogue, programme-wide context and prior accepted translations. Its prompt/review specifically covers reference/gender when supported by context, idioms and phraseology by meaning/register, metaphors, recurring terminology, slang, jokes and profanity.
 
-- pronouns and who is speaking to whom;
-- grammatical gender only where context supports it;
-- recurring names and terminology;
-- idioms and phraseological expressions by meaning/register, not word-for-word substitution;
-- metaphors and imagery without flattening or inventing them;
-- recurring phrases/refrains consistently;
-- slang, jokes and profanity at the source register.
-
-Standalone caption cues such as `[MUSIC]` bypass translation and remain unchanged. DubLocal also validates subtitle IDs/timestamps, runtime leakage and unexpected writing-system contamination before writing the translated SRT.
+Standalone accessibility tags such as `[MUSIC]` remain unchanged. Translation output is checked for subtitle-ID/timestamp integrity, runtime leakage and wrong-script contamination.
 
 ## 4 · Voice-over
 
-Choose **Translated subtitles** or **Source subtitles**, then generate a Kokoro voice track.
+Choose Source or Translated subtitles and generate a Kokoro voice track.
 
-### Automatic voice matching — default
+### Auto voice — default
 
-The normal Voice selection is **Auto · match original vocal range**.
+**Auto · match original vocal range** performs lightweight source-audio F0 analysis and chooses lower/higher Kokoro presets per subtitle segment.
 
-DubLocal performs a lightweight local acoustic analysis of the source audio inside subtitle windows. It estimates whether each segment sits in a lower or higher vocal range and chooses an appropriate Kokoro preset for that segment.
+It does not load two TTS models. One Kokoro pipeline remains loaded while voice presets change. This is acoustic range matching, not speaker identification or gender-identity classification.
 
-This is deliberately lightweight:
+### Caption tags are silent
 
-- no second TTS model is loaded;
-- no diarization or source-separation model is downloaded;
-- the same Kokoro language pipeline stays loaded while voice presets change;
-- mixed lower/higher material can therefore use two contrasting voices without doubling TTS memory.
-
-This is acoustic preset matching, not speaker identification and not an inference of anyone's gender identity. If two people overlap inside one subtitle line, that line still receives one TTS voice. Manual voice selection remains available.
-
-### Bracketed cues are silent
-
-Subtitle files keep accessibility cues such as:
+The subtitle file remains intact, but the temporary TTS timeline removes cues:
 
 ```text
-[MUSIC]
-[APPLAUSE]
-[LAUGHS] Hello.
+[MUSIC]          → no speech
+[LAUGHS] Hello   → speaks “Hello”
 ```
-
-Voice generation uses a temporary speech-only timeline. Tag-only rows produce no speech; `[LAUGHS] Hello.` speaks only `Hello.`. The actual subtitle file remains unchanged.
 
 ## 5 · Export
 
-After generating the voice track, open **5 · Export**.
+### Replace primary audio — default
 
-### Audio track
+Creates the DubLocal mix as the default audio stream. Additional original audio tracks are retained where possible.
 
-**Replace primary audio · default**
+### Add dubbed audio as second track
 
-DubLocal creates a mixed dubbed soundtrack and makes it the primary/default audio stream. Additional original audio tracks are retained where possible.
+Keeps original audio tracks untouched and adds DubLocal as another selectable stream.
 
-**Add dubbed audio as second track**
+### Package original + subtitles · no dub
 
-All original audio tracks remain untouched and the DubLocal mix is appended as another selectable stream with language/title metadata.
+Use this when you want a normal media file with subtitles but no translation/dub embedded.
 
-### Stronger original-dialogue suppression
+This mode:
 
-Professional dubbing normally uses a dialogue-free Music & Effects stem. Ordinary YouTube/local files usually contain a married mix, so DubLocal cannot perfectly remove only the original human voice without source separation.
+- keeps original audio untouched;
+- embeds the current source/transcribed SRT as a selectable track;
+- does not add the translated subtitle track;
+- does not add a DubLocal audio track;
+- keeps local Original video as stream-copy by default.
 
-The **source subtitle timeline** guides suppression. Original audio stays strongly reduced across each complete source dialogue/singing window, including gaps where the translated TTS line has already finished. Nearby windows are merged to reduce pumping.
+### Stable soundtrack loudness
 
-This is stronger ducking/overlay, not a claim of professional M&E separation. The original dialogue may still be faintly audible in difficult mixes.
+A married consumer soundtrack cannot provide a perfect dialogue-free M&E stem. DubLocal therefore uses lightweight attenuation rather than claiming source separation.
 
-### Original + translated subtitles are embedded by default
+v0.5.3 keeps the original programme at a stable reduced bed level across the dubbed output, then attenuates it further through source dialogue/singing subtitle windows. Gentle compression/limiting prevents the soundtrack from suddenly becoming extremely loud when a DubLocal line ends.
 
-When generated source and translated SRTs exist, both are packaged as selectable subtitle tracks. They are **not burned into the video**.
+### Per-line timing
 
-- MKV preserves source subtitle streams where possible and adds DubLocal's generated tracks.
-- MP4 packages generated SRT tracks as `mov_text`.
+Every generated voice segment is measured against its subtitle window. DubLocal can chain legal FFmpeg `atempo` filters to achieve an effective **0.30×–2.50×** correction range. A second small correction pass handles duration rounding when the spoken end still misses the target by more than about 25 ms.
 
-Players such as VLC can enable/disable each subtitle track independently.
+A small onset cushion remains so synthetic speech does not consistently jump in ahead of the source. Subtitle timestamps themselves are never moved.
+
+Pathological stretches are reported rather than forced.
+
+### Subtitle tracks
+
+Normal dubbed exports embed generated original + translated SRTs as selectable tracks when both exist. They are not burned into the image.
+
+MKV can also preserve source subtitle streams. MP4 converts generated SRT tracks to `mov_text` when compatible.
 
 ### Video quality
 
 **Original / best available** is the default.
 
-For YouTube you can choose a maximum quality: 2160p, 1440p, 1080p, 720p or 480p. DubLocal downloads the best source at or below that height and then stream-copies the selected video during final remux.
+For YouTube, 2160p / 1440p / 1080p / 720p / 480p is a source-quality ceiling; the selected stream is then copied during final remux.
 
-For local files, **Original** keeps the video bit-for-bit with stream-copy. Selecting a lower resolution is an explicit opt-in to H.264 VideoToolbox re-encoding. DubLocal does not upscale a lower-resolution source merely because you selected a higher option.
+For local files, Original means `-c:v copy`. Choosing a lower resolution explicitly opts into H.264 VideoToolbox encoding. A higher option never forces an upscale.
 
-### Container
-
-**MKV · recommended** is the safest choice for mixed video/audio/subtitle codecs and multiple tracks.
-
-MP4 is available when the requested streams can be packaged compatibly. DubLocal does not silently start a long video transcode merely to satisfy MP4.
-
-### Variable timing fitting
-
-v0.5.2 fits each generated voice segment independently to its subtitle window instead of using one fixed TTS speed and only correcting overflows.
-
-For a normal line DubLocal calculates the required FFmpeg `atempo` factor from the generated WAV duration and the subtitle timecode. Short translated speech can be slowed; long speech can be accelerated. A small onset cushion prevents the synthetic line from consistently sounding slightly early, while the target remains the subtitle end time.
-
-Tempo changes are limited to 0.5×–2.0×. More extreme stretching is reported instead of forced because it would usually sound worse than leaving a residual timing mismatch. Subtitle timestamps themselves are not changed.
-
-### Output filename
-
-Dubbed media is named predictably:
-
-```text
-My Movie.dub.es.mkv
-Interview.dub.en-US.mp4
-```
+**MKV · recommended** is the safest container for mixed codecs and multiple tracks.
 
 # Settings
 
 ## Updates
 
-Use **Check for updates → Install update → Restart DubLocal**.
+Use **Check for updates → Install update → Restart DubLocal**. Updates require a clean fast-forward from official `main`.
 
-Normal updates require a clean fast-forward from official `ArrowSK/dublocal` `main`. **Repair installation** can save a patch backup of modified tracked files, restore official source and refresh the managed Python environment while preserving models, caches and jobs.
+**Repair installation** can save a patch backup, restore official tracked code and refresh the managed environment while preserving models/caches/jobs.
 
 ## Model Manager
 
-**Whisper** — install only the transcription models you need. The Whisper block also reports the auxiliary Silero VAD speech detector.
-
-**Contextual translation** — prepares the hardware-appropriate local Qwen model and llama.cpp runtime.
-
-**Fast legacy OPUS** — smaller/faster sentence-level translation; never a silent fallback from contextual translation.
-
-**Kokoro** — reuses compatible external Kokoro runtimes through an isolated worker rather than merging Python environments.
+- Whisper transcription models and auxiliary speech detector.
+- Hardware-aware Qwen contextual translation.
+- Optional small/fast legacy OPUS.
+- Kokoro voice generation/reusable runtime.
 
 ## Local Resources
 
-Shows reusable FFmpeg/ffprobe, whisper.cpp, llama.cpp, shared Hugging Face cache and compatible external Python runtimes.
+Shows reusable FFmpeg/ffprobe, whisper.cpp, llama.cpp, shared Hugging Face cache and compatible isolated Python runtimes.
 
 # Temporary files
 
-Working data lives under:
+Working files live under:
 
 ```text
 ~/Library/Caches/DubLocal/jobs/
 ```
 
-This includes temporary YouTube media, voice-analysis audio, transcription WAVs, working subtitles, llama-server logs, Kokoro segments, timing-fitted audio, dubbed mixes and remux outputs.
+Normal launch removes jobs older than 24 hours and caps the cache at 4 GiB, oldest first. Persistent AI models/shared Hugging Face assets are excluded.
 
-Normal launch removes jobs older than 24 hours and caps the temporary cache at 4 GiB, oldest-first. Persistent model assets/shared Hugging Face cache are not deleted by this policy.
+# Diagnosing quality
 
-# Quality expectations
+Keep the layers separate:
 
-DubLocal aims for strong practical local output, not a guarantee of professional-human translation/dubbing quality. Keep the pipeline layers separate when diagnosing quality:
+1. transcription may be wrong or incomplete;
+2. translation may be semantically/stylistically wrong;
+3. voice choice/style may be wrong;
+4. timing/mixing can be wrong even when the text is correct.
 
-1. source recognition can be wrong;
-2. translation can be semantically/stylistically wrong;
-3. TTS voice/style can be wrong;
-4. timing/mixing can be technically imperfect even when the text is correct.
-
-For troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for stage-specific checks.

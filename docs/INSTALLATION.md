@@ -1,16 +1,20 @@
 # Installing DubLocal on macOS
 
-**Current development build: v0.5.2.dev0 — Transcription + Timing Reliability**
+**Current development build: v0.5.3.dev0 — M5 Stabilization**
 
-DubLocal currently uses a Git checkout as its application source, but after first setup it behaves like a normal local Mac utility: launch **DubLocal.app**, update/repair inside the app, and install optional models only when you need them.
+DubLocal currently runs from a Git checkout, but after the first setup ordinary use is through the native **DubLocal.app** launcher. Updates, repair and optional models are managed inside the app.
 
 There is no packaged DMG/GitHub Release yet.
 
+## Requirements
+
+- macOS 13+
+- Apple Silicon or Intel
+- Python 3.11+ (the installer can bootstrap it)
+- FFmpeg/ffprobe
+- optional whisper.cpp, llama.cpp and AI model weights depending on the features you use
+
 ## First installation
-
-DubLocal currently targets macOS 13+ on Apple Silicon and Intel.
-
-Open Terminal once:
 
 ```bash
 git clone https://github.com/ArrowSK/dublocal.git
@@ -25,137 +29,118 @@ The installer creates:
 ~/Applications/Stop DubLocal.app
 ```
 
-It can bootstrap Python 3.11+ and offer FFmpeg/whisper.cpp through Homebrew when required. It does not silently download optional heavy AI model weights.
+It can offer Homebrew installation for required native tools. Heavy optional AI models are not silently bundled or downloaded.
 
-After installation, ordinary use is through **DubLocal.app**.
+## Reuse-first policy
 
-## What DubLocal reuses
+Open **Settings → Local Resources** to see what DubLocal is reusing. The application prefers:
 
-DubLocal follows a reuse-first policy:
-
-- existing FFmpeg/ffprobe executables;
+- existing FFmpeg/ffprobe;
 - existing `whisper-cli`;
-- existing compatible llama.cpp executables;
-- shared Hugging Face model cache;
-- compatible external Python runtimes such as Kokoro, through isolated worker processes.
+- compatible llama.cpp executables;
+- the shared Hugging Face cache;
+- compatible external Kokoro Python runtimes through an isolated worker process.
 
-Python virtual environments are never merged and another application's `site-packages` is never injected into DubLocal.
+DubLocal never merges virtual environments or injects another application's `site-packages` into its own interpreter.
 
-Open **Settings → Local Resources** to see what is being reused.
-
-## Models installed only on request
+## Model Manager
 
 ### Whisper
 
-Open **Settings → Model Manager → Whisper**.
+Base is the normal starting model. **Accurate · Large v3 Turbo Q5 · 547 MiB** is the stronger option for songs, accents and difficult/noisy audio.
 
-Tiny, Base, Small and optional Accurate Large-v3-Turbo-Q5 are available. Base remains the normal starting point; Accurate is intended for songs, accents and difficult/noisy speech.
-
-v0.5.2 also uses the official whisper.cpp **Silero VAD v6.2.0** auxiliary speech detector when the installed `whisper-cli` supports VAD. This is a tiny ~0.9 MiB MIT-licensed supporting model, not another ASR model. DubLocal downloads it on demand, pins it to the upstream conversion revision and verifies its SHA-256 before use. If it cannot be downloaded while offline, transcription still works with conservative decoder settings.
+The tiny whisper.cpp Silero VAD asset may be prepared on demand for supported speech-oriented paths. v0.5.3 does not rely on VAD alone: the Accurate music profile has separate no-context/repetition protection and targeted two-pass recovery for suspicious sparse/gap regions.
 
 ### Contextual translation
 
-Open **Settings → Model Manager → Contextual translation** and click **Prepare / verify contextual translation**.
-
-DubLocal detects the Mac hardware and prepares only its recommended profile:
+**Settings → Model Manager → Contextual translation → Prepare / verify** installs only the hardware-appropriate Qwen model/profile:
 
 ```text
-Apple Silicon < 12 GB     Qwen3 4B · 8k input cap
+Apple Silicon <12 GB      Qwen3 4B · 8k input cap
 Apple Silicon 12–23 GB    Qwen3 8B · 16k input cap
-Apple Silicon 24 GB+      Qwen3 8B · review on · up to 24k input
-Intel < 24 GB             Qwen3 4B · smaller context
+Apple Silicon 24 GB+      Qwen3 8B · review · up to 24k
+Intel <24 GB              Qwen3 4B · smaller context
 Intel 24 GB+              Qwen3 8B · reduced context
 ```
 
-The actual llama.cpp runtime context allocation scales with this profile too. This matters particularly on low-memory Apple Silicon.
-
-Approximate contextual model sizes:
-
-- Qwen3 4B Q4_K_M — 2.5 GB.
-- Qwen3 8B Q4_K_M — 5.03 GB.
-
-Both are downloaded only when needed, pinned/checksum-verified and stored through the shared Hugging Face cache. There is no cloud translation fallback.
-
-### Fast legacy translation
-
-OPUS remains an explicit smaller/faster sentence-level option under **Fast legacy translation · OPUS**.
+The runtime KV/context allocation scales too; this is important for 8 GB M1 systems.
 
 ### Kokoro
 
-Open **Settings → Model Manager → Kokoro**. DubLocal reuses a compatible external Kokoro environment first. Only if no reusable environment exists does it prepare another local runtime.
+DubLocal first reuses a compatible isolated Kokoro runtime if one is already available. Automatic lower/higher vocal-range matching changes voice presets per segment without loading a second TTS model.
 
-The automatic voice matcher does not install or load a second TTS model. It performs a lightweight local acoustic analysis and can switch Kokoro voice presets per subtitle segment while the same Kokoro language pipeline remains loaded.
+## v0.5.3 has no new heavy model dependency
 
-## Export has no new heavy AI model dependency
+The new stabilization work is intentionally M1-friendly:
 
-The export path uses FFmpeg/ffprobe plus the existing voice output. Automatic original-vocal-range matching also uses FFmpeg + NumPy only; no diarization or source-separation model is downloaded.
+- stable soundtrack loudness and timing fit use FFmpeg DSP;
+- subtitle-only packaging is remuxing;
+- smarter missing-word recovery reuses the selected Whisper model only for short suspicious ranges;
+- on Apple Silicon below 12 GiB, extra ASR recovery is capped at 3 regions / 24 seconds per job.
 
-Export can:
+There is no hidden second full-media transcription pass.
 
-- fit each generated voice segment to its subtitle time window with variable local tempo;
-- strongly suppress the original soundtrack across timed dialogue/singing windows;
-- replace the primary audio or append a second dubbed track;
-- embed generated original and translated subtitles as selectable streams;
-- stream-copy the video where compatible;
-- choose a lower YouTube source resolution before download without local video encoding;
-- optionally downscale a local video only when the user explicitly selects a lower output resolution.
+## Export and recoding policy
 
-For local downscaling DubLocal uses FFmpeg's Apple VideoToolbox H.264 encoder. **Original / best available** remains the no-video-recode default.
+**Original / best available** remains the default.
 
-MKV is the recommended container. MP4 is used only when the selected streams can be packaged compatibly; DubLocal does not silently start a video transcode merely to satisfy MP4.
+For local files, Original uses video stream-copy. Selecting a lower resolution explicitly opts into Apple VideoToolbox H.264 encoding. Audio/subtitle changes alone never imply a video transcode.
+
+For YouTube, a selected maximum resolution constrains source acquisition before final stream-copy.
+
+Export modes include:
+
+- Replace primary audio;
+- Add dubbed audio as another track;
+- **Package original + subtitles · no dub**.
+
+MKV is recommended for multi-track output. MP4 is available for compatible combinations.
 
 ## Updating
 
-Open **Settings → Updates** and use:
+Use:
 
-**Check for updates → Install update → Restart DubLocal**
+**Settings → Updates → Check for updates → Install update → Restart DubLocal**
 
-Normal updates accept only a clean fast-forward from official `ArrowSK/dublocal` `main`. They do not overwrite tracked local edits or rewrite divergent Git history.
+Normal updates accept only a clean fast-forward from official `ArrowSK/dublocal` `main` and do not overwrite tracked local edits.
 
 ## Repair installation
 
-Use **Repair installation** when the checkout or managed Python environment is inconsistent.
+**Repair installation** can save a patch backup of tracked changes and restore the official application core without deleting models, shared caches, generated jobs or untracked user files.
 
-If tracked files were modified, DubLocal can save the diff as a patch under:
+Patch backups live under:
 
 ```text
 ~/.dublocal/repair-backups/
 ```
 
-then restore official source and refresh the Python core. Models, shared caches, generated jobs and untracked files are preserved.
+## Local services and paths
 
-## Launcher details
-
-DubLocal listens only on the local machine at:
+DubLocal listens only on:
 
 ```text
 http://127.0.0.1:7861
 ```
 
-`Stop DubLocal.app` stops the service. After an update the launcher can perform **Stop All & Launch**.
+Contextual translation may temporarily start a loopback-only llama-server on an ephemeral port.
 
-Contextual translation may also create a temporary loopback-only llama-server on `127.0.0.1` with an ephemeral port for the duration of a translation job.
-
-## Where files live
+Typical paths:
 
 ```text
-~/dublocal/                         application Git checkout
+~/dublocal/                         Git checkout
 ~/.dublocal/logs/                   launcher logs
-~/.dublocal/repair-backups/         repair patch backups
-~/Library/.../DubLocal/models/      app-specific model registrations, including Whisper/VAD assets
-~/.cache/huggingface/hub/           default shared Hugging Face cache
-~/Library/Caches/.../DubLocal/jobs/ generated/intermediate job files
+~/.dublocal/repair-backups/         repair patches
+~/.cache/huggingface/hub/           shared HF cache
+~/Library/Caches/DubLocal/jobs/     generated/intermediate jobs
 ```
 
-The jobs cache includes temporary source media, voice-analysis PCM, timing-fitted voice segments, dubbed audio mixes, generated subtitle tracks and remuxed outputs in addition to transcription/translation/TTS intermediates.
+Exact app/model locations may use `platformdirs`.
 
-Normal startup removes job folders older than 24 hours and caps this temporary cache at 4 GiB. Persistent models/shared Hugging Face assets are outside that lifecycle.
-
-Exact paths use `platformdirs`; Hugging Face cache environment variables are respected.
+The jobs cache is disposable: normal startup removes jobs older than 24 hours and caps it at 4 GiB. Persistent model assets and shared Hugging Face files are not part of this cleanup.
 
 ## Older-build recovery
 
-If the installed build is too old to use the current updater:
+Only if the in-app updater is too old to function:
 
 ```bash
 cd ~/dublocal
@@ -163,6 +148,6 @@ git pull
 zsh scripts/macos/install-launcher.sh
 ```
 
-Once the current updater is present, normal maintenance should happen inside DubLocal.
+For normal maintenance use the in-app updater/repair flow.
 
-If something fails, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) before deleting models or rebuilding everything.
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) before deleting models or rebuilding the installation.

@@ -1,5 +1,7 @@
 # M5.3 stabilization notes
 
+**Current development build: v0.5.3.dev0 — M5 Stabilization**
+
 This stabilization layer keeps the existing DubLocal workflow and public M5/M5.1 APIs. It addresses issues found in full end-to-end music-video tests without introducing a heavy source-separation dependency.
 
 ## Dubbed soundtrack balance
