@@ -75,7 +75,8 @@ def test_add_mode_keeps_original_audio_and_adds_dublocal_track(monkeypatch, tmp_
     assert "0:a?" in maps
     assert "1:a:0" in maps
     assert result.output_audio_tracks == 3
-    assert result.output_path.name == "Movie.dub.es.mkv"
+    # Local output naming follows the actual source filename, including its case.
+    assert result.output_path.name == "movie.dub.es.mkv"
 
 
 def test_mp4_stream_copy_failure_recommends_mkv(monkeypatch, tmp_path: Path):
