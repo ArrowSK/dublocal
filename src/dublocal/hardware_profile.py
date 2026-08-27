@@ -11,6 +11,7 @@ class HardwareProfile:
     architecture: str
     memory_bytes: int | None
     cpu_name: str
+    system_name: str = "Darwin"
 
     @property
     def memory_gib(self) -> float | None:
@@ -20,7 +21,17 @@ class HardwareProfile:
 
     @property
     def apple_silicon(self) -> bool:
-        return self.architecture.lower() in {"arm64", "aarch64"} and "apple" in self.cpu_name.lower()
+        return (
+            self.system_name == "Darwin"
+            and self.architecture.lower() in {"arm64", "aarch64"}
+        )
+
+    @property
+    def intel_mac(self) -> bool:
+        return (
+            self.system_name == "Darwin"
+            and self.architecture.lower() in {"x86_64", "amd64"}
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +89,7 @@ def detect_hardware_profile() -> HardwareProfile:
         architecture=architecture,
         memory_bytes=_physical_memory_bytes(),
         cpu_name=cpu_name,
+        system_name=platform.system() or "unknown",
     )
 
 
@@ -93,10 +105,8 @@ def recommend_translation_profile(
     hardware = profile or detect_hardware_profile()
     memory = hardware.memory_gib
     memory_text = f"{memory:.0f} GB" if memory is not None else "unknown RAM"
-    apple_silicon = hardware.apple_silicon
-    architecture = hardware.architecture
 
-    if apple_silicon and memory is not None and memory < 12:
+    if hardware.apple_silicon and memory is not None and memory < 12:
         return TranslationRecommendation(
             tier="light",
             label="Lightweight",
@@ -110,7 +120,7 @@ def recommend_translation_profile(
             ),
         )
 
-    if apple_silicon and memory is not None and memory < 24:
+    if hardware.apple_silicon and memory is not None and memory < 24:
         return TranslationRecommendation(
             tier="balanced",
             label="Balanced",
@@ -124,7 +134,7 @@ def recommend_translation_profile(
             ),
         )
 
-    if apple_silicon and memory is not None:
+    if hardware.apple_silicon and memory is not None:
         return TranslationRecommendation(
             tier="best",
             label="Best quality",
@@ -139,7 +149,7 @@ def recommend_translation_profile(
         )
 
     # Intel Macs are biased one tier lighter because llama.cpp inference is CPU-bound.
-    if architecture.lower() in {"x86_64", "amd64"}:
+    if hardware.intel_mac:
         if memory is not None and memory >= 24:
             return TranslationRecommendation(
                 tier="balanced",
@@ -175,7 +185,7 @@ def recommend_translation_profile(
         review=False,
         context_cap_tokens=6144,
         explanation=(
-            f"{architecture} · {memory_text} → conservative Qwen3 4B profile because DubLocal could not classify this Mac confidently."
+            f"{hardware.system_name} {hardware.architecture} · {memory_text} → conservative Qwen3 4B profile because DubLocal could not classify this Mac confidently."
         ),
     )
 
