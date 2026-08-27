@@ -179,17 +179,36 @@ def shared_huggingface_cache() -> Path:
     return Path.home() / ".cache" / "huggingface" / "hub"
 
 
-def _llama_resource() -> str:
-    cli = shutil.which("llama-cli")
-    if cli:
-        return cli
-    llama = shutil.which("llama")
-    if llama:
-        return f"{llama} cli"
-    for candidate in ("/opt/homebrew/bin/llama-cli", "/usr/local/bin/llama-cli"):
+def _executable_resource(name: str, fallbacks: tuple[str, ...] = ()) -> str:
+    resolved = shutil.which(name)
+    if resolved:
+        return resolved
+    for candidate in fallbacks:
         if Path(candidate).is_file():
             return candidate
     return "not found"
+
+
+def _llama_cli_resource() -> str:
+    cli = _executable_resource(
+        "llama-cli",
+        ("/opt/homebrew/bin/llama-cli", "/usr/local/bin/llama-cli"),
+    )
+    if cli != "not found":
+        return cli
+    llama = shutil.which("llama")
+    return f"{llama} cli" if llama else "not found"
+
+
+def _llama_server_resource() -> str:
+    server = _executable_resource(
+        "llama-server",
+        ("/opt/homebrew/bin/llama-server", "/usr/local/bin/llama-server"),
+    )
+    if server != "not found":
+        return server
+    llama = shutil.which("llama")
+    return f"{llama} server" if llama else "not found"
 
 
 def local_resource_status() -> str:
@@ -199,7 +218,8 @@ def local_resource_status() -> str:
         resolved = shutil.which(executable)
         state = resolved or "not found"
         lines.append(f"[{executable}] {state}")
-    lines.append(f"[llama.cpp] {_llama_resource()}")
+    lines.append(f"[llama-cli] {_llama_cli_resource()}")
+    lines.append(f"[llama-server] {_llama_server_resource()}")
 
     hf_cache = shared_huggingface_cache()
     cache_state = "available" if hf_cache.exists() else "will be created on first Hugging Face model use"
