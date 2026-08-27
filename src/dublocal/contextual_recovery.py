@@ -77,9 +77,11 @@ def _line_items(raw: str) -> list[dict[str, Any]]:
 
 
 def recover_chunk_output(raw: str, target_segments: Sequence[Segment]) -> list[str]:
-    """Parse constrained output while tolerating harmless model/runtime wrappers.
+    """Parse model output while keeping subtitle alignment strict.
 
-    Alignment remains strict: every requested subtitle id must still appear exactly once.
+    The normal path accepts valid JSON. Recovery also tolerates harmless wrappers
+    and a simple one-line-per-subtitle protocol used when llama.cpp constrained
+    JSON generation is unreliable on a particular local build.
     """
 
     first_error: DubLocalError | None = None
@@ -111,7 +113,7 @@ def recover_chunk_output(raw: str, target_segments: Sequence[Segment]) -> list[s
             pass
 
     raise first_error or DubLocalError(
-        "Contextual translator returned output that could not be recovered into aligned subtitle JSON."
+        "Contextual translator returned output that could not be recovered into aligned subtitle data."
     )
 
 
@@ -127,15 +129,16 @@ def build_format_repair_prompt(
         previous = previous[:12_000] + "\n[truncated]"
     return (
         "/no_think\n"
-        "Repair the previous subtitle-translation response into STRICT JSON.\n"
+        "Repair the previous subtitle-translation response using a simple plain-text protocol.\n"
         f"Required subtitle ids, exactly once and in this order: {ids}.\n"
-        "Return ONLY a JSON array of objects shaped exactly as "
-        '[{"id": 1, "text": "translated text"}].\n'
-        "Do not add Markdown, commentary, headings, code fences or extra ids.\n"
-        f"Every text value must be natural {target_language_label}.\n"
+        "Return EXACTLY one line per subtitle in this form: [ID] - translated text\n"
+        "Example: [12] - Это естественный перевод строки.\n"
+        "Do not output JSON, Markdown, headings, commentary or any other lines.\n"
+        f"Every translated text must be natural {target_language_label}.\n"
+        "Keep the meaning, tone, profanity and names from the previous translation when usable.\n"
         "If the previous response omitted a usable translation for an id, translate that source line naturally now.\n\n"
         "SOURCE TARGET LINES:\n"
         f"{source_lines}\n\n"
-        "PREVIOUS RESPONSE TO REPAIR:\n"
+        "PREVIOUS RESPONSE TO RECOVER:\n"
         f"{previous}\n"
     )
