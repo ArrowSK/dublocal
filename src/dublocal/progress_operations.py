@@ -21,7 +21,7 @@ def _run_in_thread(target):
     def runner():
         try:
             box["result"] = target()
-        except BaseException as exc:  # re-raised in caller thread
+        except BaseException as exc:
             box["error"] = exc
 
     thread = threading.Thread(target=runner, daemon=True)
@@ -84,6 +84,7 @@ def generate_voice_track_with_progress(
     voice: str,
     speed: float,
     progress_callback: ProgressCallback | None = None,
+    segment_voices: dict[int, str] | None = None,
 ) -> VoiceTrackResult:
     from .timeline import parse_srt
 
@@ -100,6 +101,7 @@ def generate_voice_track_with_progress(
             language=language,
             voice=voice,
             speed=float(speed),
+            segment_voices=segment_voices,
         )
     )
     job_dir: Path | None = None
