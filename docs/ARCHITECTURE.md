@@ -17,8 +17,10 @@ normalized Segment[] timeline (stable IDs + integer millisecond timing)
         ├──────────────→ SRT / VTT / TXT export
         ↓ optional
 translation
-  ├─ Best quality · Qwen3 8B + context + review   ← default quality path
-  └─ Fast legacy · OPUS/Marian                    ← explicit low-storage choice
+  ├─ Recommended for this Mac
+  │    ├─ Qwen3 4B lightweight
+  │    └─ Qwen3 8B balanced / best + optional review
+  └─ Fast legacy · OPUS/Marian                    ← explicit minimum-storage choice
         ↓
 source or translated SRT
         ↓
@@ -36,17 +38,18 @@ stream-copy/remux video where compatible
 
 1. Subtitle IDs and timestamps are stable data. Translation changes text, not timing.
 2. Subtitles are a first-class output; translation and voice generation are optional downstream stages.
-3. The default translation path must use dialogue context and must not translate subtitle rows as unrelated sentences.
-4. Longer programmes receive a larger context budget, bounded by the local model's context window.
-5. Standalone caption tags are structural data and bypass translation.
-6. Optional heavy models are downloaded only after explicit user action.
-7. Reuse existing executables, shared model caches and compatible external runtimes before installing duplicates.
-8. Never merge Python virtual environments or inject another application's `site-packages` into DubLocal.
-9. No silent cloud fallback and no silent downgrade from the selected quality backend.
-10. Model registrations require explicit licence, immutable revision and checksum metadata.
-11. Generated translation must pass alignment, runtime-leakage and target-script validation before an SRT is written.
-12. A backend failure must not disable simpler stages such as caption extraction/transcription/export.
-13. Adding/replacing audio must not imply video re-encoding; M5 prefers stream-copy.
+3. The default contextual path must use dialogue context and must not translate subtitle rows as unrelated sentences.
+4. Hardware recommendation must account for architecture, physical/unified memory, runtime context allocation and practical inference time.
+5. Longer programmes receive a larger context budget only up to the active hardware profile's ceiling.
+6. Standalone caption tags are structural data and bypass translation.
+7. Optional heavy models are downloaded only after explicit user action.
+8. Reuse existing executables, shared model caches and compatible external runtimes before installing duplicates.
+9. Never merge Python virtual environments or inject another application's `site-packages` into DubLocal.
+10. No silent cloud fallback and no silent downgrade from the selected contextual profile to OPUS.
+11. Model registrations require explicit licence, immutable revision and checksum metadata.
+12. Generated translation must pass alignment, runtime-leakage and target-script validation before an SRT is written.
+13. A backend failure must not disable simpler stages such as caption extraction/transcription/export.
+14. Adding/replacing audio must not imply video re-encoding; M5 prefers stream-copy.
 
 ## Normalized timeline
 
@@ -74,33 +77,66 @@ Base remains the default general-purpose model. v0.4.2 adds Large-v3-Turbo-Q5 as
 
 `src/dublocal/translation.py` remains the lightweight legacy backend using pinned Helsinki-NLP OPUS/Marian safetensors models.
 
-It is retained because it is small and fast. Its sentence-level architecture is deliberately not the default quality path.
+It is retained because it is small and fast. Its sentence-level architecture is deliberately not the default contextual path.
 
-## v0.4.2 contextual quality translation
+## v0.4.2 adaptive contextual translation
 
-The quality path is split so model/storage policy, runtime lifetime, prompt policy and validation remain independently testable:
+The contextual path is split so hardware policy, model/storage policy, runtime lifetime, prompt policy and validation remain independently testable:
 
 ```text
-contextual_quality_model.py   pinned Qwen3 8B model registration/download
-contextual_runtime.py         one local llama-server session per job
-contextual_policy.py          context/chunk planning + translation/review prompts
-contextual_progress.py        orchestration, recovery, review and SRT writing
-translation_quality.py        protected tags + target-output validation
-contextual_recovery.py        strict ID-oriented recovery
+hardware_profile.py            Mac architecture/RAM detection + recommendation tier
+adaptive_contextual.py         choose/register Qwen3 4B or Qwen3 8B for that tier
+contextual_translation.py      pinned Qwen3 4B model + shared context primitives
+contextual_quality_model.py    pinned Qwen3 8B model registration/download
+contextual_runtime.py          one adaptive llama-server session per job
+contextual_policy.py           context/chunk planning + translation/review prompts
+contextual_progress.py         orchestration, hardware cap, recovery, review, SRT writing
+translation_quality.py         protected tags + target-output validation
+contextual_recovery.py         strict ID-oriented recovery
 ```
 
-### Model
+### Hardware recommendation
+
+`hardware_profile.py` reads local architecture and physical memory. The current conservative defaults are:
 
 ```text
+Apple Silicon < 12 GB     Qwen3 4B · review off · 8,192 input cap
+Apple Silicon 12–23 GB    Qwen3 8B · review off · 16,384 input cap
+Apple Silicon 24 GB+      Qwen3 8B · review on  · 24,576 input cap
+Intel < 24 GB             Qwen3 4B · review off · 6,144 input cap
+Intel 24 GB+              Qwen3 8B · review off · 12,288 input cap
+```
+
+These are recommendations, not hard support declarations. The purpose is to prevent the “strongest available model” from becoming a poor product default on low-memory or CPU-bound Macs.
+
+The primary Main UI receives only the resulting label: **Recommended for this Mac · Lightweight / Balanced / Best quality**. Detailed reasoning stays in the collapsed engine details and Model Manager.
+
+### Context allocation versus prompt budget
+
+There are two separate limits:
+
+1. **Input budget** — how much source/context material DubLocal puts into the prompt.
+2. **llama.cpp runtime context** — how much KV/context capacity llama.cpp allocates.
+
+Both are hardware-scaled. The runtime allocation is currently the profile's input cap plus output/instruction headroom, capped by the model's native context. This is essential on an 8 GB M1: sending an 8k prompt while still launching `llama-server -c 32768` would leave much of the memory problem intact.
+
+### Contextual models
+
+```text
+Qwen/Qwen3-4B-GGUF
+Qwen3-4B-Q4_K_M.gguf
+~2.5 GB
+Apache-2.0
+
 Qwen/Qwen3-8B-GGUF
 Qwen3-8B-Q4_K_M.gguf
 ~5.03 GB
 Apache-2.0
 ```
 
-The model is stored in the normal shared Hugging Face cache and symlink-registered into DubLocal. Registration requires the exact configured upstream revision and SHA-256.
+Both models use the normal shared Hugging Face cache and separate DubLocal registrations. Registration requires the exact configured upstream revision and checksum.
 
-The previous Qwen3 4B development model is no longer selected in v0.4.2. Its metadata remains in `MODEL_LICENSES.json` for provenance.
+`Prepare / verify contextual translation` downloads only the model recommended for the current Mac. It does not install both merely because both are supported.
 
 ### Runtime lifetime
 
@@ -121,14 +157,16 @@ Server logs are written under the temporary DubLocal jobs cache and are covered 
 
 ### Context planning
 
-The usable source-context budget remains duration-aware:
+Before hardware capping, the source-context planner is duration-aware:
 
 ```text
-minimum input context    4,096 tokens
+base input context       4,096 tokens
 additional context       +128 tokens per programme minute
-maximum input context   24,576 tokens
+absolute input ceiling  24,576 tokens
 model native context    32,768 tokens
 ```
+
+The active hardware profile may impose a lower ceiling.
 
 Target chunk size is deliberately larger for short media:
 
@@ -159,7 +197,7 @@ These rules are semantic guidance, not a claim that grammar can be perfectly val
 
 ### Best-quality review pass
 
-The first translation draft is already alignment/script/runtime validated. Best quality then asks the same loaded Qwen3 8B model to perform a second senior-review pass against:
+Only the hardware profiles that enable review run it automatically. The first translation draft is already alignment/script/runtime validated. Best quality then asks the same loaded Qwen3 8B model to perform a second senior-review pass against:
 
 - the original target source lines;
 - the complete contextual prompt;
@@ -167,13 +205,13 @@ The first translation draft is already alignment/script/runtime validated. Best 
 
 The review focuses on mistranslation, calques, target-language grammar, word choice, untranslated ordinary words, recurring terminology and register/profanity consistency.
 
+Because the same model stays loaded, the review mainly increases inference time rather than allocating a second model-sized block of memory.
+
 If the review response is structurally invalid, DubLocal keeps the already-valid draft. Review cannot corrupt a usable result.
 
 ### Protected caption tags
 
 Standalone bracketed cues such as `[MUSIC]`, `[APPLAUSE]` and `[LAUGHTER]` never enter the translation model. They are copied exactly into the output timeline.
-
-This is intentionally different from translating prose that merely contains brackets.
 
 ### Output validation
 
@@ -204,8 +242,6 @@ better source timeline
         ↓
 contextual translation
 ```
-
-This boundary prevents “plausible” translation from hiding bad transcription.
 
 ## Dependency reuse
 
@@ -238,12 +274,12 @@ The v0.4 UI keeps ordinary processing under **Main** and maintenance under **Set
 Settings contains:
 
 - **Updates**;
-- **Model Manager** — Whisper, Contextual quality, Fast legacy OPUS, Kokoro;
+- **Model Manager** — Whisper, adaptive contextual translation, Fast legacy OPUS, Kokoro;
 - **Local Resources**.
 
 Model install/remove controls stay out of the normal processing flow.
 
-`ui_v042.py` is a deliberately small transition adapter binding the stable v0.4 layout to the new quality model while the larger `ui.py` is awaiting its next structural refactor. It avoids copying the entire Gradio layout solely to swap translation model policy.
+`ui_v042.py` is a deliberately small transition adapter binding the stable v0.4 layout to the adaptive translation policy while the larger `ui.py` is awaiting its next structural refactor. It avoids copying the entire Gradio layout solely to swap model policy.
 
 ## Updates and repair
 
