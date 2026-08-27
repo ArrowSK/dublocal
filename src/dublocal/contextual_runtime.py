@@ -46,6 +46,10 @@ def _llama_server_command() -> list[str] | None:
     return None
 
 
+def contextual_runtime_available() -> bool:
+    return bool(_llama_server_command() or _llama_command())
+
+
 def llama_server_status() -> str:
     command = _llama_server_command()
     return " · ".join(command) if command else "not installed"
@@ -164,6 +168,7 @@ class ContextualRuntime:
         self._server_command = _llama_server_command()
         self._process: subprocess.Popen[str] | None = None
         self._log_handle = None
+        self._log_path: Path | None = None
         self._base_url: str | None = None
         self.mode = "llama-server" if self._server_command else "llama-cli compatibility"
 
@@ -183,8 +188,9 @@ class ContextualRuntime:
         self._base_url = f"http://127.0.0.1:{port}"
         log_root = Path(user_cache_dir("DubLocal")) / "jobs"
         log_root.mkdir(parents=True, exist_ok=True)
-        log_path = Path(tempfile.mkstemp(prefix="llama-server-", suffix=".log", dir=log_root)[1])
-        self._log_handle = log_path.open("w", encoding="utf-8")
+        log_dir = Path(tempfile.mkdtemp(prefix="llama-server-", dir=log_root))
+        self._log_path = log_dir / "server.log"
+        self._log_handle = self._log_path.open("w", encoding="utf-8")
 
         args = self._server_command + [
             "-m",
@@ -218,25 +224,29 @@ class ContextualRuntime:
             self._close_log()
             raise DubLocalError(f"Could not start the local llama.cpp translation server: {exc}") from exc
 
-        deadline = time.monotonic() + 180.0
-        while time.monotonic() < deadline:
-            if self._process.poll() is not None:
-                raise DubLocalError(
-                    "The local llama.cpp translation server exited while loading the model. "
-                    f"See temporary log: {log_path}"
-                )
-            try:
-                with urlopen(f"{self._base_url}/health", timeout=2) as response:
-                    if response.status == 200:
-                        return self
-            except (HTTPError, URLError, TimeoutError, OSError):
-                pass
-            time.sleep(0.25)
+        try:
+            deadline = time.monotonic() + 180.0
+            while time.monotonic() < deadline:
+                if self._process.poll() is not None:
+                    raise DubLocalError(
+                        "The local llama.cpp translation server exited while loading the model. "
+                        f"See temporary log: {self._log_path}"
+                    )
+                try:
+                    with urlopen(f"{self._base_url}/health", timeout=2) as response:
+                        if response.status == 200:
+                            return self
+                except (HTTPError, URLError, TimeoutError, OSError):
+                    pass
+                time.sleep(0.25)
 
-        raise DubLocalError(
-            "The local llama.cpp translation server did not become ready within 3 minutes. "
-            f"See temporary log: {log_path}"
-        )
+            raise DubLocalError(
+                "The local llama.cpp translation server did not become ready within 3 minutes. "
+                f"See temporary log: {self._log_path}"
+            )
+        except Exception:
+            self.__exit__(None, None, None)
+            raise
 
     def _close_log(self) -> None:
         if self._log_handle is not None:
