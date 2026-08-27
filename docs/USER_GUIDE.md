@@ -15,27 +15,46 @@ There is no packaged GitHub Release yet.
 
 ### 1. Choose the source
 
-Choose **YouTube** or **Local file**, then click **Scan source**.
+Choose **YouTube** or **Local file**, then click **Load source**.
+
+The Source card itself shows `Loading source…` and then a persistent `Loaded · OK` summary with the title, duration and caption-track count.
 
 For a local file, DubLocal uses `ffprobe` to inspect video/audio/subtitle streams. For YouTube, it inspects the remote video and available captions without silently downloading the full media.
 
 ### 2. Get timed source subtitles
 
-If a usable caption/subtitle track exists, choose it and click **Extract existing subtitles**.
+If a usable caption/subtitle track exists, choose it and click **Use existing subtitles**.
 
-If captions are missing, image-based, or YouTube temporarily refuses caption delivery, use **Local transcription · Whisper**. DubLocal produces a normalized timestamped SRT locally.
+If captions are missing, image-based, or YouTube temporarily refuses caption delivery, use **Transcribe locally** with Whisper.
+
+The Subtitles stage shows its own persistent state such as `Transcribing locally…` and then `Transcribed · OK`.
+
+#### Download immediately — translation is optional
+
+A finished source timeline is a complete deliverable by itself. You do not need to translate it.
+
+Choose **Download format** before or after extraction/transcription:
+
+- **SRT** — default and recommended for subtitles;
+- **WebVTT** — useful for web/video players;
+- **TXT** — plain transcript without timestamps;
+- **CSV** — start/end timestamps plus text.
+
+Changing the format after transcription re-exports the existing timeline; Whisper does not run again.
+
+Internally DubLocal keeps a normalized SRT timeline for later translation and voice generation regardless of which download format you choose.
 
 Whisper model installation lives in **Settings → Model Manager → Whisper**.
 
+For ordinary speech, **Base** is a good starting point. Song lyrics and noisy material are significantly harder ASR tasks; if the source transcript itself contains wrong words, use **Small** before judging translation quality. A translator cannot reliably recover words that Whisper never recognized.
+
 ### 3. Translate — Contextual quality is the default
 
-Under **Local translation** choose the source language and target language.
+Choose the source language and target language, then leave **Contextual quality · Qwen3 4B · recommended** selected for normal use.
 
-Leave **Contextual quality · Qwen3 4B · recommended** selected for normal use.
+Unlike the old sentence-level OPUS path, Contextual quality does not treat every subtitle row as an isolated sentence. Translation receives:
 
-Unlike the old sentence-level OPUS path, Contextual quality does not treat every subtitle row as an isolated sentence. Each translation chunk receives:
-
-- nearby source lines before and after it;
+- nearby source lines before and after the current material;
 - sampled dialogue from across the programme;
 - recent translated lines as rolling terminology/style memory.
 
@@ -47,9 +66,11 @@ DubLocal calculates a context budget automatically from programme duration.
 
 The current v0.4.1.dev0 policy starts at about **4,096 input tokens** for short material and adds context as duration grows, up to **24,576 input tokens**. Qwen3's native context remains larger than that, leaving room for instructions and generated subtitles.
 
-You can see the active context budget directly in the translation status panel before starting.
+Short material is packed into fewer translation chunks when it safely fits. This reduces overhead and gives a short song or clip more continuous context.
 
-DubLocal still processes the timeline in manageable chunks. The context around those chunks grows, and recent translations are carried forward, so a long film is not translated as hundreds of unrelated one-line requests.
+For a translation job DubLocal now starts one local `llama-server`, loads Qwen once, reuses that model session for every chunk/recovery request, and shuts the server down when the job finishes. This avoids repeatedly reloading a 2.5 GB model for every chunk.
+
+Translation uses a strict DubLocal subtitle-line protocol over the local HTTP API. `llama.cpp` startup logs, prompt echoes and terminal control characters are never accepted as subtitle text.
 
 #### First use
 
@@ -70,8 +91,6 @@ If you explicitly choose **Fast legacy · OPUS · sentence-level**, DubLocal use
 It is smaller and faster, but it does not provide the same dialogue context. It remains available for low-storage or quick jobs rather than being silently used as a fallback.
 
 ### 4. Generate a local voice track
-
-Open **Local voice · Kokoro**.
 
 Choose whether to speak:
 
@@ -138,7 +157,7 @@ This panel reports reusable:
 
 - FFmpeg and ffprobe;
 - `whisper-cli`;
-- `llama.cpp` / `llama-cli`;
+- `llama-cli` and `llama-server`;
 - the shared Hugging Face cache;
 - compatible external Python runtimes such as Kokoro.
 
@@ -152,9 +171,11 @@ If captions remain blocked, use local Whisper transcription. If YouTube also blo
 
 # Translation quality expectations
 
-Context improves translation substantially, but local models can still make mistakes. The preview is there for review, especially before generating speech or distributing subtitles.
+Context improves translation substantially, but a 4B local model can still make semantic or stylistic mistakes. The preview is there for review, especially before generating speech or distributing subtitles.
 
-If Contextual quality produces missing/duplicated subtitle IDs, non-JSON output or another alignment failure, DubLocal stops instead of silently producing a shifted SRT.
+Translation quality is also bounded by source quality. If Whisper transcribes a lyric, name or sentence incorrectly, contextual translation should not confidently invent a replacement. For difficult songs/noisy speech, first improve the source transcription (for example with Whisper Small), then translate.
+
+DubLocal validates every expected subtitle ID before writing the translated SRT. Runtime banners, prompt echoes and malformed/misaligned output are rejected instead of being written into subtitles.
 
 For troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
