@@ -1,6 +1,6 @@
 # DubLocal architecture
 
-**Current development build: v0.5.1.dev0 — Voice Match + Export Refinement**
+**Current development build: v0.5.2.dev0 — Transcription + Timing Reliability**
 
 DubLocal is a local-first media pipeline made from separable stages. The Gradio UI coordinates jobs, but source inspection, transcription, translation, TTS, timing, mixing and remuxing remain independent modules with explicit failure boundaries.
 
@@ -12,6 +12,7 @@ YouTube / local media
 inspection + caption discovery
         ↓
 existing text subtitles OR local whisper.cpp transcription
+  └─ v0.5.2: Silero VAD speech gating when supported
         ↓
 normalized Segment[] timeline
         ├──────────────→ SRT / VTT / TXT export
@@ -28,23 +29,23 @@ TTS preparation
   ├─ preserve subtitle file
   └─ remove caption cues from temporary speech input
         ↓
-M4 / v0.5.1 Kokoro TTS
+Kokoro TTS
   ├─ manual voice OR automatic vocal-range matching
   ├─ one Kokoro pipeline/model
   ├─ per-segment voice preset selection
   ├─ per-segment WAVs
   └─ synchronized voice-only WAV + manifest
         ↓
-M5 timing fit
-  ├─ borrow silence before next spoken segment
-  └─ modest atempo speed-up, capped at 1.25×
+v0.5.2 timing fit
+  ├─ each line targets its own subtitle time window
+  ├─ short lines may slow; long lines may accelerate
+  └─ quality guard: 0.5×–2.0× atempo range
         ↓
-M5.1 soundtrack mix
+v0.5.1+ soundtrack mix
   ├─ source subtitle windows drive strong original-dialogue suppression
-  ├─ fitted voice remains the audible sidechain reference
-  └─ voice overlaid into AAC dubbed mix
+  └─ translated voice overlaid into AAC dubbed mix
         ↓
-M5.1 remux/export
+track-aware remux/export
   ├─ Replace primary audio — default
   ├─ Add dubbed audio as second track
   ├─ embed generated original + translated subtitles
@@ -59,7 +60,7 @@ M5.1 remux/export
 3. Contextual translation treats subtitle fragments as continuous discourse.
 4. Hardware recommendations scale both model choice and actual llama.cpp context/KV allocation.
 5. Caption cues remain subtitle data but are not translated as dialogue and are not spoken by TTS.
-6. Heavy models download only after explicit user action.
+6. Heavy models download only after explicit user action. Tiny auxiliary reliability assets may be prepared on demand and checksum-verified.
 7. Reuse system executables, shared model caches and compatible external runtimes before installing duplicates.
 8. Never merge Python virtual environments or inject another application's `site-packages` into DubLocal.
 9. No silent cloud fallback and no silent downgrade from contextual translation to OPUS.
@@ -69,6 +70,8 @@ M5.1 remux/export
 13. Local-file export defaults to stream-copy. Re-encoding occurs only after an explicit lower-resolution selection.
 14. Automatic voice matching must stay lightweight: no extra TTS model, diarization model or source-separation model is required.
 15. Acoustic voice matching is preset selection, not speaker identity or gender-identity classification.
+16. ASR output from non-speech audio is treated as a recognition failure, not content to be translated. Speech gating and conservative long-form decoding are preferred over post-hoc guessing.
+17. Dub timing may change generated audio duration, but it does not move subtitle timestamps.
 
 ## Normalized subtitle timeline
 
@@ -84,9 +87,21 @@ Segment
 
 Integer milliseconds avoid accumulated timing drift. `subtitle_export.py` converts this stable timeline to SRT, WebVTT or TXT without rerunning transcription. `output_naming.py` exposes media-derived names such as `Movie Name.en.srt`, `Movie Name.ru.srt` and `Movie Name.dub.ru.mkv` while internal job files remain disposable.
 
-## Transcription
+## Transcription and anti-hallucination policy
 
-`transcription.py` manages `whisper-cli`, FFmpeg speech preparation and optional Whisper weights. Base is the normal default; Large-v3-Turbo-Q5 is the optional higher-accuracy path for songs, accents, noisy material or damaged automatic captions.
+`transcription.py` manages `whisper-cli`, FFmpeg speech preparation, optional Whisper weights and the v0.5.2 auxiliary VAD path. Base is the normal default; Large-v3-Turbo-Q5 is the optional higher-accuracy path for songs, accents, noisy material or damaged automatic captions.
+
+Long-form music/video transcription can fail in two characteristic ways: hallucinated text over silence/instrumental audio, and self-reinforcing repetition after a short phrase. v0.5.2 addresses the source of those failures rather than filtering arbitrary text after recognition:
+
+- feature-detect whether the installed `whisper-cli` supports VAD;
+- prepare the official whisper.cpp Silero VAD v6.2.0 model on demand;
+- verify the pinned model SHA-256 before use;
+- process only detected speech regions when VAD is available;
+- use a 64-token carried-text context cap;
+- use a slightly stricter no-speech threshold;
+- retain normal transcription when an older CLI has no VAD or the tiny auxiliary model cannot be downloaded offline.
+
+The VAD model is an auxiliary speech detector, not another transcription model. It is approximately 0.9 MiB and does not materially change Mac memory requirements.
 
 `language_utils.py` normalizes common ISO codes/full labels so detected language can populate Translate → From. Loading a new source clears stale language state.
 
@@ -116,62 +131,52 @@ Intel 24 GB+              Qwen3 8B · review off · 12,288 input cap
 
 The prompt/review explicitly covers speaker/addressee/reference relationships, grammatical gender where supported, idioms/phraseology, metaphor fidelity, terminology continuity, slang/profanity and recurring refrains. Standalone caption tags bypass translation and are copied exactly.
 
-## TTS preparation
+## TTS preparation and automatic vocal-range matching
 
 `voice_text.py` creates a temporary speech-only SRT. `[MUSIC]` becomes silence; `[LAUGHS] Hello` becomes spoken `Hello`. The original subtitle file is unchanged.
 
 `tts.py` and `kokoro_worker.py` generate per-segment WAVs, a synchronized voice-only WAV and `voice-manifest.json`. Compatible external Kokoro environments are invoked through their own Python process; they are never imported into DubLocal's interpreter.
 
-## Automatic vocal-range matching
+`voice_match.py` is the lightweight casting layer. It decodes the original primary audio to low-rate mono analysis data, estimates dominant fundamental frequency inside subtitle windows, maps lower/higher ranges to available Kokoro presets, and stores the selected voice per segment. One Kokoro model/pipeline stays loaded; changing voice presets does not double model memory.
 
-`voice_match.py` is the v0.5.1 lightweight casting layer.
+The matcher is acoustic preset selection, not speaker identification or gender-identity classification. If analysis is inconclusive or the selected language exposes only one usable voice, the normal Kokoro default is used.
 
-It:
+## v0.5.2 per-line timing fit
 
-1. decodes the original primary audio to a temporary low-rate mono WAV;
-2. examines audio inside source subtitle windows;
-3. estimates dominant fundamental frequency with a NumPy autocorrelation path;
-4. classifies usable segments into lower/higher vocal-range buckets;
-5. maps those buckets to available Kokoro lower/higher presets for the selected language;
-6. stores the selected voice per segment in the Kokoro manifest.
+`m52.py` installs the current timing fitter into the stable `m5.fit_voice_timing` API before the Gradio app is built. `m51.render_dubbed_media()` therefore uses the refined fitter without requiring another export API or a redesign of the working UI.
 
-The matcher does not load another ML model. `kokoro_worker.py` keeps one KPipeline and changes `voice=` per request segment, so mixed two-range material does not double model memory.
+For every generated segment:
 
-If analysis is inconclusive, no source media is available, or a language exposes only one usable voice, the normal Kokoro default is used.
+1. read original subtitle `start_ms` / `end_ms` and generated WAV duration from `voice-manifest.json`;
+2. reserve a small 35–100 ms onset cushion so synthesized speech does not sound systematically early;
+3. use the remainder of the subtitle window as the target spoken duration;
+4. calculate `atempo = generated_duration / target_duration`;
+5. slow short speech or accelerate long speech as needed;
+6. constrain the factor to 0.5×–2.0×;
+7. assemble the fitted segments at their adjusted starts into a new synchronized voice track;
+8. report residual mismatch when an extreme line cannot be fitted inside the quality guard.
 
-## Timing fit
-
-M5 reads the Kokoro manifest. For overflowing lines it first extends into real silence up to the next spoken segment, then uses FFmpeg `atempo` up to 1.25×. Speech is never deliberately truncated; residual overflow is reported.
+The target for normal lines is therefore the subtitle end time, rather than merely “do not overflow.” Subtitle/SRT timestamps are never rewritten by this process.
 
 ## Stronger dialogue/singing suppression
 
-Professional dubbing ideally uses a dialogue-free Music & Effects stem. Ordinary consumer media often provides only a married mix, so `m5.py` cannot perfectly isolate original dialogue without source separation.
+Professional dubbing ideally uses a dialogue-free Music & Effects stem. Ordinary consumer media often provides only a married mix, so DubLocal cannot perfectly isolate original dialogue without source separation.
 
-v0.5.1 improves the fallback using the **source subtitle timeline**:
+`m51.py` uses the **source subtitle timeline** as the practical suppression guide:
 
-- subtitle windows are converted into a timeline gain envelope;
-- nearby windows are merged to reduce pumping;
-- original audio is strongly attenuated across the full source dialogue/singing window, not merely while synthesized TTS is non-silent;
-- sidechain compression remains as a secondary protection around the generated voice;
-- when no usable source timeline exists, DubLocal falls back to stronger voice-driven ducking.
+- nearby source dialogue/singing windows are merged to reduce pumping;
+- original audio is strongly attenuated across the complete source window, not only while synthesized TTS is non-silent;
+- sidechain compression remains as a fallback/protection when a usable source timeline is unavailable.
 
 This is intentionally described as suppression/ducking, not source separation.
 
-## Subtitle muxing
+## Subtitle muxing and video quality
 
-`subtitle_mux.py` prepares generated subtitle tracks for final media packaging.
+`m51.py` also owns the v0.5.1 track-aware export refinements.
 
-By default, when available:
+When available, generated original/source subtitles and translated subtitles are embedded by default as selectable streams and are never burned into the video. MKV can preserve existing source subtitle streams and add the DubLocal tracks; MP4 packages generated SRT streams as `mov_text`.
 
-- generated original/source subtitles are embedded;
-- generated translated subtitles are embedded;
-- they remain selectable and are never burned into the image.
-
-MKV preserves existing source subtitle streams and adds DubLocal tracks. MP4 maps generated subtitle tracks as `mov_text`. Track language/title/default metadata is set independently from audio metadata.
-
-## Video quality policy
-
-`video_quality.py` defines:
+Export quality options are:
 
 ```text
 Original / best available
@@ -182,9 +187,7 @@ Original / best available
 480p maximum
 ```
 
-For YouTube, the selected value controls yt-dlp format selection before source acquisition; the chosen video is stream-copied during final remux.
-
-For local media, Original means `-c:v copy`. A lower explicit quality creates a separate prepared source with FFmpeg H.264 VideoToolbox. DubLocal never silently downscales and never upscales a source just because a higher limit is selected.
+For YouTube, the selected value constrains yt-dlp source acquisition before final remux. For local media, Original means `-c:v copy`; selecting a lower resolution explicitly opts into H.264 VideoToolbox re-encoding. DubLocal never silently downscales or upscales local media.
 
 ## Export modes
 
@@ -196,7 +199,7 @@ MKV remains the recommended container. MP4 is used only when requested streams c
 
 ## UI layering
 
-`ui.py` remains the stable earlier workflow implementation. `ui_v042.py` adds hardware-adaptive translation policy. `ui_v050.py` adds reliable language propagation, readable filenames, speech-only TTS preparation and the Export stage. `ui_v051.py` extends that working layer with automatic voice matching, subtitle mux defaults and export-quality controls rather than replacing the Main design.
+`ui.py` remains the stable earlier workflow implementation. `ui_v042.py` adds hardware-adaptive translation policy. `ui_v050.py` now contains the v0.5/v0.5.1 workflow adapters: reliable language propagation, readable filenames, speech-only TTS preparation, automatic voice matching and the Export stage. v0.5.2 intentionally leaves this working layout intact; `m52.py` changes timing behavior behind the existing export API.
 
 Main remains:
 
@@ -223,12 +226,12 @@ max size   4 GiB
 strategy   age first, then oldest-first size pruning
 ```
 
-Temporary YouTube downloads, voice-analysis audio, fitted voice, subtitle conversion, dubbed mixes and remux outputs are covered by the same lifecycle. Persistent model assets/shared Hugging Face cache are outside it.
+Temporary YouTube downloads, voice-analysis audio, fitted voice, subtitle conversion, dubbed mixes and remux outputs are covered by the same lifecycle. Persistent Whisper/VAD/Qwen/Kokoro assets and the shared Hugging Face cache are outside it.
 
 ## Still out of scope
 
 - OCR for image subtitle streams;
 - full speaker diarization/identity tracking;
 - professional dialogue/M&E source separation;
-- semantic rephrasing specifically to fit difficult dub timing;
+- semantic rephrasing specifically to fit extreme dub timing;
 - signed/notarized macOS packaging.
