@@ -1,118 +1,193 @@
 # DubLocal user guide
 
-**Current development build: v0.4.1.dev0 — M4 Local Voice + M3.1 Contextual Translation**
+**Current development build: v0.4.2.dev0 — Subtitle Export + Translation Quality Pass**
 
-DubLocal is meant to feel like a small Mac utility. Once installed, start **DubLocal.app** and work in the local browser window it opens.
+DubLocal is intended to behave like a small Mac utility rather than an AI development console. Once installed, open **DubLocal.app** and use the local browser window it launches.
 
 There are two top-level areas:
 
-- **Main** — process the current video/audio job.
-- **Settings** — update/repair DubLocal and manage optional local resources.
+- **Main** — process the current media job.
+- **Settings** — update/repair DubLocal and manage optional engines/models.
 
 There is no packaged GitHub Release yet.
 
-## Main: the normal workflow
+## Main: normal workflow
 
-### 1. Choose the source
+### 1. Load the source
 
 Choose **YouTube** or **Local file**, then click **Load source**.
 
-The Source card itself shows `Loading source…` and then a persistent `Loaded · OK` summary with the title, duration and caption-track count.
+The Source card stays visible and reports the result, for example:
 
-For a local file, DubLocal uses `ffprobe` to inspect video/audio/subtitle streams. For YouTube, it inspects the remote video and available captions without silently downloading the full media.
+`✓ Loaded · OK · YouTube · Title · 6:15 · 2 caption tracks`
 
-### 2. Get timed source subtitles
+For a local file, DubLocal uses `ffprobe` to inspect streams. For YouTube it inspects metadata and available caption tracks without silently downloading the full video.
 
-If a usable caption/subtitle track exists, choose it and click **Use existing subtitles**.
+### 2. Create or reuse subtitles
 
-If captions are missing, image-based, or YouTube temporarily refuses caption delivery, use **Transcribe locally** with Whisper.
+This stage is a complete output by itself. You do **not** need to translate after transcription.
 
-The Subtitles stage shows its own persistent state such as `Transcribing locally…` and then `Transcribed · OK`.
+If a usable subtitle/caption track exists, select it and click **Use existing subtitles**.
 
-#### Download immediately — translation is optional
+If the track is missing, image-based or unsuitable, open the Whisper section and click **Transcribe locally**.
 
-A finished source timeline is a complete deliverable by itself. You do not need to translate it.
+The subtitle stage keeps a persistent status such as:
 
-Choose **Download format** before or after extraction/transcription:
+`✓ Transcribed · OK · 34 timed segments · English`
 
-- **SRT** — default and recommended for subtitles;
-- **WebVTT** — useful for web/video players;
-- **TXT** — plain transcript without timestamps;
-- **CSV** — start/end timestamps plus text.
+and exposes the resulting subtitle file immediately.
 
-Changing the format after transcription re-exports the existing timeline; Whisper does not run again.
+#### Download format
 
-Internally DubLocal keeps a normalized SRT timeline for later translation and voice generation regardless of which download format you choose.
+Choose:
 
-Whisper model installation lives in **Settings → Model Manager → Whisper**.
+- **SRT** — default;
+- **WebVTT** — useful for web video;
+- **TXT** — plain text transcript.
 
-For ordinary speech, **Base** is a good starting point. Song lyrics and noisy material are significantly harder ASR tasks; if the source transcript itself contains wrong words, use **Small** before judging translation quality. A translator cannot reliably recover words that Whisper never recognized.
+Changing this selector after transcription converts the current subtitle timeline. It does not rerun Whisper.
 
-### 3. Translate — Contextual quality is the default
+#### Which Whisper model should I use?
 
-Choose the source language and target language, then leave **Contextual quality · Qwen3 4B · recommended** selected for normal use.
+- **Base · 142 MiB** — default; good balance for ordinary clear speech.
+- **Small · 466 MiB** — stronger but slower.
+- **Accurate · Large v3 Turbo Q5 · 547 MiB** — optional quality choice for songs, accents, noisy material or when automatic captions look wrong.
 
-Unlike the old sentence-level OPUS path, Contextual quality does not treat every subtitle row as an isolated sentence. Translation receives:
+The model must be installed once under **Settings → Model Manager → Whisper** before use.
 
-- nearby source lines before and after the current material;
-- sampled dialogue from across the programme;
-- recent translated lines as rolling terminology/style memory.
+### Automatic YouTube captions are not ground truth
 
-This matters for pronouns, names, relationships, slang, jokes, callbacks, profanity and tone.
+If a selected YouTube track is marked **automatic captions**, DubLocal shows a quality warning.
 
-#### Longer video = larger context
+This is important: translation receives the words present in the subtitle timeline. If the automatic captioner heard the wrong word, a translator cannot reliably know what was actually spoken or sung without going back to the audio.
 
-DubLocal calculates a context budget automatically from programme duration.
+For obviously damaged source text, prefer local Accurate Whisper transcription before judging translation quality.
 
-The current v0.4.1.dev0 policy starts at about **4,096 input tokens** for short material and adds context as duration grows, up to **24,576 input tokens**. Qwen3's native context remains larger than that, leaving room for instructions and generated subtitles.
+### 3. Translate — Recommended for this Mac
 
-Short material is packed into fewer translation chunks when it safely fits. This reduces overhead and gives a short song or clip more continuous context.
+Choose **From** and **To** languages. The normal contextual option is intentionally simple:
 
-For a translation job DubLocal now starts one local `llama-server`, loads Qwen once, reuses that model session for every chunk/recovery request, and shuts the server down when the job finishes. This avoids repeatedly reloading a 2.5 GB model for every chunk.
+**Recommended for this Mac · Lightweight / Balanced / Best quality**
 
-Translation uses a strict DubLocal subtitle-line protocol over the local HTTP API. `llama.cpp` startup logs, prompt echoes and terminal control characters are never accepted as subtitle text.
+DubLocal detects architecture and physical memory locally and chooses the most sensible contextual profile for the machine instead of assuming every Mac should run the same model.
 
-#### First use
+Current v0.4.2 recommendations:
 
-If Contextual quality is not ready:
+- **8 GB Apple Silicon** → Qwen3 4B, single pass, 8k input-context cap.
+- **16 GB Apple Silicon** → Qwen3 8B, single pass, 16k input-context cap.
+- **24 GB+ Apple Silicon** → Qwen3 8B with the senior review pass, up to 24k input context.
+- **Intel below 24 GB** → Qwen3 4B with a smaller context allocation.
+- **Intel 24 GB+** → Qwen3 8B single pass with a reduced context cap.
 
-**Settings → Model Manager → Contextual translation · Qwen3 4B → Prepare / verify contextual translation**
+These are conservative defaults, not statements that another profile is technically impossible.
 
-This may install/reuse `llama.cpp` and download the ~2.5 GB model once. Model files use the shared Hugging Face cache and are checksum-verified.
+The Main screen does not show a model spreadsheet. If you want the reasoning, open **Translation engine details** or **Settings → Model Manager → Contextual translation**. There DubLocal shows the detected Mac, recommended model, current input-context budget, actual llama.cpp context allocation and whether review is enabled.
 
-Then return to Main and click **Translate subtitles**.
+#### Why this matters on an M1
 
-DubLocal preserves the original subtitle IDs, segment count and timestamps. The preview shows **Translation** first and **Original** beside it.
+A 5.03 GB 8B model can be a poor default on an 8 GB M1 once macOS, the model and llama.cpp KV cache all compete for unified memory.
 
-### Fast legacy translation
+DubLocal therefore uses the 2.5 GB Qwen3 4B profile on an 8 GB Apple Silicon Mac and also reduces the **actual llama.cpp context allocation**. It does not reserve a 32k KV cache and merely send a shorter prompt. That is the practical difference between a UI label and a real hardware-aware implementation.
 
-If you explicitly choose **Fast legacy · OPUS · sentence-level**, DubLocal uses the older M3 Marian/OPUS backend.
+#### What “contextual” means
 
-It is smaller and faster, but it does not provide the same dialogue context. It remains available for low-storage or quick jobs rather than being silently used as a fallback.
+DubLocal does not translate subtitle rows as unrelated sentences. It supplies the model with:
+
+- nearby source dialogue before and after the current lines;
+- sampled source context from across the programme;
+- recent approved translations as terminology/style memory.
+
+The usable context budget grows with programme duration until it reaches the cap for the current hardware profile.
+
+Short media uses larger chunks. A short song can normally fit into one contextual translation chunk rather than several tiny independent requests.
+
+#### Review pass
+
+On the Best quality profile, the same loaded Qwen3 8B model performs a second senior-review pass against the original source lines and context.
+
+The review is asked to correct:
+
+- mistranslations;
+- literal English-style syntax;
+- unnatural target-language grammar;
+- case/gender/number mistakes;
+- incorrect word choice;
+- untranslated ordinary words;
+- inconsistent recurring phrases;
+- inappropriate changes to slang or profanity.
+
+The review is not allowed to invent missing ASR words or rewrite the material into something more literary.
+
+Because the same model remains loaded, the review mainly adds processing time rather than another model-sized memory allocation. On 8 GB and 16 GB profiles it is not enabled by default.
+
+If the review output itself is structurally broken, DubLocal keeps the already validated first-pass translation rather than replacing it with corrupt data.
+
+#### First use of contextual translation
+
+Open:
+
+**Settings → Model Manager → Contextual translation**
+
+and click **Prepare / verify contextual translation**.
+
+DubLocal will:
+
+1. detect the current Mac and select its recommendation;
+2. reuse an existing compatible `llama.cpp` installation when available;
+3. otherwise install `llama.cpp` through Homebrew;
+4. download only the recommended Qwen3 model to the shared Hugging Face cache;
+5. verify the pinned model checksum before registering it.
+
+The two contextual model sizes are approximately:
+
+- **Qwen3 4B Q4_K_M** — 2.5 GB;
+- **Qwen3 8B Q4_K_M** — 5.03 GB.
+
+Both are local Apache-2.0 model releases. DubLocal does not download both merely because both are supported.
+
+If speed/storage matters more than contextual quality, choose **Fast legacy · OPUS · sentence-level** explicitly.
+
+### Subtitle tags and integrity
+
+Standalone cues such as:
+
+- `[MUSIC]`
+- `[APPLAUSE]`
+- `[LAUGHTER]`
+
+are not dialogue. DubLocal copies them exactly and does not send them to the translator.
+
+Before a translated SRT is written, DubLocal checks:
+
+- every expected subtitle ID is present exactly once;
+- original ordering/timestamps are retained;
+- llama.cpp runtime text or prompts did not leak into subtitles;
+- unrelated CJK/Hangul characters did not appear in current European targets;
+- Russian/Ukrainian output is not substantially contaminated with untranslated Latin-script text;
+- Latin-script targets are not substantially contaminated with Cyrillic text.
+
+If these checks fail and contextual recovery cannot repair the affected line, DubLocal stops instead of writing a corrupted subtitle file.
 
 ### 4. Generate a local voice track
+
+Open **4 · Voice-over**.
 
 Choose whether to speak:
 
 - **Translated subtitles**, or
 - **Source subtitles**.
 
-Choose a supported voice language, voice and speed, then click **Generate voice track**.
+Choose a supported language, voice and speed, then click **Generate voice track**.
 
-M4 creates:
+M4 creates a synchronized voice-only WAV and timing diagnostics. It deliberately does not edit the original soundtrack yet.
 
-- per-segment WAV files;
-- one synchronized voice-only WAV;
-- a JSON manifest;
-- a timing table showing which lines overrun their subtitle windows.
-
-M4 deliberately does not modify the original soundtrack yet. M5 handles duration fitting, ducking/mixing and media remuxing.
+M5 will add duration fitting, soundtrack ducking/mixing and media remuxing.
 
 ## Kokoro language coverage
 
-Official Kokoro support exposed in the current build includes American/British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin Chinese.
+Official Kokoro support currently exposed by DubLocal includes American/British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin Chinese.
 
-Translation supports additional targets such as Hungarian, Russian and German, but official Kokoro cannot voice those targets. DubLocal does not pretend otherwise or silently apply the wrong pronunciation frontend.
+Translation supports additional targets such as Hungarian, Russian and German, but the official Kokoro backend cannot voice all of those languages. DubLocal does not silently use the wrong pronunciation frontend.
 
 # Settings
 
@@ -120,36 +195,37 @@ Translation supports additional targets such as Hungarian, Russian and German, b
 
 Use **Check for updates → Install update → Restart DubLocal**.
 
-Normal updates are clean fast-forwards from official GitHub `main`. Tracked local edits are not overwritten.
+Normal updates are clean fast-forwards from official GitHub `main`. Tracked local edits are not silently overwritten.
 
-**Repair installation** can restore official tracked program files after saving a patch backup and refresh the managed Python core. Models, shared caches and generated jobs are preserved.
+**Repair installation** restores official tracked application files after saving a patch backup and refreshes the managed Python environment. It preserves models, shared caches and generated job data.
 
 ## Model Manager
 
 ### Whisper
 
-Install/verify Tiny, Base or Small. Models are downloaded only when requested.
+Install only the transcription models you need. Base remains the default; Accurate Large-v3-Turbo-Q5 is optional.
 
-### Contextual translation · Qwen3 4B
+### Contextual translation
 
-This is the recommended translation backend.
+The accordion title itself includes the current recommendation, for example:
 
-**Prepare / verify contextual translation**:
+`Contextual translation · Lightweight · Qwen3 4B Q4_K_M`
 
-1. reuses existing `llama.cpp` when available;
-2. otherwise installs it through Homebrew;
-3. downloads the pinned official Qwen3 4B Q4_K_M model (~2.5 GB) to the shared Hugging Face cache;
-4. verifies its SHA-256 before enabling it.
+or:
 
-Removing the DubLocal contextual model removes DubLocal's registration/link, not the underlying shared cache snapshot or `llama.cpp` installation.
+`Contextual translation · Best quality · Qwen3 8B Q4_K_M`
+
+The status explains the hardware decision and shows both the recommended model and whether the alternate contextual model is already registered locally.
+
+**Prepare / verify contextual translation** prepares only the recommended model. **Remove DubLocal contextual model** removes DubLocal's 4B/8B registrations/links while leaving the shared Hugging Face cache intact, so other local applications are not broken.
 
 ### Fast legacy translation · OPUS
 
-The two older ~310 MiB OPUS directions remain available here. Use them only when you deliberately want the smaller/faster sentence-level engine.
+The older ~310 MiB OPUS model directions remain available when you intentionally want the smaller/faster sentence-level engine.
 
 ### Kokoro
 
-DubLocal first looks for a compatible existing Kokoro environment. If found, it uses that environment's Python through an isolated worker rather than copying its packages. Missing official model/voice assets use the shared Hugging Face cache.
+DubLocal first looks for a compatible existing Kokoro environment. If found, it runs that backend through an isolated worker process rather than copying another environment's Python packages into DubLocal.
 
 ## Local Resources
 
@@ -157,25 +233,41 @@ This panel reports reusable:
 
 - FFmpeg and ffprobe;
 - `whisper-cli`;
-- `llama-cli` and `llama-server`;
-- the shared Hugging Face cache;
+- `llama.cpp` / `llama-cli` / `llama-server` when available;
+- shared Hugging Face cache;
 - compatible external Python runtimes such as Kokoro.
 
-Python environments remain isolated: another application's `site-packages` is never injected into DubLocal's interpreter.
+Python environments remain isolated.
+
+# Temporary files
+
+Working files live under:
+
+`~/Library/Caches/DubLocal/jobs/`
+
+They include temporary downloaded audio, 16 kHz Whisper WAVs, intermediate subtitles, per-job llama-server logs and voice-generation intermediates.
+
+At normal launch DubLocal removes jobs older than 24 hours and caps this temporary job cache at 4 GiB, deleting the oldest jobs first if necessary.
+
+Persistent AI models and the shared Hugging Face model cache are not treated as temporary job files.
 
 # YouTube HTTP 429
 
-YouTube can temporarily rate-limit caption/media delivery. DubLocal retries ordinary caption retrieval but does not evade the restriction.
+YouTube can temporarily rate-limit caption or media delivery. DubLocal retries ordinary caption retrieval but does not bypass that restriction.
 
-If captions remain blocked, use local Whisper transcription. If YouTube also blocks audio delivery, wait or use a local copy you have the right to process.
+If captions remain blocked, local Whisper transcription is the intended fallback. If YouTube also refuses audio delivery, wait or use a local copy you have the right to process.
 
 # Translation quality expectations
 
-Context improves translation substantially, but a 4B local model can still make semantic or stylistic mistakes. The preview is there for review, especially before generating speech or distributing subtitles.
+The goal is the best practical local translation for the current Mac, not a claim of perfect human translation.
 
-Translation quality is also bounded by source quality. If Whisper transcribes a lyric, name or sentence incorrectly, contextual translation should not confidently invent a replacement. For difficult songs/noisy speech, first improve the source transcription (for example with Whisper Small), then translate.
+Three facts remain important:
 
-DubLocal validates every expected subtitle ID before writing the translated SRT. Runtime banners, prompt echoes and malformed/misaligned output are rejected instead of being written into subtitles.
+1. a stronger translator cannot reliably reconstruct speech that was already incorrectly transcribed;
+2. even an 8B local model can make semantic or stylistic mistakes;
+3. the best model in isolation is not necessarily the best product default if it causes memory pressure or extreme latency on the machine running it.
+
+That is why DubLocal exposes Original/Translation side-by-side and chooses its default translation profile from the hardware rather than from a single universal marketing label.
 
 For troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 

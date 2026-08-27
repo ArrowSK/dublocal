@@ -6,24 +6,24 @@ import platform
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 from pathlib import Path
-from typing import Any
-from urllib import error, request
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
-from .contextual_translation import (
-    ContextualTranslationMissingError,
-    QWEN_CONTEXT_MODEL,
-    _registered_model_valid,
-    contextual_model_path,
-)
+from platformdirs import user_cache_dir
+
+from .adaptive_contextual import contextual_model_spec, contextual_model_valid
+from .contextual_translation import ContextualTranslationMissingError, _llama_command
 from .media import DubLocalError
 
 
 _SYSTEM_PROMPT = (
-    "You are a professional audiovisual subtitle translator. "
-    "Follow the user's translation instructions exactly. "
-    "Return only the requested DubLocal subtitle protocol."
+    "You are a senior professional audiovisual translator and subtitle editor. Translate faithfully, "
+    "idiomatically and conservatively. Prefer natural target-language grammar over literal calques, but "
+    "never invent dialogue or repair uncertain source text by guessing. Preserve requested subtitle IDs "
+    "and output format exactly."
 )
 
 
@@ -39,8 +39,12 @@ def _llama_server_command() -> list[str] | None:
 
     llama = shutil.which("llama")
     if llama and Path(llama).is_file() and os.access(llama, os.X_OK):
-        return [str(llama), "server"]
+        return [str(llama), "serve"]
     return None
+
+
+def contextual_runtime_available() -> bool:
+    return bool(_llama_server_command() or _llama_command())
 
 
 def llama_server_status() -> str:
@@ -48,42 +52,171 @@ def llama_server_status() -> str:
     return " · ".join(command) if command else "not installed"
 
 
-def _free_port() -> int:
+def _free_local_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
 
 
-class ContextualLlamaSession:
-    """One local llama.cpp server reused for every chunk in one translation job."""
+def _clean_cli_text(raw: str) -> str:
+    """Remove terminal control characters and known llama-cli UI noise."""
 
-    def __init__(self) -> None:
-        command = _llama_server_command()
-        if not command or not _registered_model_valid():
+    text = (raw or "").replace("\b", "")
+    text = "".join(char for char in text if char in "\n\t" or ord(char) >= 32)
+    noise_prefixes = (
+        "Loading model",
+        "build      :",
+        "model      :",
+        "ftype      :",
+        "modalities :",
+        "using custom system prompt",
+        "available commands:",
+        "Exiting...",
+    )
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(noise_prefixes):
+            continue
+        if stripped.startswith(("/exit", "/regen", "/clear", "/read", "/glob")):
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def _context_size(spec, requested: int | None) -> int:
+    native = int(spec.metadata["native_context"])
+    if requested is None:
+        return native
+    return max(4096, min(native, int(requested)))
+
+
+def _run_cli_compat(
+    prompt: str,
+    *,
+    max_output_tokens: int,
+    model_key: str,
+    context_tokens: int | None,
+) -> str:
+    command = _llama_command()
+    spec = contextual_model_spec(model_key)
+    if not command or not contextual_model_valid(model_key):
+        raise ContextualTranslationMissingError(
+            f"{spec.label} contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
+        )
+    context_size = _context_size(spec, context_tokens)
+
+    args = command + [
+        "-m",
+        str(spec.path),
+        "--jinja",
+        "--single-turn",
+        "--reasoning",
+        "off",
+        "--simple-io",
+        "--color",
+        "off",
+        "--log-colors",
+        "off",
+        "--log-verbosity",
+        "1",
+        "--no-warmup",
+        "--no-display-prompt",
+        "--no-show-timings",
+        "-sys",
+        _SYSTEM_PROMPT,
+        "-p",
+        prompt,
+        "-c",
+        str(context_size),
+        "-n",
+        str(max(128, min(4096, max_output_tokens))),
+        "--temp",
+        "0.05",
+        "--top-p",
+        "0.75",
+        "--repeat-penalty",
+        "1.03",
+    ]
+    if platform.machine().lower() in {"arm64", "aarch64"}:
+        args.extend(["-ngl", "99"])
+
+    env = os.environ.copy()
+    env.setdefault("GGML_METAL", "1")
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=6 * 60 * 60,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise DubLocalError(f"Contextual translation engine failed to run: {exc}") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "llama.cpp failed").strip()
+        raise DubLocalError(
+            "Contextual translation failed in llama.cpp: "
+            + (detail.splitlines()[-1] if detail else "unknown error")
+        )
+    cleaned = _clean_cli_text(result.stdout)
+    if not cleaned:
+        raise DubLocalError("llama.cpp returned no translation text.")
+    return cleaned
+
+
+class ContextualRuntime:
+    """One local llama.cpp session reused for an entire contextual translation job."""
+
+    def __init__(self, model_key: str = "8b", context_tokens: int | None = None) -> None:
+        self.model_key = model_key
+        self.spec = contextual_model_spec(model_key)
+        self.context_tokens = _context_size(self.spec, context_tokens)
+        self._server_command = _llama_server_command()
+        self._process: subprocess.Popen[str] | None = None
+        self._log_handle = None
+        self._log_path: Path | None = None
+        self._base_url: str | None = None
+        runtime = "llama-server" if self._server_command else "llama-cli compatibility"
+        self.mode = f"{self.spec.label} · {runtime} · ctx {self.context_tokens}"
+
+    def __enter__(self) -> "ContextualRuntime":
+        if not contextual_model_valid(self.model_key):
             raise ContextualTranslationMissingError(
-                "Contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
+                f"{self.spec.label} contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
             )
-        self.command = command
-        self.model = contextual_model_path()
-        self.port = _free_port()
-        self.process: subprocess.Popen[str] | None = None
+        if not self._server_command:
+            if not _llama_command():
+                raise ContextualTranslationMissingError(
+                    "llama.cpp is not installed. Prepare contextual translation in Settings → Model Manager."
+                )
+            return self
 
-    @property
-    def base_url(self) -> str:
-        return f"http://127.0.0.1:{self.port}"
+        port = _free_local_port()
+        self._base_url = f"http://127.0.0.1:{port}"
+        log_root = Path(user_cache_dir("DubLocal")) / "jobs"
+        log_root.mkdir(parents=True, exist_ok=True)
+        log_dir = Path(tempfile.mkdtemp(prefix="llama-server-", dir=log_root))
+        self._log_path = log_dir / "server.log"
+        self._log_handle = self._log_path.open("w", encoding="utf-8")
 
-    def __enter__(self) -> "ContextualLlamaSession":
-        args = self.command + [
+        args = self._server_command + [
             "-m",
-            str(self.model),
+            str(self.spec.path),
             "--host",
             "127.0.0.1",
             "--port",
-            str(self.port),
+            str(port),
             "-c",
-            str(QWEN_CONTEXT_MODEL["native_context"]),
+            str(self.context_tokens),
             "--jinja",
-            "--no-warmup",
+            "--log-colors",
+            "off",
+            "--log-verbosity",
+            "1",
         ]
         if platform.machine().lower() in {"arm64", "aarch64"}:
             args.extend(["-ngl", "99"])
@@ -91,87 +224,104 @@ class ContextualLlamaSession:
         env = os.environ.copy()
         env.setdefault("GGML_METAL", "1")
         try:
-            self.process = subprocess.Popen(
+            self._process = subprocess.Popen(
                 args,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=self._log_handle,
+                stderr=subprocess.STDOUT,
                 text=True,
                 env=env,
             )
         except OSError as exc:
-            raise DubLocalError(f"Could not start the local contextual translation server: {exc}") from exc
+            self._close_log()
+            raise DubLocalError(f"Could not start the local llama.cpp translation server: {exc}") from exc
 
-        deadline = time.monotonic() + 120.0
-        last_error = "server did not become ready"
-        while time.monotonic() < deadline:
-            if self.process.poll() is not None:
-                raise DubLocalError(
-                    "The local contextual translation server exited while loading the model. "
-                    "Open Settings → Model Manager and verify the contextual model."
-                )
-            try:
-                with request.urlopen(f"{self.base_url}/health", timeout=2.0) as response:
-                    if 200 <= response.status < 300:
-                        return self
-            except Exception as exc:  # server is expected to refuse connections while loading
-                last_error = str(exc)
-            time.sleep(0.25)
-
-        self.close()
-        raise DubLocalError(f"The local contextual translation server did not become ready: {last_error}")
-
-    def close(self) -> None:
-        process = self.process
-        self.process = None
-        if process is None or process.poll() is not None:
-            return
-        process.terminate()
         try:
-            process.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5.0)
+            deadline = time.monotonic() + 240.0
+            while time.monotonic() < deadline:
+                if self._process.poll() is not None:
+                    raise DubLocalError(
+                        f"The local {self.spec.label} translation server exited while loading the model. "
+                        f"See temporary log: {self._log_path}"
+                    )
+                try:
+                    with urlopen(f"{self._base_url}/health", timeout=2) as response:
+                        if response.status == 200:
+                            return self
+                except (HTTPError, URLError, TimeoutError, OSError):
+                    pass
+                time.sleep(0.25)
+
+            raise DubLocalError(
+                f"The local {self.spec.label} translation server did not become ready within 4 minutes. "
+                f"See temporary log: {self._log_path}"
+            )
+        except Exception:
+            self.__exit__(None, None, None)
+            raise
+
+    def _close_log(self) -> None:
+        if self._log_handle is not None:
+            try:
+                self._log_handle.close()
+            except OSError:
+                pass
+            self._log_handle = None
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        self.close()
+        if self._process is not None:
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait(timeout=5)
+            self._process = None
+        self._close_log()
 
-    def complete(self, prompt: str, *, max_output_tokens: int) -> str:
-        body: dict[str, Any] = {
-            "model": self.model.name,
+    def generate(self, prompt: str, *, max_output_tokens: int) -> str:
+        if not self._server_command:
+            return _run_cli_compat(
+                prompt,
+                max_output_tokens=max_output_tokens,
+                model_key=self.model_key,
+                context_tokens=self.context_tokens,
+            )
+        if not self._base_url or not self._process or self._process.poll() is not None:
+            raise DubLocalError("The local contextual translation runtime is not running.")
+
+        payload = {
             "messages": [
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
             "stream": False,
             "temperature": 0.05,
-            "top_p": 0.9,
+            "top_p": 0.75,
+            "repeat_penalty": 1.03,
             "max_tokens": max(128, min(4096, int(max_output_tokens))),
-            "reasoning_effort": "none",
-            "chat_template_kwargs": {"enable_thinking": False},
         }
-        payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
-        req = request.Request(
-            f"{self.base_url}/v1/chat/completions",
-            data=payload,
+        request = Request(
+            f"{self._base_url}/v1/chat/completions",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
         try:
-            with request.urlopen(req, timeout=60 * 60) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise DubLocalError(
-                f"Contextual translation server rejected the request ({exc.code}): {detail[:500]}"
-            ) from exc
-        except (error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-            raise DubLocalError(f"Contextual translation server request failed: {exc}") from exc
+            with urlopen(request, timeout=6 * 60 * 60) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                detail = str(exc)
+            raise DubLocalError(f"Local contextual translation request failed: {detail}") from exc
+        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            raise DubLocalError(f"Local contextual translation request failed: {exc}") from exc
 
         try:
-            content = data["choices"][0]["message"]["content"]
+            content = str(body["choices"][0]["message"]["content"]).strip()
         except (KeyError, IndexError, TypeError) as exc:
-            raise DubLocalError("Contextual translation server returned an unexpected response.") from exc
-        if not isinstance(content, str) or not content.strip():
-            raise DubLocalError("Contextual translation server returned no translated text.")
-        return content.strip()
+            raise DubLocalError("llama.cpp returned an unexpected translation response shape.") from exc
+        if not content:
+            raise DubLocalError("llama.cpp returned an empty translation response.")
+        return content

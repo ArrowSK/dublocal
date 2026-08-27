@@ -1,20 +1,23 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Sequence
 
-from .contextual_protocol import (
-    build_line_translation_prompt,
-    parse_line_translation,
-    parse_partial_line_translation,
+from .adaptive_contextual import active_recommendation, contextual_model_spec, contextual_model_valid
+from .contextual_policy import build_review_prompt, build_translation_prompt, context_plan
+from .contextual_recovery import (
+    build_format_repair_prompt,
+    build_single_line_recovery_prompt,
+    clean_single_line_output,
+    recover_chunk_output,
+    recover_partial_output,
 )
-from .contextual_runtime import ContextualLlamaSession
+from .contextual_runtime import ContextualRuntime
 from .contextual_translation import (
     ContextualTranslationMissingError,
     _llama_command,
     _new_job_dir,
-    _registered_model_valid,
-    context_plan,
     estimate_tokens,
 )
 from .media import DubLocalError
@@ -25,54 +28,29 @@ from .translation import (
     TranslationResult,
     normalise_language_code,
 )
+from .translation_quality import is_protected_caption_tag, validate_translation_text
 
 
 ProgressCallback = Callable[[float, str], None]
 
 
-def _chunk_ranges(segments: Sequence[Segment], input_budget_tokens: int) -> list[tuple[int, int]]:
-    """Pack short material into fewer model calls while keeping long outputs bounded."""
-
-    if not segments:
-        return []
-
-    target_token_cap = min(2400, max(1200, input_budget_tokens // 2))
-    max_segments = 64
-    ranges: list[tuple[int, int]] = []
-    start = 0
-    used = 0
-
-    for position, segment in enumerate(segments):
-        cost = estimate_tokens(segment.text) + 6
-        if position > start and (used + cost > target_token_cap or position - start >= max_segments):
-            ranges.append((start, position))
-            start = position
-            used = 0
-        used += cost
-
-    ranges.append((start, len(segments)))
-    return ranges
+def _validated_chunk(
+    texts: Sequence[str],
+    target_segments: Sequence[Segment],
+    target_language: str,
+) -> list[str]:
+    return [
+        validate_translation_text(
+            text,
+            target_language=target_language,
+            segment_id=segment.index,
+        )
+        for segment, text in zip(target_segments, texts, strict=True)
+    ]
 
 
-def _single_id_prompt(
-    original_prompt: str,
-    segment: Segment,
-    target_language_label: str,
-) -> str:
-    return (
-        original_prompt.rstrip()
-        + "\n\nRECOVERY TASK:\n"
-        + f"The previous response omitted or corrupted subtitle [{segment.index}]. Use all context above and translate ONLY that subtitle into natural {target_language_label}.\n"
-        + f"Source text: {segment.text}\n"
-        + "Return exactly this protocol and nothing else:\n"
-        + "DUBLOCAL_TRANSLATION_BEGIN\n"
-        + f"[{segment.index}] - translated text\n"
-        + "DUBLOCAL_TRANSLATION_END\n"
-    )
-
-
-def _translate_chunk(
-    session: ContextualLlamaSession,
+def _translate_chunk_with_recovery(
+    runtime: ContextualRuntime,
     prompt: str,
     target_segments: Sequence[Segment],
     target_language: str,
@@ -82,40 +60,121 @@ def _translate_chunk(
     total_chunks: int,
     progress_callback: ProgressCallback | None,
 ) -> list[str]:
-    raw = session.complete(prompt, max_output_tokens=max_output_tokens)
+    raw = runtime.generate(prompt, max_output_tokens=max_output_tokens)
     try:
-        return parse_line_translation(raw, target_segments)
+        return _validated_chunk(
+            recover_chunk_output(raw, target_segments),
+            target_segments,
+            target_language,
+        )
     except DubLocalError:
-        recovered = parse_partial_line_translation(raw, target_segments)
-
-    missing = [segment for segment in target_segments if segment.index not in recovered]
-    target_label = TRANSLATION_LANGUAGES[target_language]["label"]
-
-    for position, segment in enumerate(missing, start=1):
         if progress_callback:
-            fraction = max(
-                0.03,
-                min(0.95, ((chunk_number - 1) + position / max(1, len(missing))) / max(1, total_chunks)),
-            )
             progress_callback(
-                fraction,
-                f"Recovering subtitle {position}/{len(missing)} in chunk {chunk_number}/{total_chunks}",
+                max(0.02, min(0.88, (chunk_number - 0.4) / max(1, total_chunks) * 0.80 + 0.02)),
+                f"Recovering output for chunk {chunk_number}/{total_chunks}",
             )
-        single_raw = session.complete(
-            _single_id_prompt(prompt, segment, target_label),
-            max_output_tokens=max(128, min(384, estimate_tokens(segment.text) * 4 + 96)),
-        )
-        recovered[segment.index] = parse_line_translation(single_raw, [segment])[0]
 
-    expected = [segment.index for segment in target_segments]
-    still_missing = [index for index in expected if index not in recovered]
-    if still_missing:
-        raise DubLocalError(
-            "Contextual translator could not recover all required subtitle IDs "
-            f"for chunk {chunk_number}/{total_chunks} (missing={still_missing[:5]}). "
-            "DubLocal stopped instead of writing a corrupted SRT."
+        target_label = TRANSLATION_LANGUAGES[target_language]["label"]
+        repair_prompt = build_format_repair_prompt(raw, target_segments, target_label)
+        repaired = runtime.generate(
+            repair_prompt,
+            max_output_tokens=max(512, max_output_tokens),
         )
-    return [recovered[index] for index in expected]
+        try:
+            return _validated_chunk(
+                recover_chunk_output(repaired, target_segments),
+                target_segments,
+                target_language,
+            )
+        except DubLocalError:
+            pass
+
+        recovered = recover_partial_output(raw, target_segments)
+        recovered.update(recover_partial_output(repaired, target_segments))
+
+        for segment in target_segments:
+            if segment.index not in recovered:
+                continue
+            try:
+                recovered[segment.index] = validate_translation_text(
+                    recovered[segment.index],
+                    target_language=target_language,
+                    segment_id=segment.index,
+                )
+            except DubLocalError:
+                recovered.pop(segment.index, None)
+
+        missing = [segment for segment in target_segments if segment.index not in recovered]
+        for position, segment in enumerate(missing, start=1):
+            if progress_callback:
+                progress_callback(
+                    max(0.02, min(0.90, (chunk_number - 0.2) / max(1, total_chunks) * 0.82 + 0.02)),
+                    f"Recovering subtitle {position}/{len(missing)} in chunk {chunk_number}/{total_chunks}",
+                )
+            single_prompt = build_single_line_recovery_prompt(
+                prompt,
+                segment,
+                target_label,
+                repaired,
+            )
+            single_raw = runtime.generate(
+                single_prompt,
+                max_output_tokens=max(128, min(512, estimate_tokens(segment.text) * 4 + 96)),
+            )
+            partial = recover_partial_output(single_raw, [segment])
+            candidate = (
+                partial[segment.index]
+                if segment.index in partial
+                else clean_single_line_output(single_raw, segment.index)
+            )
+            recovered[segment.index] = validate_translation_text(
+                candidate,
+                target_language=target_language,
+                segment_id=segment.index,
+            )
+
+        expected = [segment.index for segment in target_segments]
+        still_missing = [index for index in expected if index not in recovered]
+        if still_missing:
+            raise DubLocalError(
+                "Contextual translator could not recover all required subtitle IDs "
+                f"for chunk {chunk_number}/{total_chunks} (missing={still_missing[:5]}). "
+                "DubLocal stopped instead of writing a corrupted SRT."
+            )
+        return [recovered[index] for index in expected]
+
+
+def _review_chunk(
+    runtime: ContextualRuntime,
+    original_prompt: str,
+    target_segments: Sequence[Segment],
+    draft_texts: Sequence[str],
+    target_language: str,
+    *,
+    max_output_tokens: int,
+    chunk_number: int,
+    total_chunks: int,
+    progress_callback: ProgressCallback | None,
+) -> list[str]:
+    """Run a conservative senior-review pass; keep the validated draft if review formatting fails."""
+
+    if progress_callback:
+        progress_callback(
+            min(0.96, 0.55 + (chunk_number - 1) / max(1, total_chunks) * 0.38),
+            f"Reviewing translation quality {chunk_number}/{total_chunks}",
+        )
+    review_prompt = build_review_prompt(
+        original_prompt,
+        target_segments,
+        draft_texts,
+        target_language,
+    )
+    try:
+        raw = runtime.generate(review_prompt, max_output_tokens=max_output_tokens)
+        reviewed = recover_chunk_output(raw, target_segments)
+        return _validated_chunk(reviewed, target_segments, target_language)
+    except DubLocalError:
+        return list(draft_texts)
 
 
 def translate_srt_contextual_with_progress(
@@ -123,9 +182,26 @@ def translate_srt_contextual_with_progress(
     source_language: str,
     target_language: str,
     *,
+    review: bool | None = None,
+    model_key: str | None = None,
+    context_cap_tokens: int | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> TranslationResult:
-    """Translate locally with one persistent llama.cpp model session per job."""
+    """Adaptive contextual translation using the recommended local model/profile for this Mac."""
+
+    recommendation = active_recommendation()
+    selected_model_key = model_key or recommendation.model_key
+    selected_review = recommendation.review if review is None else bool(review)
+    selected_context_cap = (
+        recommendation.context_cap_tokens
+        if context_cap_tokens is None
+        else max(4096, int(context_cap_tokens))
+    )
+    spec = contextual_model_spec(selected_model_key)
+    runtime_context_tokens = min(
+        int(spec.metadata["native_context"]),
+        selected_context_cap + 4096,
+    )
 
     path = Path(subtitle_path).expanduser().resolve()
     if not path.is_file():
@@ -141,9 +217,9 @@ def translate_srt_contextual_with_progress(
         raise DubLocalError("Choose a supported translation target language.")
     if source == target:
         raise DubLocalError("Source and target languages are the same; no translation is needed.")
-    if not _llama_command() or not _registered_model_valid():
+    if not _llama_command() or not contextual_model_valid(selected_model_key):
         raise ContextualTranslationMissingError(
-            "Contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
+            f"{spec.label} contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
         )
 
     try:
@@ -154,55 +230,115 @@ def translate_srt_contextual_with_progress(
         raise DubLocalError("The subtitle file contains no timed text to translate.")
 
     plan = context_plan(segments)
-    ranges = _chunk_ranges(segments, plan.input_budget_tokens)
-    total_chunks = max(1, len(ranges))
+    if plan.input_budget_tokens > selected_context_cap:
+        plan = replace(plan, input_budget_tokens=selected_context_cap)
+    starts = list(range(0, len(segments), plan.chunk_segments))
+    total_chunks = max(1, len(starts))
     translated: list[TranslatedSegment] = []
+    protected_count = sum(1 for segment in segments if is_protected_caption_tag(segment.text))
+    needs_model = protected_count < len(segments)
+    runtime_mode = "not needed"
 
     if progress_callback:
-        progress_callback(0.02, f"Loading contextual model once for {total_chunks} translation chunk(s)")
+        progress_callback(
+            0.02,
+            f"Preparing {total_chunks} contextual chunk(s) · {protected_count} protected tag(s)",
+        )
 
-    with ContextualLlamaSession() as session:
-        if progress_callback:
-            progress_callback(0.06, "Contextual model ready")
-
-        for chunk_number, (start, end) in enumerate(ranges, start=1):
-            target_segments = segments[start:end]
-            prompt = build_line_translation_prompt(
-                segments,
-                start,
-                end,
-                source,
-                target,
-                translated,
-                plan,
-            )
-            target_text = "\n".join(segment.text for segment in target_segments)
-            max_output_tokens = max(512, estimate_tokens(target_text) * 2 + 256)
-            chunk = _translate_chunk(
-                session,
-                prompt,
-                target_segments,
-                target,
-                max_output_tokens=max_output_tokens,
-                chunk_number=chunk_number,
-                total_chunks=total_chunks,
-                progress_callback=progress_callback,
-            )
-            translated.extend(
-                TranslatedSegment(
-                    index=segment.index,
-                    start_ms=segment.start_ms,
-                    end_ms=segment.end_ms,
-                    source_text=segment.text,
-                    translated_text=text,
+    runtime: ContextualRuntime | None = None
+    try:
+        if needs_model:
+            if progress_callback:
+                pass_name = " + review" if selected_review else ""
+                progress_callback(
+                    0.03,
+                    f"Loading {spec.label}{pass_name} once for this translation",
                 )
-                for segment, text in zip(target_segments, chunk, strict=True)
-            )
+            runtime = ContextualRuntime(
+                model_key=selected_model_key,
+                context_tokens=runtime_context_tokens,
+            ).__enter__()
+            runtime_mode = runtime.mode
+
+        for chunk_number, start in enumerate(starts, start=1):
+            end = min(len(segments), start + plan.chunk_segments)
+            target_segments = segments[start:end]
+            model_targets = [
+                segment for segment in target_segments if not is_protected_caption_tag(segment.text)
+            ]
+            translated_map: dict[int, str] = {}
+
+            if model_targets:
+                assert runtime is not None
+                prompt = build_translation_prompt(
+                    segments,
+                    start,
+                    end,
+                    source,
+                    target,
+                    translated,
+                    plan,
+                )
+                target_text = "\n".join(segment.text for segment in model_targets)
+                max_output_tokens = max(512, estimate_tokens(target_text) * 2 + 256)
+                draft = _translate_chunk_with_recovery(
+                    runtime,
+                    prompt,
+                    model_targets,
+                    target,
+                    max_output_tokens=max_output_tokens,
+                    chunk_number=chunk_number,
+                    total_chunks=total_chunks,
+                    progress_callback=progress_callback,
+                )
+                chunk = (
+                    _review_chunk(
+                        runtime,
+                        prompt,
+                        model_targets,
+                        draft,
+                        target,
+                        max_output_tokens=max_output_tokens,
+                        chunk_number=chunk_number,
+                        total_chunks=total_chunks,
+                        progress_callback=progress_callback,
+                    )
+                    if selected_review
+                    else draft
+                )
+                translated_map = {
+                    segment.index: text
+                    for segment, text in zip(model_targets, chunk, strict=True)
+                }
+
+            for segment in target_segments:
+                text = (
+                    segment.text
+                    if is_protected_caption_tag(segment.text)
+                    else translated_map[segment.index]
+                )
+                translated.append(
+                    TranslatedSegment(
+                        index=segment.index,
+                        start_ms=segment.start_ms,
+                        end_ms=segment.end_ms,
+                        source_text=segment.text,
+                        translated_text=text,
+                    )
+                )
+
             if progress_callback:
                 progress_callback(
-                    min(0.96, chunk_number / total_chunks * 0.90 + 0.06),
-                    f"Translated context chunk {chunk_number}/{total_chunks}",
+                    min(0.97, chunk_number / total_chunks * 0.92 + 0.04),
+                    (
+                        f"Translated + reviewed chunk {chunk_number}/{total_chunks}"
+                        if selected_review
+                        else f"Translated chunk {chunk_number}/{total_chunks}"
+                    ),
                 )
+    finally:
+        if runtime is not None:
+            runtime.__exit__(None, None, None)
 
     output_dir = _new_job_dir("contextual-translation")
     output = output_dir / f"captions.{target}.srt"
@@ -224,9 +360,9 @@ def translate_srt_contextual_with_progress(
         progress_callback(1.0, "Contextual translation complete")
 
     route = (
-        f"Contextual Qwen3 · {TRANSLATION_LANGUAGES[source]['label']} → "
-        f"{TRANSLATION_LANGUAGES[target]['label']} · {plan.input_budget_tokens}-token context budget · "
-        f"persistent llama.cpp session · {total_chunks} chunk(s)"
+        f"{spec.label} {'+ review' if selected_review else 'single pass'} · "
+        f"{TRANSLATION_LANGUAGES[source]['label']} → {TRANSLATION_LANGUAGES[target]['label']} · "
+        f"{plan.input_budget_tokens}-token input · {runtime_mode}"
     )
     return TranslationResult(
         srt_path=output,

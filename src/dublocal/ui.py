@@ -36,7 +36,7 @@ from .progress_operations import (
     install_whisper_model_with_progress,
 )
 from .stage_status import subtitles_ready_status, translation_ready_status, voice_ready_status
-from .subtitle_export import SUBTITLE_EXPORT_CHOICES, export_subtitle_timeline
+from .subtitle_export import SUBTITLE_FORMAT_CHOICES, export_subtitle
 from .transcription import model_manager_status
 from .translation import translated_segments_to_rows, translation_manager_status
 from .tts import (
@@ -129,6 +129,17 @@ input[type="range"], progress {
 .dl-stage-status p { margin: 0 !important; }
 .dl-stage-status strong { color: var(--dl-green-soft) !important; }
 
+.dl-quality-note {
+  margin: 8px 0 !important;
+  padding: 8px 10px !important;
+  border-left: 3px solid #d7b94a !important;
+  background: rgba(52, 44, 10, 0.18) !important;
+  color: #d9d2ad !important;
+  min-height: 0 !important;
+}
+
+.dl-quality-note p { margin: 0 !important; }
+
 .console { min-height: 72px !important; }
 """
 
@@ -199,6 +210,42 @@ def _source_card_status(source_info: dict | None) -> str:
     )
 
 
+def _selected_caption_track(info: dict | None, track_value: str | None) -> dict:
+    if not info or not track_value:
+        return {}
+    return next(
+        (item for item in info.get("subtitle_tracks", []) if item.get("value") == track_value),
+        {},
+    )
+
+
+def _caption_quality_note(info: dict | None, track_value: str | None) -> str:
+    track = _selected_caption_track(info, track_value)
+    if not track:
+        return ""
+    if (info or {}).get("kind") == "youtube" and track.get("source") == "auto":
+        return (
+            "⚠ **Automatic YouTube captions** · recognition mistakes in the source cannot be repaired reliably by translation. "
+            "For songs, accents or noisy audio, local transcription with **Accurate · Large v3 Turbo Q5** is usually the better source."
+        )
+    return "✓ Creator/embedded subtitle track · DubLocal will preserve its timing and text as the source timeline."
+
+
+def _append_caption_quality(card: str, info: dict | None, track_value: str | None) -> str:
+    note = _caption_quality_note(info, track_value)
+    return f"{card}\n\n{note}" if note else card
+
+
+def _export_existing_subtitle(path: str, output_format: str):
+    if not path:
+        return None
+    try:
+        return str(export_subtitle(path, output_format))
+    except Exception as exc:
+        _error_status(str(exc))
+        return None
+
+
 def _translation_status_for_ui(
     mode: str,
     source_language: str,
@@ -215,16 +262,6 @@ def _translation_status_for_ui(
         )
     except Exception as exc:
         return _error_status(str(exc))
-
-
-def _export_subtitle_for_ui(subtitle_path: str | None, output_format: str) -> str | None:
-    if not subtitle_path:
-        return None
-    try:
-        return str(export_subtitle_timeline(subtitle_path, output_format))
-    except Exception as exc:
-        _error_status(str(exc))
-        return None
 
 
 def _scan_source_ui(
@@ -251,8 +288,9 @@ def _extract_ui(
     update(0.08, "Extracting subtitle track")
     _output, rows, status, path, language = extract_selected(info, track_value, rights_confirmed)
     update(1.0, "Subtitle timeline ready")
+    download = str(export_subtitle(path, output_format)) if path else None
     card = subtitles_ready_status(path, rows, language, method="Subtitles ready")
-    download = _export_subtitle_for_ui(path, output_format)
+    card = _append_caption_quality(card, info, track_value)
     return download, rows, status, path, language, card
 
 
@@ -270,8 +308,10 @@ def _transcribe_ui(
         info, rights_confirmed, model_id, language
     )
     update(1.0, "Transcription complete")
+    download = str(export_subtitle(path, output_format)) if path else None
     card = subtitles_ready_status(path, rows, detected, method="Transcribed")
-    download = _export_subtitle_for_ui(path, output_format)
+    if path:
+        card += f" · **{output_format.upper()} ready to download**"
     return download, rows, status, path, detected, card
 
 
@@ -449,6 +489,8 @@ def _translate_with_state(
                 f"[route] {result.route}\n"
                 f"[segments] {len(result.segments)} · original timings preserved\n"
                 "[quality] surrounding source context + rolling prior translations were used\n"
+                "[tags] standalone bracketed cues were preserved exactly\n"
+                "[validation] runtime leakage and wrong-script contamination were rejected\n"
                 f"[output] {result.srt_path.name}\n"
                 "```"
             )
@@ -596,16 +638,18 @@ def build_app() -> gr.Blocks:
                         choices=[],
                         interactive=False,
                     )
+                    caption_quality_note = gr.Markdown("", elem_classes=["dl-quality-note"])
                     rights = gr.Checkbox(
                         label="I have the right or legal authority to process this media",
                         value=False,
                     )
-                    subtitle_format = gr.Dropdown(
-                        label="Download format",
-                        choices=SUBTITLE_EXPORT_CHOICES,
-                        value="srt",
-                    )
-                    extract_button = gr.Button("Use existing subtitles", variant="primary")
+                    with gr.Row():
+                        subtitle_download_format = gr.Dropdown(
+                            label="Download format",
+                            choices=SUBTITLE_FORMAT_CHOICES,
+                            value="srt",
+                        )
+                        extract_button = gr.Button("Use existing subtitles", variant="primary")
                     with gr.Accordion("No usable captions? Transcribe locally with Whisper", open=False):
                         with gr.Row():
                             whisper_model_main = gr.Dropdown(
@@ -616,7 +660,7 @@ def build_app() -> gr.Blocks:
                             )
                         transcribe_button = gr.Button("Transcribe locally", variant="primary")
                         gr.HTML(
-                            '<div class="dl-compact-note">Model install/remove lives in Settings → Model Manager.</div>'
+                            '<div class="dl-compact-note">For songs, accents or noisy audio, the optional Accurate model is the stronger local choice. Model install/remove lives in Settings → Model Manager.</div>'
                         )
                     subtitle_stage_status = gr.Markdown(
                         "**Waiting** · choose existing captions or transcribe locally.",
@@ -830,9 +874,22 @@ def build_app() -> gr.Blocks:
             queue=False,
         )
         scan_event.then(
+            fn=_caption_quality_note,
+            inputs=[source_state, subtitle_track],
+            outputs=[caption_quality_note],
+            queue=False,
+        )
+        scan_event.then(
             fn=_translation_status_for_ui,
             inputs=[translation_mode, translation_source_language, translation_target_language, source_state],
             outputs=[translation_status_main],
+            queue=False,
+        )
+
+        subtitle_track.change(
+            fn=_caption_quality_note,
+            inputs=[source_state, subtitle_track],
+            outputs=[caption_quality_note],
             queue=False,
         )
 
@@ -843,7 +900,7 @@ def build_app() -> gr.Blocks:
         )
         extract_begin.then(
             fn=_extract_ui,
-            inputs=[source_state, subtitle_track, rights, subtitle_format],
+            inputs=[source_state, subtitle_track, rights, subtitle_download_format],
             outputs=[
                 subtitle_output,
                 subtitle_preview,
@@ -861,7 +918,7 @@ def build_app() -> gr.Blocks:
         )
         transcribe_begin.then(
             fn=_transcribe_ui,
-            inputs=[source_state, rights, whisper_model_main, source_language, subtitle_format],
+            inputs=[source_state, rights, whisper_model_main, source_language, subtitle_download_format],
             outputs=[
                 subtitle_output,
                 subtitle_preview,
@@ -871,9 +928,10 @@ def build_app() -> gr.Blocks:
                 subtitle_stage_status,
             ],
         )
-        subtitle_format.change(
-            fn=_export_subtitle_for_ui,
-            inputs=[subtitle_path_state, subtitle_format],
+
+        subtitle_download_format.change(
+            fn=_export_existing_subtitle,
+            inputs=[subtitle_path_state, subtitle_download_format],
             outputs=[subtitle_output],
             queue=False,
         )

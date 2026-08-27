@@ -2,39 +2,37 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dublocal.subtitle_export import export_subtitle_timeline
+from dublocal.subtitle_export import export_subtitle
 
 
-_SAMPLE = """1
+SRT = """1
 00:00:01,000 --> 00:00:02,500
-Hello, world.
+Hello
 
 2
 00:00:03,000 --> 00:00:04,000
-Second line.
+[MUSIC]
 """
 
 
-def test_srt_export_reuses_normalized_timeline(tmp_path: Path):
+def test_srt_export_reuses_internal_timeline(tmp_path: Path):
     source = tmp_path / "captions.srt"
-    source.write_text(_SAMPLE, encoding="utf-8")
-    assert export_subtitle_timeline(source, "srt") == source.resolve()
+    source.write_text(SRT, encoding="utf-8")
+    assert export_subtitle(source, "srt") == source.resolve()
 
 
-def test_vtt_txt_and_csv_exports(tmp_path: Path):
+def test_vtt_export_preserves_timing_and_tags(tmp_path: Path):
     source = tmp_path / "captions.srt"
-    source.write_text(_SAMPLE, encoding="utf-8")
+    source.write_text(SRT, encoding="utf-8")
+    output = export_subtitle(source, "vtt")
+    text = output.read_text(encoding="utf-8")
+    assert text.startswith("WEBVTT\n")
+    assert "00:00:01.000 --> 00:00:02.500" in text
+    assert "[MUSIC]" in text
 
-    vtt = export_subtitle_timeline(source, "vtt")
-    txt = export_subtitle_timeline(source, "txt")
-    csv = export_subtitle_timeline(source, "csv")
 
-    assert vtt.suffix == ".vtt"
-    assert "WEBVTT" in vtt.read_text(encoding="utf-8")
-    assert "00:00:01.000 --> 00:00:02.500" in vtt.read_text(encoding="utf-8")
-
-    assert txt.read_text(encoding="utf-8") == "Hello, world.\nSecond line.\n"
-
-    csv_text = csv.read_text(encoding="utf-8")
-    assert "start,end,text" in csv_text
-    assert '"Hello, world."' in csv_text
+def test_txt_export_is_plain_text(tmp_path: Path):
+    source = tmp_path / "captions.srt"
+    source.write_text(SRT, encoding="utf-8")
+    output = export_subtitle(source, "txt")
+    assert output.read_text(encoding="utf-8") == "Hello\n[MUSIC]\n"

@@ -45,6 +45,13 @@ WHISPER_MODELS: dict[str, dict[str, str]] = {
         "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
         "license": "MIT",
     },
+    "large-v3-turbo-q5_0": {
+        "label": "Accurate · Large v3 Turbo Q5 · 547 MiB",
+        "size": "547 MiB",
+        "sha1": "e050f7970618a659205450ad97eb95a18d69c9ee",
+        "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        "license": "MIT",
+    },
 }
 
 _PROGRESS_RE = re.compile(r"progress\s*=\s*(\d{1,3})%", re.IGNORECASE)

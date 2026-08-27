@@ -1,6 +1,6 @@
 # DubLocal architecture
 
-**Current development build: v0.4.1.dev0 / M4 + M3.1 Contextual Translation**
+**Current development build: v0.4.2.dev0 — Subtitle Export + Translation Quality Pass**
 
 DubLocal is a local pipeline of replaceable stages. The Gradio UI coordinates jobs; media inspection, transcription, translation, TTS and later rendering remain separate modules with separate dependencies and failure boundaries.
 
@@ -14,10 +14,13 @@ inspection + caption discovery
 existing text subtitles OR local whisper.cpp transcription
         ↓
 normalized Segment[] timeline (stable IDs + integer millisecond timing)
-        ↓
-translation (optional)
-  ├─ Contextual quality · Qwen3 4B + llama.cpp   ← default
-  └─ Fast legacy · OPUS/Marian                  ← explicit fallback choice
+        ├──────────────→ SRT / VTT / TXT export
+        ↓ optional
+translation
+  ├─ Recommended for this Mac
+  │    ├─ Qwen3 4B lightweight
+  │    └─ Qwen3 8B balanced / best + optional review
+  └─ Fast legacy · OPUS/Marian                    ← explicit minimum-storage choice
         ↓
 source or translated SRT
         ↓
@@ -34,15 +37,19 @@ stream-copy/remux video where compatible
 ## Design rules
 
 1. Subtitle IDs and timestamps are stable data. Translation changes text, not timing.
-2. The default translation path must use dialogue context; it must not translate subtitle rows as unrelated sentences.
-3. Longer programmes receive a larger translation-context budget, bounded by the local model's context window.
-4. Optional heavy models are downloaded only after an explicit user action.
-5. Reuse existing executables, shared model caches and compatible external runtimes before installing duplicates.
-6. Never merge Python virtual environments or inject another application's `site-packages` into DubLocal.
-7. No silent cloud fallback and no silent downgrade from the selected quality backend.
-8. Model registrations require explicit licence, immutable revision and checksum metadata.
-9. A backend failure should not disable simpler stages such as caption extraction or SRT export.
-10. Adding/replacing audio must not imply video re-encoding; M5 prefers stream-copy.
+2. Subtitles are a first-class output; translation and voice generation are optional downstream stages.
+3. The default contextual path must use dialogue context and must not translate subtitle rows as unrelated sentences.
+4. Hardware recommendation must account for architecture, physical/unified memory, runtime context allocation and practical inference time.
+5. Longer programmes receive a larger context budget only up to the active hardware profile's ceiling.
+6. Standalone caption tags are structural data and bypass translation.
+7. Optional heavy models are downloaded only after explicit user action.
+8. Reuse existing executables, shared model caches and compatible external runtimes before installing duplicates.
+9. Never merge Python virtual environments or inject another application's `site-packages` into DubLocal.
+10. No silent cloud fallback and no silent downgrade from the selected contextual profile to OPUS.
+11. Model registrations require explicit licence, immutable revision and checksum metadata.
+12. Generated translation must pass alignment, runtime-leakage and target-script validation before an SRT is written.
+13. A backend failure must not disable simpler stages such as caption extraction/transcription/export.
+14. Adding/replacing audio must not imply video re-encoding; M5 prefers stream-copy.
 
 ## Normalized timeline
 
@@ -58,71 +65,183 @@ Segment
 
 Integer milliseconds avoid accumulated timing drift. Extracted captions and Whisper transcription are normalized to this structure/SRT before later stages.
 
-## M2 transcription
+`src/dublocal/subtitle_export.py` converts that stable timeline to user-facing SRT, WebVTT or TXT without re-running transcription.
 
-`src/dublocal/transcription.py` manages local `whisper-cli`, FFmpeg speech preparation and Tiny/Base/Small Whisper models. Whisper can hand its detected language into the translation UI.
+## M2 transcription + v0.4.2 accurate option
+
+`src/dublocal/transcription.py` manages local `whisper-cli`, FFmpeg speech preparation and optional model weights.
+
+Base remains the default general-purpose model. v0.4.2 adds Large-v3-Turbo-Q5 as an optional higher-accuracy source path for songs, accents and noisy material. The UI explicitly distinguishes automatic YouTube captions from creator/embedded subtitles because translation must not be treated as an ASR-repair engine.
 
 ## M3 legacy translation
 
-`src/dublocal/translation.py` remains the lightweight legacy translation engine using pinned Helsinki-NLP OPUS/Marian safetensors models.
+`src/dublocal/translation.py` remains the lightweight legacy backend using pinned Helsinki-NLP OPUS/Marian safetensors models.
 
-It is intentionally retained because it is small and fast, but its sentence-level design is no longer the default quality path.
+It is retained because it is small and fast. Its sentence-level architecture is deliberately not the default contextual path.
 
-## M3.1 contextual translation
+## v0.4.2 adaptive contextual translation
 
-`src/dublocal/contextual_translation.py` is the default translation backend in v0.4.1.dev0.
-
-### Runtime and model
+The contextual path is split so hardware policy, model/storage policy, runtime lifetime, prompt policy and validation remain independently testable:
 
 ```text
-llama.cpp
-  +
-Qwen/Qwen3-4B-GGUF
-Qwen3-4B-Q4_K_M.gguf
+hardware_profile.py            Mac architecture/RAM detection + recommendation tier
+adaptive_contextual.py         choose/register Qwen3 4B or Qwen3 8B for that tier
+contextual_translation.py      pinned Qwen3 4B model + shared context primitives
+contextual_quality_model.py    pinned Qwen3 8B model registration/download
+contextual_runtime.py          one adaptive llama-server session per job
+contextual_policy.py           context/chunk planning + translation/review prompts
+contextual_progress.py         orchestration, hardware cap, recovery, review, SRT writing
+translation_quality.py         protected tags + target-output validation
+contextual_recovery.py         strict ID-oriented recovery
 ```
 
-DubLocal looks for `llama-cli`/`llama cli` first. If absent, Model Manager can install `llama.cpp` through Homebrew. The GGUF is stored in the normal shared Hugging Face cache, linked into DubLocal's model registration, pinned to an immutable upstream revision and SHA-256 verified before use.
+### Hardware recommendation
+
+`hardware_profile.py` reads local architecture and physical memory. The current conservative defaults are:
+
+```text
+Apple Silicon < 12 GB     Qwen3 4B · review off · 8,192 input cap
+Apple Silicon 12–23 GB    Qwen3 8B · review off · 16,384 input cap
+Apple Silicon 24 GB+      Qwen3 8B · review on  · 24,576 input cap
+Intel < 24 GB             Qwen3 4B · review off · 6,144 input cap
+Intel 24 GB+              Qwen3 8B · review off · 12,288 input cap
+```
+
+These are recommendations, not hard support declarations. The purpose is to prevent the “strongest available model” from becoming a poor product default on low-memory or CPU-bound Macs.
+
+The primary Main UI receives only the resulting label: **Recommended for this Mac · Lightweight / Balanced / Best quality**. Detailed reasoning stays in the collapsed engine details and Model Manager.
+
+### Context allocation versus prompt budget
+
+There are two separate limits:
+
+1. **Input budget** — how much source/context material DubLocal puts into the prompt.
+2. **llama.cpp runtime context** — how much KV/context capacity llama.cpp allocates.
+
+Both are hardware-scaled. The runtime allocation is currently the profile's input cap plus output/instruction headroom, capped by the model's native context. This is essential on an 8 GB M1: sending an 8k prompt while still launching `llama-server -c 32768` would leave much of the memory problem intact.
+
+### Contextual models
+
+```text
+Qwen/Qwen3-4B-GGUF
+Qwen3-4B-Q4_K_M.gguf
+~2.5 GB
+Apache-2.0
+
+Qwen/Qwen3-8B-GGUF
+Qwen3-8B-Q4_K_M.gguf
+~5.03 GB
+Apache-2.0
+```
+
+Both models use the normal shared Hugging Face cache and separate DubLocal registrations. Registration requires the exact configured upstream revision and checksum.
+
+`Prepare / verify contextual translation` downloads only the model recommended for the current Mac. It does not install both merely because both are supported.
+
+### Runtime lifetime
+
+The preferred path is a loopback-only `llama-server` bound to `127.0.0.1` on an ephemeral port.
+
+One server/model load is reused for:
+
+- every translation chunk;
+- structured/plain-text recovery;
+- missing-ID recovery;
+- the optional senior-review pass.
+
+This solves two earlier architectural problems: repeated model startup on short jobs and accidental mixing of CLI runtime output with generated subtitle text.
+
+A sanitized `llama-cli --simple-io` path remains only for compatibility when `llama-server` is unavailable.
+
+Server logs are written under the temporary DubLocal jobs cache and are covered by the normal 24-hour/4-GiB pruning policy.
 
 ### Context planning
 
-A translation request is not one subtitle row at a time. DubLocal creates a `ContextPlan` from the programme duration.
-
-Current policy:
+Before hardware capping, the source-context planner is duration-aware:
 
 ```text
-minimum input context    4,096 tokens
+base input context       4,096 tokens
 additional context       +128 tokens per programme minute
-maximum input context   24,576 tokens
-Qwen native context     32,768 tokens
+absolute input ceiling  24,576 tokens
+model native context    32,768 tokens
 ```
 
-The ceiling intentionally leaves space for system/user instructions and generated subtitle JSON.
+The active hardware profile may impose a lower ceiling.
 
-Longer programmes also use slightly larger target chunks (bounded at 20 subtitle segments) to reduce repeated model startup while keeping output alignment easy to verify.
+Target chunk size is deliberately larger for short media:
 
-### Three context layers
-
-Each target chunk receives:
-
-1. **Programme-wide source context** — evenly sampled lines from across the media, useful for recurring names/topics and later callbacks.
-2. **Nearby source context** — lines immediately before and after the target chunk, weighted more heavily toward preceding dialogue.
-3. **Recent translated context** — prior accepted/generated translations, carried forward as terminology and style memory.
-
-This structure lets the translator reason about pronouns, speaker intent, slang, jokes, profanity/register and recurring terminology while still preserving one output item per original subtitle ID.
-
-### Alignment contract
-
-The model is instructed through its chat template with reasoning disabled for this deterministic transformation task. `llama.cpp` is given a JSON schema so output must be an array of:
-
-```json
-{"id": 123, "text": "translated subtitle"}
+```text
+≤ 10 min      48 subtitle segments
+≤ 30 min      36
+≤ 90 min      28
+> 90 min      24
 ```
 
-DubLocal validates that every requested ID occurs exactly once and that no unexpected ID appears. If alignment fails, the job stops instead of producing a shifted SRT.
+A short song therefore normally fits into one contextual chunk rather than several independent requests.
 
-### No hidden fallback
+### Context layers
 
-If Qwen/llama.cpp is not prepared or fails, Contextual quality reports the error. It does not silently invoke OPUS or a cloud API. The user can explicitly choose **Fast legacy · OPUS** when desired.
+Each target chunk can receive:
+
+1. **Programme-wide source context** — evenly sampled source lines for recurring names/topics/references.
+2. **Nearby source context** — source lines before and after the target chunk.
+3. **Recent translated context** — prior accepted translations as terminology/style memory.
+
+The prompt also tells the model to read subtitle fragments as continuous speech when a sentence crosses timestamp boundaries.
+
+### Target-language rules
+
+`translation_quality.py` supplies target-language guidance. For Russian, for example, the prompt explicitly requires idiomatic contemporary Russian, natural case/gender/number/aspect, no English-syntax calques, no pseudo-Russian transliterations and no ordinary untranslated English words.
+
+These rules are semantic guidance, not a claim that grammar can be perfectly validated by regex.
+
+### Best-quality review pass
+
+Only the hardware profiles that enable review run it automatically. The first translation draft is already alignment/script/runtime validated. Best quality then asks the same loaded Qwen3 8B model to perform a second senior-review pass against:
+
+- the original target source lines;
+- the complete contextual prompt;
+- the first-pass draft.
+
+The review focuses on mistranslation, calques, target-language grammar, word choice, untranslated ordinary words, recurring terminology and register/profanity consistency.
+
+Because the same model stays loaded, the review mainly increases inference time rather than allocating a second model-sized block of memory.
+
+If the review response is structurally invalid, DubLocal keeps the already-valid draft. Review cannot corrupt a usable result.
+
+### Protected caption tags
+
+Standalone bracketed cues such as `[MUSIC]`, `[APPLAUSE]` and `[LAUGHTER]` never enter the translation model. They are copied exactly into the output timeline.
+
+### Output validation
+
+Before any translated text becomes SRT:
+
+- runtime banners/model paths/prompts/control characters are rejected;
+- CJK/Hangul contamination is rejected for the current European target set;
+- Cyrillic targets reject substantial Latin-script leakage;
+- Latin targets reject substantial Cyrillic leakage;
+- every target subtitle ID must be present exactly once;
+- unexpected IDs are rejected;
+- ordering/timestamps are reconstructed from the source timeline, never from model output.
+
+Recovery receives the original context. If output still cannot be validated, the translation stops instead of writing a corrupted SRT.
+
+### Source-quality boundary
+
+Contextual translation is not an audio decoder. If an automatic-caption source already contains incorrect words, DubLocal does not instruct Qwen to hallucinate the probable original lyrics/dialogue.
+
+The intended repair path is upstream:
+
+```text
+bad automatic captions
+        ↓
+local Accurate Whisper transcription from audio
+        ↓
+better source timeline
+        ↓
+contextual translation
+```
 
 ## Dependency reuse
 
@@ -130,41 +249,58 @@ If Qwen/llama.cpp is not prepared or fails, Contextual quality reports the error
 
 - FFmpeg and ffprobe;
 - `whisper-cli`;
-- `llama.cpp` / `llama-cli`;
-- the shared Hugging Face cache;
+- `llama.cpp` executables;
+- shared Hugging Face cache;
 - compatible external Python environments.
 
 ### Python environment boundary
 
-On macOS, separate venv `bin/python` paths may point to the same underlying framework binary. DubLocal preserves the venv entry-point identity rather than resolving the symlink. This is how a separate Kokoro environment can be reused safely while remaining isolated.
+On macOS, separate venv `bin/python` paths may point to the same underlying framework binary. DubLocal preserves the virtual-environment entry-point identity rather than resolving that symlink away.
 
-Supported external Python backends run a dedicated worker process with that environment's own interpreter; no cross-venv import path manipulation occurs.
+Supported external Python backends run a dedicated worker process with that environment's own interpreter; no cross-venv import-path manipulation occurs.
 
 ## M4 Kokoro voice generation
 
 `src/dublocal/tts.py` and `src/dublocal/kokoro_worker.py` generate a local voice-only timeline.
 
-The worker can run inside a compatible external Kokoro environment. It writes 24 kHz mono segment WAVs plus metadata into DubLocal's job directory. `tts.py` assembles them at the original subtitle start times and reports `voice_duration_ms`, `slot_ms` and `overflow_ms` for M5.
+The worker can run inside a compatible external Kokoro environment. It writes per-segment WAV assets and metadata into DubLocal's job directory. `tts.py` assembles the voice timeline at original subtitle start times and reports timing overflow data for M5.
 
 Kokoro and translation are separate capabilities. A language can be translated successfully even when Kokoro has no official voice frontend for it.
 
 ## Main / Settings split
 
-`src/dublocal/ui.py` keeps ordinary processing under **Main** and maintenance under **Settings**.
+The v0.4 UI keeps ordinary processing under **Main** and maintenance under **Settings**.
 
 Settings contains:
 
 - **Updates**;
-- **Model Manager** — Whisper, Contextual translation, Fast legacy OPUS, Kokoro;
+- **Model Manager** — Whisper, adaptive contextual translation, Fast legacy OPUS, Kokoro;
 - **Local Resources**.
 
-Model installation/removal is not mixed into the ordinary job flow.
+Model install/remove controls stay out of the normal processing flow.
+
+`ui_v042.py` is a deliberately small transition adapter binding the stable v0.4 layout to the adaptive translation policy while the larger `ui.py` is awaiting its next structural refactor. It avoids copying the entire Gradio layout solely to swap model policy.
 
 ## Updates and repair
 
 `src/dublocal/updater.py` distinguishes the running package, local Git checkout and official `origin/main`.
 
 Normal updates require a clean fast-forward. Repair is a separate explicit operation that can back up modified tracked files, restore official source and refresh the managed Python core while preserving models/caches/jobs/untracked files.
+
+## Temporary job lifecycle
+
+`src/dublocal/job_cache.py` owns generated/intermediate job cleanup.
+
+Default policy:
+
+```text
+root       ~/Library/Caches/DubLocal/jobs/
+max age    24 hours
+max size   4 GiB
+strategy   age first, then oldest-first size pruning
+```
+
+Persistent models/shared HF cache are explicitly outside this lifecycle.
 
 ## M5 boundary
 

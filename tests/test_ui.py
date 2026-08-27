@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import dublocal
+from dublocal.subtitle_export import SUBTITLE_FORMAT_CHOICES
 from dublocal.ui import (
     MATRIX_CSS,
+    _caption_quality_note,
     _settings_version_html,
     _source_card_status,
     _suggest_voice_controls,
@@ -68,6 +70,27 @@ def test_source_card_status_is_persistent_and_human_readable():
     assert "Example video" in loaded
     assert "2:05" in loaded
     assert "2 caption tracks" in loaded
+
+
+def test_automatic_caption_note_warns_about_source_recognition_quality():
+    info = {
+        "kind": "youtube",
+        "subtitle_tracks": [
+            {"value": "yt:auto:en", "source": "auto"},
+            {"value": "yt:manual:en", "source": "manual"},
+        ],
+    }
+    auto = _caption_quality_note(info, "yt:auto:en")
+    manual = _caption_quality_note(info, "yt:manual:en")
+    assert "Automatic YouTube captions" in auto
+    assert "cannot be repaired reliably by translation" in auto
+    assert "Large v3 Turbo" in auto
+    assert "Creator/embedded" in manual
+
+
+def test_subtitle_download_formats_default_to_srt_and_offer_vtt_txt():
+    values = [value for _label, value in SUBTITLE_FORMAT_CHOICES]
+    assert values == ["srt", "vtt", "txt"]
 
 
 def test_settings_version_is_visible_and_uses_running_package_version():

@@ -7,6 +7,7 @@ from typing import Any, Sequence
 from .contextual_translation import _parse_chunk_output
 from .media import DubLocalError
 from .timeline import Segment
+from .translation_quality import clean_generated_text
 
 _CODE_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 _ID_LINE_RE = re.compile(r"^\s*\[?(\d+)\]?\s*(?::|[-–—])\s*(.+?)\s*$")
@@ -20,7 +21,7 @@ _TRANSLATION_PREFIX_RE = re.compile(
 def _candidate_payloads(raw: str) -> list[Any]:
     """Recover likely JSON payloads from common local-LLM output wrappers."""
 
-    text = (raw or "").strip()
+    text = clean_generated_text(raw)
     candidates: list[str] = []
     if text:
         candidates.append(text)
@@ -62,7 +63,7 @@ def _items_from_payload(payload: Any) -> list[dict[str, Any]] | None:
 
 def _line_items(raw: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for line in (raw or "").splitlines():
+    for line in clean_generated_text(raw).splitlines():
         stripped = line.strip().rstrip(",")
         if not stripped:
             continue
@@ -91,19 +92,14 @@ def _all_candidate_items(raw: str) -> list[dict[str, Any]]:
 
 
 def recover_partial_output(raw: str, target_segments: Sequence[Segment]) -> dict[int, str]:
-    """Return unambiguous translations for any expected IDs present in model output.
-
-    This is intentionally partial. It is used only after a complete chunk failed strict
-    validation so DubLocal can preserve the good lines and recover only the missing IDs.
-    Duplicate/conflicting IDs are discarded and recovered individually instead.
-    """
+    """Return unambiguous translations for expected IDs present in model output."""
 
     expected = {segment.index for segment in target_segments}
     values: dict[int, list[str]] = {}
     for item in _all_candidate_items(raw):
         try:
             index = int(item["id"])
-            text = str(item["text"]).strip()
+            text = clean_generated_text(str(item["text"]))
         except (KeyError, TypeError, ValueError):
             continue
         if index not in expected or not text:
@@ -121,14 +117,13 @@ def recover_partial_output(raw: str, target_segments: Sequence[Segment]) -> dict
 def recover_chunk_output(raw: str, target_segments: Sequence[Segment]) -> list[str]:
     """Parse model output while keeping subtitle alignment strict.
 
-    The normal path accepts valid JSON. Recovery also tolerates harmless wrappers
-    and a simple one-line-per-subtitle protocol used when llama.cpp constrained
-    JSON generation is unreliable on a particular local build.
+    The current preferred protocol is one line per subtitle: ``[ID] - text``.
+    JSON remains accepted for compatibility with earlier DubLocal builds.
     """
 
     first_error: DubLocalError | None = None
     try:
-        return _parse_chunk_output(raw, target_segments)
+        return _parse_chunk_output(clean_generated_text(raw), target_segments)
     except DubLocalError as exc:
         first_error = exc
 
@@ -166,7 +161,7 @@ def build_format_repair_prompt(
 ) -> str:
     ids = ", ".join(str(segment.index) for segment in target_segments)
     source_lines = "\n".join(f"[{segment.index}] {segment.text}" for segment in target_segments)
-    previous = (raw or "").strip()
+    previous = clean_generated_text(raw)
     if len(previous) > 12_000:
         previous = previous[:12_000] + "\n[truncated]"
     return (
@@ -177,8 +172,8 @@ def build_format_repair_prompt(
         "Example: [12] - Это естественный перевод строки.\n"
         "Do not output JSON, Markdown, headings, commentary or any other lines.\n"
         f"Every translated text must be natural {target_language_label}.\n"
-        "Keep the meaning, tone, profanity and names from the previous translation when usable.\n"
-        "If the previous response omitted a usable translation for an id, translate that source line naturally now.\n\n"
+        "Keep meaning, tone, profanity and names faithful to the source. Do not invent a smoother but different sentence.\n"
+        "If the previous response omitted a usable translation for an id, translate that source line conservatively now.\n\n"
         "SOURCE TARGET LINES:\n"
         f"{source_lines}\n\n"
         "PREVIOUS RESPONSE TO RECOVER:\n"
@@ -194,7 +189,7 @@ def build_single_line_recovery_prompt(
 ) -> str:
     """Build a final single-ID recovery prompt while retaining the original context."""
 
-    prior = (prior_chunk_output or "").strip()
+    prior = clean_generated_text(prior_chunk_output)
     if len(prior) > 8_000:
         prior = prior[-8_000:]
     return (
@@ -203,8 +198,9 @@ def build_single_line_recovery_prompt(
         + f"Use all programme, nearby and prior-translation context above. Translate ONLY subtitle [{segment.index}] "
         + f"into natural {target_language_label}.\n"
         + f"Source text: {segment.text}\n"
-        + "Return ONLY the translated subtitle text itself. Do not output an ID, JSON, Markdown, explanation, label or alternatives.\n"
-        + "Keep names, tone, profanity and meaning consistent with the surrounding dialogue.\n"
+        + f"Return EXACTLY one line: [{segment.index}] - translated text\n"
+        + "Do not output JSON, Markdown, explanation, labels, alternatives or any other subtitle ID.\n"
+        + "Keep names, tone, profanity and meaning faithful to the source; do not invent missing lyrics/dialogue.\n"
         + "For reference, the previous chunk recovery output was:\n"
         + prior
         + "\n"
@@ -212,9 +208,9 @@ def build_single_line_recovery_prompt(
 
 
 def clean_single_line_output(raw: str, segment_id: int) -> str:
-    """Extract one subtitle translation from the final single-ID recovery response."""
+    """Extract one subtitle translation without ever concatenating runtime/log output."""
 
-    text = (raw or "").strip()
+    text = clean_generated_text(raw)
     if not text:
         raise DubLocalError(f"Contextual translator returned no text for subtitle id {segment_id}.")
 
@@ -224,18 +220,15 @@ def clean_single_line_output(raw: str, segment_id: int) -> str:
 
     for payload in _candidate_payloads(text):
         if isinstance(payload, dict) and "text" in payload:
-            candidate = str(payload["text"]).strip()
+            candidate = clean_generated_text(str(payload["text"]))
             if candidate:
                 return candidate
         if isinstance(payload, list) and len(payload) == 1 and isinstance(payload[0], dict):
-            candidate = str(payload[0].get("text") or "").strip()
+            candidate = clean_generated_text(str(payload[0].get("text") or ""))
             if candidate:
                 return candidate
 
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if not lines:
-        raise DubLocalError(f"Contextual translator returned no text for subtitle id {segment_id}.")
-
     for line in lines:
         match = _ID_LINE_RE.match(line)
         if match and int(match.group(1)) == segment_id:
@@ -243,15 +236,13 @@ def clean_single_line_output(raw: str, segment_id: int) -> str:
             if candidate:
                 return candidate
 
-    cleaned = [_TRANSLATION_PREFIX_RE.sub("", line).strip().strip('"“”') for line in lines]
-    cleaned = [line for line in cleaned if line]
-    candidate = " ".join(cleaned).strip()
-    if not candidate or len(candidate) > 2_000:
-        raise DubLocalError(
-            f"Contextual translator returned unusable text for subtitle id {segment_id}."
-        )
-    if "SOURCE TARGET LINES" in candidate or "FINAL SINGLE-SUBTITLE RECOVERY TASK" in candidate:
-        raise DubLocalError(
-            f"Contextual translator echoed instructions instead of translating subtitle id {segment_id}."
-        )
-    return candidate
+    # A single bare line is tolerated for compatibility. Multiple unstructured lines
+    # are rejected rather than joined, because recent llama-cli builds may print UI/log text.
+    if len(lines) == 1:
+        candidate = _TRANSLATION_PREFIX_RE.sub("", lines[0]).strip().strip('"“”')
+        if candidate and len(candidate) <= 1_000:
+            return candidate
+
+    raise DubLocalError(
+        f"Contextual translator returned ambiguous or contaminated text for subtitle id {segment_id}."
+    )
