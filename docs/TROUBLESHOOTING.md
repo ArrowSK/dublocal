@@ -25,6 +25,18 @@ zsh scripts/macos/install-launcher.sh
 
 Update DubLocal and restart. Generated outputs must live under DubLocal's own jobs cache, which is explicitly allowed by the local Gradio runtime.
 
+## Where do temporary media and generated files go?
+
+DubLocal puts transcription WAVs, temporary YouTube audio, generated SRTs, per-job TTS files and other intermediate job artifacts in the macOS cache, not in the repository or your Documents folder:
+
+```text
+~/Library/Caches/DubLocal/jobs/
+```
+
+They are temporary working files. On each normal DubLocal launch, stale job folders older than 24 hours are removed. The jobs cache is also capped at 4 GiB; if it is larger, the oldest remaining jobs are removed first. Files from the current session are not deleted while the app is running.
+
+Models are different: Whisper models, registered contextual models and the shared Hugging Face cache are intentionally persistent and are not touched by job-cache cleanup.
+
 ## YouTube HTTP 429
 
 YouTube is temporarily rate-limiting caption/media delivery. DubLocal retries caption retrieval but does not evade the restriction.
@@ -97,7 +109,9 @@ The status box shows the active budget before translation starts.
 
 Contextual translation uses constrained JSON with subtitle IDs. DubLocal validates that every target ID appears exactly once.
 
-If this validation fails, the job stops rather than writing a shifted subtitle file. Report the exact error; do not switch off alignment checks.
+The quality path now tolerates harmless local-model wrappers such as Markdown fences or a `translations` container object. If a chunk still arrives malformed, DubLocal automatically asks the local model once to repair only the structured output, then validates the subtitle IDs again. It does not silently weaken alignment checks.
+
+If the second structured-output attempt still fails, the job stops rather than writing a shifted subtitle file. Report the exact visible error.
 
 ## Translation is still awkward
 
