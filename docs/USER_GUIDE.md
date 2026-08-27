@@ -1,231 +1,169 @@
 # DubLocal user guide
 
-**Current development build: v0.4.0.dev0 — M4 Local Voice**
+**Current development build: v0.4.1.dev0 — M4 Local Voice + M3.1 Contextual Translation**
 
-DubLocal is meant to feel like a small Mac utility, not a Python project. Once installed, start it with **DubLocal.app** and use the local browser window it opens.
+DubLocal is meant to feel like a small Mac utility. Once installed, start **DubLocal.app** and work in the local browser window it opens.
 
-The interface has two top-level areas:
+There are two top-level areas:
 
 - **Main** — process the current video/audio job.
-- **Settings** — maintain DubLocal itself and optional local AI resources.
+- **Settings** — update/repair DubLocal and manage optional local resources.
 
-Inside **Settings** there are three subtabs: **Updates**, **Model Manager**, and **Local Resources**.
+There is no packaged GitHub Release yet.
 
-> There is no packaged GitHub Release yet. `v0.4.0.dev0` is the current M4 development build. See [CHANGELOG.md](../CHANGELOG.md) for the build history.
+## Main: the normal workflow
 
-## Before you start
+### 1. Choose the source
 
-Local video/audio files are not uploaded to a cloud transcription, translation or TTS service. Whisper, OPUS and Kokoro run locally.
+Choose **YouTube** or **Local file**, then click **Scan source**.
 
-YouTube is different because the source itself is remote: DubLocal has to contact YouTube to inspect the video, request captions, or fetch audio when you explicitly start local transcription. Process only media you have the right or legal authority to use.
+For a local file, DubLocal uses `ffprobe` to inspect video/audio/subtitle streams. For YouTube, it inspects the remote video and available captions without silently downloading the full media.
 
-# Main
+### 2. Get timed source subtitles
 
-## 1. Choose the source
+If a usable caption/subtitle track exists, choose it and click **Extract existing subtitles**.
 
-Choose **YouTube** or **Local file**.
+If captions are missing, image-based, or YouTube temporarily refuses caption delivery, use **Local transcription · Whisper**. DubLocal produces a normalized timestamped SRT locally.
 
-For YouTube, paste one video URL and click **Scan source**. DubLocal shows the title and any creator/automatic caption tracks it can discover.
+Whisper model installation lives in **Settings → Model Manager → Whisper**.
 
-For a local file, select the media and click **Scan source**. DubLocal uses `ffprobe` to inspect its streams and list embedded subtitle tracks.
+### 3. Translate — Contextual quality is the default
 
-## 2. Get timed source subtitles
+Under **Local translation** choose the source language and target language.
 
-You can either reuse existing captions or make new ones from the audio.
+Leave **Contextual quality · Qwen3 4B · recommended** selected for normal use.
 
-### Existing subtitles
+Unlike the old sentence-level OPUS path, Contextual quality does not treat every subtitle row as an isolated sentence. Each translation chunk receives:
 
-Choose the subtitle/caption track, confirm that you have the right to process the media, then click **Extract existing subtitles**.
+- nearby source lines before and after it;
+- sampled dialogue from across the programme;
+- recent translated lines as rolling terminology/style memory.
 
-DubLocal normalizes supported text captions to SRT. That SRT becomes the common timeline used by translation and voice generation.
+This matters for pronouns, names, relationships, slang, jokes, callbacks, profanity and tone.
 
-Image-only subtitle formats such as PGS are not silently OCR'd. Use local transcription for those.
+#### Longer video = larger context
 
-### Local Whisper transcription
+DubLocal calculates a context budget automatically from programme duration.
 
-Open **Local transcription · Whisper** on Main.
+The current v0.4.1.dev0 policy starts at about **4,096 input tokens** for short material and adds context as duration grows, up to **24,576 input tokens**. Qwen3's native context remains larger than that, leaving room for instructions and generated subtitles.
 
-Choose the Whisper model and spoken language, then click **Transcribe locally**.
+You can see the active context budget directly in the translation status panel before starting.
 
-Model installation/removal lives in **Settings → Model Manager → Whisper**.
+DubLocal still processes the timeline in manageable chunks. The context around those chunks grows, and recent translations are carried forward, so a long film is not translated as hundreds of unrelated one-line requests.
 
-| Model | Approximate size | Best use |
-| --- | ---: | --- |
-| Tiny | 75 MiB | quick tests / speed first |
-| Base | 142 MiB | recommended starting point |
-| Small | 466 MiB | better accuracy when extra time/storage is acceptable |
+#### First use
 
-FFmpeg prepares 16 kHz mono audio and `whisper.cpp` creates the timestamped SRT locally. With **Auto detect**, Whisper's detected language is carried into translation where possible.
+If Contextual quality is not ready:
 
-## 3. Translate locally
+**Settings → Model Manager → Contextual translation · Qwen3 4B → Prepare / verify contextual translation**
 
-After extraction or transcription, open **Local translation** on Main.
+This may install/reuse `llama.cpp` and download the ~2.5 GB model once. Model files use the shared Hugging Face cache and are checksum-verified.
 
-Choose **Subtitle language** and **Translate to**, then click **Translate subtitles**.
+Then return to Main and click **Translate subtitles**.
 
-Possible local routes include:
+DubLocal preserves the original subtitle IDs, segment count and timestamps. The preview shows **Translation** first and **Original** beside it.
 
-```text
-English → Hungarian
-Hungarian → English
-Hungarian → English → German
-```
+### Fast legacy translation
 
-The last route means that two non-English languages are translated locally through English.
+If you explicitly choose **Fast legacy · OPUS · sentence-level**, DubLocal uses the older M3 Marian/OPUS backend.
 
-If the required model is not installed, use **Settings → Model Manager → OPUS · subtitle translation**.
+It is smaller and faster, but it does not provide the same dialogue context. It remains available for low-storage or quick jobs rather than being silently used as a fallback.
 
-The output preview shows original and translated text side by side. Timestamps are preserved exactly, and **Translated SRT** gives you the translated file.
+### 4. Generate a local voice track
 
-There is no silent cloud translation fallback.
+Open **Local voice · Kokoro**.
 
-## 4. Generate a local voice track
+Choose whether to speak:
 
-Open **Local voice · Kokoro** on Main.
+- **Translated subtitles**, or
+- **Source subtitles**.
 
-Choose **Voice source**:
-
-- **Translated subtitles** — speak the translated SRT.
-- **Source subtitles** — speak the original/extracted/transcribed SRT.
-
-Then choose **Voice language**, **Kokoro voice**, and **Voice speed**, and click **Generate voice track**.
+Choose a supported voice language, voice and speed, then click **Generate voice track**.
 
 M4 creates:
 
-- one local WAV for every subtitle segment;
-- one synchronized voice-only WAV for the full timeline;
-- a JSON generation manifest recording the runtime, model, voice, speed, timing and per-line durations;
-- a table showing whether each generated line fits inside its current subtitle window.
+- per-segment WAV files;
+- one synchronized voice-only WAV;
+- a JSON manifest;
+- a timing table showing which lines overrun their subtitle windows.
 
-The start time of every subtitle is preserved. If synthetic speech is longer than the subtitle window, DubLocal reports the overrun instead of silently speeding it up, cutting it or rewriting the text. That is intentional: M5 adds duration fitting.
+M4 deliberately does not modify the original soundtrack yet. M5 handles duration fitting, ducking/mixing and media remuxing.
 
-The M4 WAV is **voice only**. It does not replace the original movie soundtrack yet.
+## Kokoro language coverage
 
-### Kokoro language coverage
+Official Kokoro support exposed in the current build includes American/British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin Chinese.
 
-Official Kokoro support exposed in M4 is:
-
-- American English;
-- British English;
-- Spanish;
-- French;
-- Hindi;
-- Italian;
-- Japanese;
-- Brazilian Portuguese;
-- Mandarin Chinese.
-
-The translation engine supports additional targets such as Hungarian, Russian and German. Those can still produce translated SRT files, but official Kokoro cannot voice them. DubLocal does not silently route them through an incorrect pronunciation frontend.
-
-For generic translated `Portuguese`, the Kokoro suggestion is explicitly **Brazilian Portuguese** (`pt-BR`).
+Translation supports additional targets such as Hungarian, Russian and German, but official Kokoro cannot voice those targets. DubLocal does not pretend otherwise or silently apply the wrong pronunciation frontend.
 
 # Settings
 
 ## Updates
 
-Open **Settings → Updates**.
+Use **Check for updates → Install update → Restart DubLocal**.
 
-For a normal clean installation:
+Normal updates are clean fast-forwards from official GitHub `main`. Tracked local edits are not overwritten.
 
-**Check for updates → Install update → Restart DubLocal**
-
-The updater distinguishes the running DubLocal package, the local Git checkout, and official GitHub `main`.
-
-Normal update rules are intentionally strict:
-
-- only `ArrowSK/dublocal` `main` is trusted automatically;
-- clean fast-forward updates are allowed;
-- tracked local edits are never overwritten by a normal update;
-- local commits or diverged history are not rewritten automatically.
-
-### Repair installation
-
-Use **Repair installation** when the checkout/runtime is inconsistent or tracked DubLocal program files were modified.
-
-If tracked files need replacement, tick the repair confirmation first. DubLocal then saves a patch backup, restores official tracked files, refreshes the managed Python core, verifies the import/version, and schedules a clean restart.
-
-Repair does **not** delete Whisper/translation/Kokoro cache assets, generated jobs or untracked user files.
+**Repair installation** can restore official tracked program files after saving a patch backup and refresh the managed Python core. Models, shared caches and generated jobs are preserved.
 
 ## Model Manager
 
-Open **Settings → Model Manager** to install, verify or prepare optional AI resources.
-
 ### Whisper
 
-Choose Tiny, Base or Small and click **Install / verify model**. DubLocal downloads only the requested model and verifies its checksum.
+Install/verify Tiny, Base or Small. Models are downloaded only when requested.
 
-### OPUS translation
+### Contextual translation · Qwen3 4B
 
-Choose the model set that matches the kind of translation you need:
+This is the recommended translation backend.
 
-| Model set | What it enables | Approximate weights |
-| --- | --- | ---: |
-| English → supported languages | English subtitles into Hungarian/German/etc. | 310 MiB |
-| Supported languages → English | Hungarian/German/etc. into English | 310 MiB |
-| Non-English ↔ non-English | both directions through an English pivot | 620 MiB total |
+**Prepare / verify contextual translation**:
 
-Then click **Install / verify required model(s)**.
+1. reuses existing `llama.cpp` when available;
+2. otherwise installs it through Homebrew;
+3. downloads the pinned official Qwen3 4B Q4_K_M model (~2.5 GB) to the shared Hugging Face cache;
+4. verifies its SHA-256 before enabling it.
 
-DubLocal follows a **reuse first, install second** policy. Compatible Python runtimes can be used through isolated worker processes, and exact OPUS snapshots are reused from the normal Hugging Face cache when already present.
+Removing the DubLocal contextual model removes DubLocal's registration/link, not the underlying shared cache snapshot or `llama.cpp` installation.
+
+### Fast legacy translation · OPUS
+
+The two older ~310 MiB OPUS directions remain available here. Use them only when you deliberately want the smaller/faster sentence-level engine.
 
 ### Kokoro
 
-Open **Kokoro · voice generation**.
-
-Choose the language/voice you expect to use and click **Prepare / verify Kokoro**.
-
-DubLocal does this in order:
-
-1. look for a compatible existing Kokoro Python environment;
-2. if one exists, use its own Python executable through an isolated worker;
-3. if none exists, install DubLocal's optional `kokoro` extra into the DubLocal venv;
-4. instantiate the selected Kokoro frontend/voice to verify that the runtime and shared model assets are usable.
-
-Preparing Kokoro may download missing official model/voice files into the normal shared Hugging Face cache. It does not copy another application's Python packages into DubLocal.
-
-DubLocal also deliberately does not offer a broad **Uninstall Python dependencies** button for Kokoro: an external runtime is not owned by DubLocal, and shared dependencies/cache assets may be used by another local application.
+DubLocal first looks for a compatible existing Kokoro environment. If found, it uses that environment's Python through an isolated worker rather than copying its packages. Missing official model/voice assets use the shared Hugging Face cache.
 
 ## Local Resources
 
-Open **Settings → Local Resources** to see what DubLocal can safely reuse on the Mac.
-
-The panel reports:
+This panel reports reusable:
 
 - FFmpeg and ffprobe;
 - `whisper-cli`;
-- the shared Hugging Face cache location;
-- a compatible Kokoro runtime when one is found.
+- `llama.cpp` / `llama-cli`;
+- the shared Hugging Face cache;
+- compatible external Python runtimes such as Kokoro.
 
-### Why a real venv path matters
-
-On macOS, `venv/bin/python` is often a symlink to the same framework Python used by several environments. Resolving that symlink can erase which venv the executable belongs to.
-
-M4 therefore preserves the venv executable path itself. This lets DubLocal distinguish, for example, its own `.venv/bin/python` from another application's `.venv/bin/python`, even if both symlink to the same underlying framework binary.
-
-Python virtual environments remain isolated. DubLocal never appends another application's `site-packages` into its own interpreter.
+Python environments remain isolated: another application's `site-packages` is never injected into DubLocal's interpreter.
 
 # YouTube HTTP 429
 
-YouTube can temporarily rate-limit caption or media delivery. DubLocal retries ordinary caption delivery but does not try to evade the restriction.
+YouTube can temporarily rate-limit caption/media delivery. DubLocal retries ordinary caption retrieval but does not evade the restriction.
 
-If captions remain blocked, use **Transcribe locally**. If YouTube also refuses audio delivery, wait and retry later or use a local copy you are allowed to process.
+If captions remain blocked, use local Whisper transcription. If YouTube also blocks audio delivery, wait or use a local copy you have the right to process.
 
-# What M4 does not do yet
+# Translation quality expectations
 
-M4 stops at a synchronized voice-only WAV.
+Context improves translation substantially, but local models can still make mistakes. The preview is there for review, especially before generating speech or distributing subtitles.
+
+If Contextual quality produces missing/duplicated subtitle IDs, non-JSON output or another alignment failure, DubLocal stops instead of silently producing a shifted SRT.
+
+For troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+# What comes next
 
 M5 adds:
 
-- speech-duration fitting against subtitle windows;
+- duration fitting against subtitle windows;
 - original-audio ducking/mixing;
-- stream-copy media export when compatible;
-- **Replace primary audio** as the default output mode;
+- stream-copy video export where compatible;
+- **Replace primary audio** as the default dubbed-media mode;
 - **Add dubbed audio as second track** as the optional multi-track mode.
-
-Compatible video should not be re-encoded merely because a new audio stream is being created.
-
-# If something goes wrong
-
-Do not reinstall everything immediately. Read the nearest status panel first. DubLocal keeps source access, captions, Whisper, translation, Kokoro, dependency reuse, updater and launcher failures separate where possible.
-
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for practical recovery steps.
