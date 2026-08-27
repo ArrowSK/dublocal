@@ -31,7 +31,7 @@ QWEN_CONTEXT_MODEL = {
     "repo_id": "Qwen/Qwen3-4B-GGUF",
     "revision": "a9a60d009fa7ff9606305047c2bf77ac25dbec49",
     "filename": "Qwen3-4B-Q4_K_M.gguf",
-    "sha256": "7485fe6f11af29433bc51b69ff7fcdd187af17f0d694c5b05000b54664292e8534fdf5",
+    "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
     "size": "2.5 GB",
     "license": "Apache-2.0",
     "native_context": 32768,
