@@ -12,24 +12,32 @@ Nothing here grants rights to third-party video, audio or subtitles. Users remai
 | NumPy | Timeline/audio array processing | Core Python dependency |
 | yt-dlp | YouTube metadata/captions and explicit audio acquisition for local transcription | Python dependency; no DRM/access-control bypass |
 | platformdirs | Application/cache paths | Core Python dependency |
-| Hugging Face Hub | Shared model downloads/cache | Core helper from v0.4.1.dev0; models still download only on explicit user action |
+| Hugging Face Hub | Shared model downloads/cache | Core helper; models still download only on explicit user action |
 | FFmpeg / ffprobe | Media inspection/extraction and later mixing/remuxing | Existing executable reused when available; any future bundled binary requires exact build/licence review |
 | whisper.cpp | Local speech-to-text | Optional external engine; existing `whisper-cli` reused when present |
 
-## M3.1 contextual translation — recommended path
+## v0.4.2 contextual translation — recommended quality path
 
-The default translation path in **v0.4.1.dev0** is context-aware and local.
+The recommended quality translation path is local and uses a larger model plus a review pass.
 
 | Component | Purpose | Licence / distribution policy |
 | --- | --- | --- |
-| `llama.cpp` | Local GGUF inference runtime | MIT upstream; DubLocal reuses an existing executable or can install it through Homebrew; not bundled in the development checkout |
-| `Qwen/Qwen3-4B-GGUF` / `Qwen3-4B-Q4_K_M.gguf` | Context-aware multilingual subtitle translation | Apache-2.0 upstream; not bundled; explicit download only; pinned immutable revision and SHA-256; shared Hugging Face cache |
+| `llama.cpp` | Local GGUF inference runtime / loopback llama-server | MIT upstream; DubLocal reuses an existing executable or can install it through Homebrew; not bundled in the development checkout |
+| `Qwen/Qwen3-8B-GGUF` / `Qwen3-8B-Q4_K_M.gguf` | Default context-aware multilingual subtitle translation and review | Apache-2.0 upstream; not bundled; explicit download only; pinned immutable revision and SHA-256; shared Hugging Face cache |
 
-DubLocal reserves part of Qwen3's native context for output/instructions and scales the source context budget with programme duration. Model identity and checksum are recorded in `MODEL_LICENSES.json`.
+The configured Qwen3 8B Q4_K_M weight is about 5.03 GB. Exact revision/hash are recorded in `MODEL_LICENSES.json`.
 
-Removing the contextual model from DubLocal removes only DubLocal's registration/link. It does not delete the shared Hugging Face snapshot or uninstall `llama.cpp`, because another local application may use them.
+DubLocal reserves part of the model context for instructions/output and scales source context with programme duration. The same loaded model session can be reused for translation, recovery and the optional senior-review pass.
+
+Removing the quality model from DubLocal removes only DubLocal's registration/link. It does not delete the shared Hugging Face snapshot or uninstall `llama.cpp`, because another local application may use them.
 
 There is no cloud translation fallback.
+
+## Historical Qwen3 4B development model
+
+`Qwen/Qwen3-4B-GGUF` was used by the v0.4.1 development contextual translator. Real-language testing showed that it was not consistently strong enough for DubLocal's intended default quality level.
+
+v0.4.2 does not select/download it. Its exact Apache-2.0 model metadata remains in `MODEL_LICENSES.json` for provenance. A previously downloaded shared-cache snapshot is not automatically deleted.
 
 ## M3 fast legacy translation
 
@@ -44,9 +52,15 @@ The original OPUS/Marian backend remains as an explicit smaller/faster option.
 | `Helsinki-NLP/opus-mt-mul-en` | Supported languages → English | Apache-2.0; pinned safetensors revision/checksum; shared cache |
 | `Helsinki-NLP/opus-mt-en-mul` | English → supported languages | Apache-2.0; pinned safetensors revision/checksum; shared cache |
 
-These models are no longer described as the recommended quality route because they translate subtitle text sentence-by-sentence and do not supply long-form dialogue context.
+These models are not described as the recommended quality route because they translate subtitle text sentence-by-sentence and do not provide long-form dialogue context.
 
 DubLocal never adds another application's `site-packages` to its own interpreter. Compatible Python environments are reused only by starting that environment's own Python as an isolated worker process.
+
+## Whisper models
+
+Whisper weights are downloaded only when requested and retain the whisper.cpp/OpenAI model licensing conditions represented in `MODEL_LICENSES.json`.
+
+v0.4.2 additionally exposes the quantized Large-v3-Turbo-Q5 weight as an optional higher-accuracy transcription path for songs, accents and noisy audio. It is not bundled and is checksum-verified before use.
 
 ## M4 local voice generation
 
@@ -64,7 +78,7 @@ M4 produces a voice-only WAV. M5 handles source-audio ducking/mixing and media r
 
 ## Shared-cache rule
 
-A model being present in the Hugging Face cache does not make it owned by DubLocal. DubLocal registrations can be removed without erasing shared snapshots that another local application may need.
+A model being present in the Hugging Face cache does not make it owned by DubLocal. DubLocal registrations can be removed without erasing shared snapshots another local application may need.
 
 Dependency reuse also does not change a component's licence. DubLocal must comply with each component's licence whether that component was installed by DubLocal or already existed on the Mac.
 
