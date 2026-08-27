@@ -1,6 +1,6 @@
 # DubLocal quality notes
 
-This document records the quality policy behind `v0.4.2.dev0`. It exists because “AI translation quality” is not one problem: transcription accuracy, context, model capability, target-language fluency, hardware limits and subtitle alignment can fail independently.
+This document records the quality policy behind `v0.5.0.dev0`. “AI quality” is not one problem: source recognition, timing, context, translation fluency, TTS pronunciation, timing fit and final media handling can fail independently.
 
 ## Quality hierarchy
 
@@ -11,79 +11,131 @@ audio/source media
   → source subtitle accuracy
   → stable timing/IDs
   → hardware-appropriate contextual translation
-  → target-language review when the Mac can support the profile comfortably
+  → optional context-aware review
   → structural/output validation
-  → optional TTS
+  → speech-only TTS preparation
+  → voice generation
+  → timing fit
+  → soundtrack mix
+  → stream-copy/remux export
 ```
 
-A later stage must not pretend it can reliably repair an earlier unknown. In particular, translation context is not permission to invent what an automatic captioner probably misheard.
+A later stage must not pretend it can reliably repair an unknown introduced earlier. Translation context is not permission to invent what an automatic captioner probably misheard; M5 mixing is not permission to claim dialogue separation that was never performed.
 
 ## Source subtitle quality
 
 Creator/embedded text subtitles are preserved as supplied.
 
-YouTube automatic captions are explicitly marked as automatic. When their wording is clearly damaged, the recommended quality path is to transcribe the audio locally with the Accurate Large-v3-Turbo-Q5 Whisper option rather than ask the translator to hallucinate the original lyric/dialogue.
+YouTube automatic captions are explicitly marked as automatic. When wording is clearly damaged, the recommended path is local Whisper transcription—especially Accurate Large-v3-Turbo-Q5 for songs, accents or noisy material—rather than asking the translator to hallucinate the missing original wording.
+
+Whisper Auto detect is propagated into translation only when DubLocal can normalize a concrete returned language. If no usable language is supplied, the app asks for an explicit source language rather than guessing.
 
 ## Hardware-aware translation policy
 
-DubLocal does not recommend the same model to every Mac.
+DubLocal does not recommend the same contextual model to every Mac.
 
-The app detects architecture and physical memory locally and chooses a conservative profile. The normal Main UI therefore shows one clean choice: **Recommended for this Mac**. Model/RAM/context details live in Settings and the translation engine status rather than cluttering the workflow.
-
-Current v0.4.2 policy:
+Current policy:
 
 | Mac class | Recommended model | Review | Effective input-context cap |
 | --- | --- | --- | ---: |
-| Apple Silicon below 12 GB (normally 8 GB M1/M2 class) | Qwen3 4B Q4_K_M | off | 8,192 |
-| Apple Silicon 12–23 GB (normally 16 GB) | Qwen3 8B Q4_K_M | off | 16,384 |
+| Apple Silicon below 12 GB | Qwen3 4B Q4_K_M | off | 8,192 |
+| Apple Silicon 12–23 GB | Qwen3 8B Q4_K_M | off | 16,384 |
 | Apple Silicon 24 GB+ | Qwen3 8B Q4_K_M | on | 24,576 |
 | Intel below 24 GB | Qwen3 4B Q4_K_M | off | 6,144 |
 | Intel 24 GB+ | Qwen3 8B Q4_K_M | off | 12,288 |
 
-These are deliberately cautious defaults rather than hard compatibility claims. The important constraint is unified/physical memory pressure and practical inference time, not the chip marketing name alone.
+These are cautious defaults, not hard compatibility claims. The actual llama.cpp runtime context allocation scales with the profile as well as the prompt budget so low-memory Macs are not forced to reserve a large KV cache unnecessarily.
 
-The llama.cpp runtime context allocation is reduced along with the prompt budget. On an 8 GB M1, DubLocal therefore does **not** start a 32k KV cache and merely feed it 8k of text; the actual local runtime receives a smaller context allocation as well. This is important for avoiding unnecessary swap pressure.
+## Context and translation semantics
 
-## Translation model policy
-
-Real-language testing showed that Qwen3 4B was not acceptable as a universal “best quality” recommendation. It remains useful as the lightweight contextual model for low-memory Macs.
-
-Qwen3 8B Q4_K_M is the balanced/best-quality model. On higher-memory Apple Silicon the Best profile adds a second review pass. The review reuses the same loaded model, so it increases processing time much more than peak model memory.
-
-OPUS remains the explicit smaller/faster sentence-level option.
-
-## Context policy
-
-Context grows with programme duration up to the active hardware profile's bounded input ceiling. It combines programme-wide samples, nearby source dialogue and recent translations.
+Context grows with programme duration up to the hardware profile's ceiling. It combines programme-wide samples, nearby source dialogue and recent accepted translations.
 
 Short media uses larger target chunks so a song or short clip can normally be understood as one coherent local section rather than many disconnected calls.
 
-## Target-language policy
+v0.5 explicitly asks the contextual model to use discourse context for:
 
-Prompts include language-specific guidance where useful. Russian currently requires natural contemporary Russian grammar, discourages English calques and pseudo-Russian transliteration, and preserves source profanity/register.
+- grammatical gender where the source establishes it;
+- speaker/addressee/pronoun/reference continuity;
+- recurring names/entities;
+- idioms and phraseological expressions by meaning/register rather than literal word substitution;
+- metaphors and figurative imagery without inventing new imagery;
+- slang and profanity at the source register.
 
-When the selected hardware profile enables it, a second review pass compares draft translation against source/context and is asked to correct semantic mistakes, grammar, calques, unnatural word choice and untranslated ordinary words.
+When the source is ambiguous, the prompt tells the model not to fabricate unsupported gender or reference merely to make the target language more specific.
 
-## Protected structural tags
+On hardware profiles that enable it, the second review pass checks the same categories again against source + context + first-pass draft.
 
-A standalone bracketed cue such as `[MUSIC]` is structural subtitle information, not prose to translate. Protected tags bypass the model and are copied exactly.
+## Protected subtitle cues
 
-## Validation policy
+Closed-caption cues are useful subtitle information but are not dialogue.
 
-Automated validation is intentionally conservative. It can prove some things but not “the translation is beautiful”.
+Standalone tags such as `[MUSIC]`, `[APPLAUSE]` and `[LAUGHTER]` bypass translation and remain unchanged in SRT/VTT output.
+
+For TTS, `voice_text.py` creates a temporary speech-only timeline. Bracketed cues are removed only from that temporary input. The user's subtitle file is never rewritten merely to make Kokoro silent on cues.
+
+This means:
+
+```text
+[MUSIC]            stays in subtitles; not spoken
+[LAUGHS] Hello     stays in subtitles; Kokoro speaks “Hello”
+```
+
+## Translation validation policy
+
+Automated validation is intentionally conservative. It can prove alignment and reject obvious contamination; it cannot prove that a translation is elegant.
 
 Before writing translated SRT, DubLocal verifies:
 
 - subtitle IDs/order/timestamps remain aligned;
 - no llama.cpp runtime/log/prompt content leaked into text;
-- no unexpected CJK/Hangul contamination exists for current European targets;
+- unexpected non-target script contamination is rejected;
 - substantial wrong-script leakage is rejected;
 - protected tags remain untouched.
 
-If the model cannot produce validated output after contextual recovery, DubLocal stops instead of creating a plausible-looking corrupt file.
+If contextual recovery cannot produce validated output, DubLocal stops instead of creating a plausible-looking corrupt file.
+
+## TTS quality boundary
+
+Kokoro voice generation is separate from translation support. A language can have good subtitles even when the official Kokoro frontend does not support it.
+
+DubLocal does not silently choose a mismatched pronunciation frontend merely to produce audio.
+
+## M5 timing quality
+
+The first timing engine prioritizes intelligibility over rigid timestamp compliance.
+
+For overflowing speech it:
+
+1. borrows available silence until the next spoken segment;
+2. applies a modest FFmpeg tempo increase only if needed;
+3. caps that speed-up at 1.25×;
+4. never deliberately truncates words;
+5. reports residual overflows that still cannot fit.
+
+Future semantic shortening/rephrasing can improve difficult dubbing cases, but v0.5 does not hide destructive truncation behind a successful status.
+
+## M5 audio quality boundary
+
+The default dubbed soundtrack uses sidechain ducking of the source's primary audio plus an overlay of the generated voice.
+
+This preserves underlying ambience/music/effects better than replacing the whole soundtrack with dry TTS, but it is **not source separation**. Original dialogue may remain quietly audible.
+
+DubLocal therefore avoids claims such as “dialogue replacement” unless true dialogue/background separation is implemented later.
+
+## Video integrity policy
+
+M5 treats video and audio processing independently.
+
+Where the requested container accepts the original video stream, DubLocal uses FFmpeg stream-copy (`-c:v copy`). This avoids generation loss and unnecessary processing time.
+
+The new dubbed soundtrack must be audio-encoded because it is newly mixed. That does not justify re-encoding the video.
+
+If MP4 cannot carry the selected source streams by remuxing, DubLocal directs the user to MKV instead of silently starting a video transcode.
 
 ## Human quality boundary
 
-Neither Qwen3 4B nor Qwen3 8B is represented as equivalent to a professional translator. The side-by-side Original/Translation preview remains part of the product because semantic nuance, humour, lyric interpretation and cultural adaptation are not fully machine-verifiable.
+Neither Qwen3 4B/8B nor the current Kokoro/M5 pipeline is represented as equivalent to professional human translation, voice acting or studio dubbing.
 
-Quality regressions should be reported with the smallest lawful source/translation sample that reproduces them, together with whether the source timeline came from creator subtitles, automatic captions or local Whisper.
+The side-by-side Original/Translation preview remains important because semantic nuance, humour, lyric interpretation, cultural adaptation, casting and final mix aesthetics are not fully machine-verifiable.
+
+Quality regressions should be reported with the smallest lawful sample that reproduces the problem and enough neighboring context to establish the intended meaning.

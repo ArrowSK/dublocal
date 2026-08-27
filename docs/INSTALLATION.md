@@ -1,8 +1,8 @@
 # Installing DubLocal on macOS
 
-**Current development build: v0.4.2.dev0 — Subtitle Export + Translation Quality Pass**
+**Current development build: v0.5.0.dev0 — M5 Local Dubbed Media Export**
 
-DubLocal still uses a Git checkout as its application source, but after first setup it behaves like a normal local Mac utility: open **DubLocal.app**, update/repair inside the app, and install optional models only when you need them.
+DubLocal currently uses a Git checkout as its application source, but after first setup it behaves like a normal local Mac utility: launch **DubLocal.app**, update/repair inside the app, and install optional models only when you need them.
 
 There is no packaged DMG/GitHub Release yet.
 
@@ -25,72 +25,75 @@ The installer creates:
 ~/Applications/Stop DubLocal.app
 ```
 
-It can bootstrap Python 3.11+ and offer FFmpeg/whisper.cpp through Homebrew when required. It does **not** silently download AI model weights.
+It can bootstrap Python 3.11+ and offer FFmpeg/whisper.cpp through Homebrew when required. It does not silently download optional AI model weights.
 
 After installation, ordinary use is through **DubLocal.app**.
 
-## What is installed only when requested
+## What DubLocal reuses
+
+DubLocal follows a reuse-first policy:
+
+- existing FFmpeg/ffprobe executables;
+- existing `whisper-cli`;
+- existing compatible llama.cpp executables;
+- shared Hugging Face model cache;
+- compatible external Python runtimes such as Kokoro, through isolated worker processes.
+
+Python virtual environments are never merged and another application's `site-packages` is never injected into DubLocal.
+
+Open **Settings → Local Resources** to see what is being reused.
+
+## Models installed only on request
 
 ### Whisper
 
-Settings → Model Manager → Whisper.
+Open **Settings → Model Manager → Whisper**.
 
-Available local models include Tiny, Base, Small and the optional Accurate Large-v3-Turbo-Q5 model. Base (~142 MiB) remains the normal starting point; Accurate (~547 MiB) is intended for difficult audio such as songs, accents or noisy speech.
+Tiny, Base, Small and optional Accurate Large-v3-Turbo-Q5 are available. Base remains the normal starting point; Accurate is intended for songs, accents and difficult/noisy speech.
 
-### Contextual translation — Recommended for this Mac
+### Contextual translation
 
 Open **Settings → Model Manager → Contextual translation** and click **Prepare / verify contextual translation**.
 
-DubLocal first detects the Mac architecture and physical memory, then prepares only the contextual model recommended for that hardware. The ordinary Main workflow therefore stays simple; it shows **Recommended for this Mac · Lightweight / Balanced / Best quality** rather than asking the user to choose from a model matrix.
-
-Current conservative defaults are:
+DubLocal detects the Mac hardware and prepares only its recommended profile:
 
 ```text
-Apple Silicon < 12 GB     Qwen3 4B · review off · 8k input cap
-Apple Silicon 12–23 GB    Qwen3 8B · review off · 16k input cap
-Apple Silicon 24 GB+      Qwen3 8B · review on  · 24k input cap
-Intel < 24 GB             Qwen3 4B · review off · smaller context
-Intel 24 GB+              Qwen3 8B · review off · reduced context
+Apple Silicon < 12 GB     Qwen3 4B · 8k input cap
+Apple Silicon 12–23 GB    Qwen3 8B · 16k input cap
+Apple Silicon 24 GB+      Qwen3 8B · review on · up to 24k input
+Intel < 24 GB             Qwen3 4B · smaller context
+Intel 24 GB+              Qwen3 8B · reduced context
 ```
 
-That preparation action:
-
-1. detects the recommended translation profile for the current Mac;
-2. reuses an existing compatible `llama.cpp` command when available;
-3. otherwise installs `llama.cpp` through Homebrew;
-4. downloads only the recommended official Qwen GGUF into the shared Hugging Face cache;
-5. verifies the pinned checksum before registering the model with DubLocal.
+The actual llama.cpp runtime context allocation scales with this profile too. This matters particularly on low-memory Apple Silicon.
 
 Approximate contextual model sizes:
 
-- **Qwen3 4B Q4_K_M** — 2.5 GB; lightweight profile;
-- **Qwen3 8B Q4_K_M** — 5.03 GB; balanced/best profiles.
+- Qwen3 4B Q4_K_M — 2.5 GB.
+- Qwen3 8B Q4_K_M — 5.03 GB.
 
-Both are local Apache-2.0 model releases. There is no cloud translation fallback.
+Both are downloaded only when needed, pinned/checksum-verified and stored through the shared Hugging Face cache. There is no cloud translation fallback.
 
-The hardware profile also controls the **actual llama.cpp context allocation**, not only the amount of prompt text. For example, an 8 GB M1 does not reserve the model's full 32k context while receiving only an 8k prompt; DubLocal starts llama.cpp with a smaller runtime context to reduce unified-memory and swap pressure.
+### Fast legacy translation
 
-If another contextual Qwen model was already registered by an earlier DubLocal build, Model Manager reports it as the alternate model. Preparing contextual translation does not download both models merely because both are supported.
-
-Removing DubLocal contextual models removes DubLocal's registrations/links. It does not erase the shared Hugging Face cache or uninstall `llama.cpp`, because another local application may use them.
-
-### Fast legacy translation — optional
-
-The OPUS models remain under Settings → Model Manager → **Fast legacy translation · OPUS**. They are smaller (~310 MiB per direction) but translate sentence-by-sentence and are not the recommended contextual path.
+OPUS remains an explicit smaller/faster sentence-level option under **Fast legacy translation · OPUS**.
 
 ### Kokoro
 
-Settings → Model Manager → Kokoro. DubLocal first searches for a compatible existing Kokoro environment and runs it through an isolated Python worker. Only when no reusable environment exists does DubLocal prepare another Kokoro runtime.
+Open **Settings → Model Manager → Kokoro**. DubLocal reuses a compatible external Kokoro environment first. Only if no reusable environment exists does it prepare another local runtime.
 
-## Reuse first, install second
+## M5 has no new AI model dependency
 
-DubLocal deliberately avoids duplicate heavyweight resources when safe reuse is possible.
+M5 uses FFmpeg/ffprobe plus the existing M4 voice output. It does not require another neural model.
 
-- FFmpeg, ffprobe, whisper.cpp and llama.cpp executables are reused in place.
-- Qwen, OPUS and Kokoro model assets use the normal shared Hugging Face cache.
-- Python virtual environments are never merged. Compatible external environments are invoked as isolated workers instead of adding their `site-packages` to DubLocal.
+M5 can:
 
-Open **Settings → Local Resources** to see what is being reused.
+- timing-fit generated voice segments;
+- duck/mix the original primary soundtrack;
+- replace the primary audio or append a second dubbed track;
+- stream-copy the video where compatible.
+
+MKV is the recommended container. MP4 is used only when the source streams can be remuxed compatibly; DubLocal does not silently re-encode video on an incompatible MP4 request.
 
 ## Updating
 
@@ -104,13 +107,13 @@ Normal updates accept only a clean fast-forward from official `ArrowSK/dublocal`
 
 Use **Repair installation** when the checkout or managed Python environment is inconsistent.
 
-If tracked program files were modified, DubLocal can save the diff as a patch under:
+If tracked files were modified, DubLocal can save the diff as a patch under:
 
 ```text
 ~/.dublocal/repair-backups/
 ```
 
-and restore official files before refreshing the Python core. Models, shared caches, generated jobs and untracked user files are preserved.
+then restore official source and refresh the Python core. Models, shared caches, generated jobs and untracked files are preserved.
 
 ## Launcher details
 
@@ -120,9 +123,9 @@ DubLocal listens only on the local machine at:
 http://127.0.0.1:7861
 ```
 
-The launcher can open the running instance or perform **Stop All & Launch** after an update. `Stop DubLocal.app` stops the local service without Terminal.
+`Stop DubLocal.app` stops the service. After an update the launcher can perform **Stop All & Launch**.
 
-The contextual runtime also uses a temporary loopback-only llama-server on `127.0.0.1` when that executable is available. Its port is selected dynamically for the translation job and is not exposed on the LAN.
+Contextual translation may also create a temporary loopback-only llama-server on `127.0.0.1` with an ephemeral port for the duration of a translation job.
 
 ## Where files live
 
@@ -135,15 +138,15 @@ The contextual runtime also uses a temporary loopback-only llama-server on `127.
 ~/Library/Caches/.../DubLocal/jobs/ generated/intermediate job files
 ```
 
-The jobs cache contains temporary audio, subtitles, voice intermediates and contextual-runtime logs. Normal startup removes jobs older than 24 hours and caps this temporary cache at 4 GiB.
+The jobs cache now includes M5 temporary source media, timing-fitted voice segments, dubbed audio mixes and remuxed outputs in addition to transcription/translation/TTS intermediates.
 
-Persistent model assets and the shared Hugging Face cache are not automatically pruned as temporary jobs.
+Normal startup removes job folders older than 24 hours and caps this temporary cache at 4 GiB. Persistent models/shared Hugging Face assets are outside that lifecycle.
 
-Exact data/cache paths use `platformdirs`; Hugging Face cache environment variables are respected.
+Exact paths use `platformdirs`; Hugging Face cache environment variables are respected.
 
 ## Older-build recovery
 
-If you are still on a build too old to use the current updater:
+If the installed build is too old to use the current updater:
 
 ```bash
 cd ~/dublocal
@@ -151,6 +154,6 @@ git pull
 zsh scripts/macos/install-launcher.sh
 ```
 
-Once the current updater is installed, normal maintenance should happen inside DubLocal.
+Once the current updater is present, normal maintenance should happen inside DubLocal.
 
-If something fails, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) before deleting models or rebuilding the whole environment.
+If something fails, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) before deleting models or rebuilding everything.

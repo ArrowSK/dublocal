@@ -49,22 +49,31 @@ def target_language_guidance(target_language: str) -> str:
 
     if target_language == "ru":
         return (
-            "Write idiomatic contemporary Russian in Cyrillic. Use correct case, gender, number and verbal aspect. "
-            "Do not calque English syntax. Do not leave ordinary English words untranslated and do not create pseudo-Russian "
-            "transliterations of English words. Render proper names naturally in Russian when appropriate. Preserve profanity "
-            "at the source register rather than sanitising or intensifying it."
+            "Write idiomatic contemporary Russian in Cyrillic. Do not calque English syntax. Reconstruct natural Russian syntax rather than "
+            "mirroring English word order. Use correct case, agreement, gender, number, tense and verbal aspect. Resolve grammatical gender from "
+            "supplied discourse context; when context does not establish gender, avoid inventing it and prefer a natural gender-neutral/rephrased "
+            "construction where possible. Translate idioms and phraseological expressions by their Russian meaning/register, not word-for-word. "
+            "Preserve metaphors as metaphors, using a natural Russian equivalent image where a literal calque would sound absurd, without adding "
+            "new imagery. Do not leave ordinary English words untranslated and do not create pseudo-Russian transliterations of English words. "
+            "Render proper names naturally in Russian when appropriate. Preserve profanity at the source register rather than sanitising or "
+            "intensifying it."
         )
     if target_language == "uk":
         return (
-            "Write idiomatic contemporary Ukrainian in Cyrillic with natural grammar and word order. Do not leave ordinary "
+            "Write idiomatic contemporary Ukrainian in Cyrillic with natural grammar and word order. Resolve grammatical gender from context, "
+            "translate idioms by meaning rather than literal wording, and preserve metaphors without inventing new imagery. Do not leave ordinary "
             "English words untranslated or create pseudo-Ukrainian transliterations. Preserve names and profanity naturally."
         )
     if target_language in _LATIN_TARGETS:
         return (
-            "Write entirely in the requested target language using natural target-language grammar and idiom. Avoid literal "
-            "English calques and untranslated source-language fragments except unavoidable proper names."
+            "Write entirely in the requested target language using natural target-language grammar and idiom. Resolve grammatical gender/reference "
+            "from context where the target language requires it. Translate idioms by meaning/register rather than literal word order, preserve source "
+            "metaphors with a natural target-language equivalent, and avoid untranslated source-language fragments except unavoidable proper names."
         )
-    return "Write entirely in the requested target language using natural grammar and idiom."
+    return (
+        "Write entirely in the requested target language using natural grammar and idiom. Resolve reference/gender from context without guessing, "
+        "translate phraseological expressions by meaning, and preserve source metaphors without inventing new imagery."
+    )
 
 
 def _script_counts(text: str) -> tuple[int, int]:
@@ -91,7 +100,7 @@ def validate_translation_text(
 
     if _CJK_OR_HANGUL_RE.search(cleaned):
         raise DubLocalError(
-            f"Contextual translator produced unexpected CJK/Hangul text in subtitle id {segment_id} "
+            f"Contextual translator produced unexpected non-target script (CJK/Hangul) in subtitle id {segment_id} "
             f"while translating to {target_language}."
         )
 
