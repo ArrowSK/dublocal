@@ -86,13 +86,27 @@ def _clean_cli_text(raw: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _run_cli_compat(prompt: str, *, max_output_tokens: int, model_key: str) -> str:
+def _context_size(spec, requested: int | None) -> int:
+    native = int(spec.metadata["native_context"])
+    if requested is None:
+        return native
+    return max(4096, min(native, int(requested)))
+
+
+def _run_cli_compat(
+    prompt: str,
+    *,
+    max_output_tokens: int,
+    model_key: str,
+    context_tokens: int | None,
+) -> str:
     command = _llama_command()
     spec = contextual_model_spec(model_key)
     if not command or not contextual_model_valid(model_key):
         raise ContextualTranslationMissingError(
             f"{spec.label} contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
         )
+    context_size = _context_size(spec, context_tokens)
 
     args = command + [
         "-m",
@@ -116,7 +130,7 @@ def _run_cli_compat(prompt: str, *, max_output_tokens: int, model_key: str) -> s
         "-p",
         prompt,
         "-c",
-        str(spec.metadata["native_context"]),
+        str(context_size),
         "-n",
         str(max(128, min(4096, max_output_tokens))),
         "--temp",
@@ -157,16 +171,17 @@ def _run_cli_compat(prompt: str, *, max_output_tokens: int, model_key: str) -> s
 class ContextualRuntime:
     """One local llama.cpp session reused for an entire contextual translation job."""
 
-    def __init__(self, model_key: str = "8b") -> None:
+    def __init__(self, model_key: str = "8b", context_tokens: int | None = None) -> None:
         self.model_key = model_key
         self.spec = contextual_model_spec(model_key)
+        self.context_tokens = _context_size(self.spec, context_tokens)
         self._server_command = _llama_server_command()
         self._process: subprocess.Popen[str] | None = None
         self._log_handle = None
         self._log_path: Path | None = None
         self._base_url: str | None = None
         runtime = "llama-server" if self._server_command else "llama-cli compatibility"
-        self.mode = f"{self.spec.label} · {runtime}"
+        self.mode = f"{self.spec.label} · {runtime} · ctx {self.context_tokens}"
 
     def __enter__(self) -> "ContextualRuntime":
         if not contextual_model_valid(self.model_key):
@@ -196,7 +211,7 @@ class ContextualRuntime:
             "--port",
             str(port),
             "-c",
-            str(self.spec.metadata["native_context"]),
+            str(self.context_tokens),
             "--jinja",
             "--log-colors",
             "off",
@@ -269,6 +284,7 @@ class ContextualRuntime:
                 prompt,
                 max_output_tokens=max_output_tokens,
                 model_key=self.model_key,
+                context_tokens=self.context_tokens,
             )
         if not self._base_url or not self._process or self._process.poll() is not None:
             raise DubLocalError("The local contextual translation runtime is not running.")
