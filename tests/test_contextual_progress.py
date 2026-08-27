@@ -104,8 +104,9 @@ def test_contextual_translation_preserves_standalone_tags(monkeypatch, tmp_path:
     class Runtime:
         mode = "fake-server"
 
-        def __init__(self, model_key: str = "8b"):
+        def __init__(self, model_key: str = "8b", context_tokens: int | None = None):
             assert model_key == "8b"
+            assert context_tokens == 20480
 
         def __enter__(self):
             return self
