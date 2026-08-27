@@ -7,7 +7,7 @@ from .adaptive_contextual import (
     active_recommendation,
     adaptive_contextual_translation_status,
     prepare_recommended_contextual_translation,
-    remove_recommended_contextual_model,
+    remove_all_contextual_model_registrations,
 )
 from .dependencies import local_resource_status
 from .hardware_profile import hardware_summary
@@ -20,7 +20,7 @@ _RECOMMENDATION = active_recommendation()
 # explicit legacy fast path. Detailed hardware/model reasoning stays in Settings.
 base.contextual_translation_status = adaptive_contextual_translation_status
 base.prepare_contextual_translation = prepare_recommended_contextual_translation
-base.remove_contextual_model = remove_recommended_contextual_model
+base.remove_contextual_model = remove_all_contextual_model_registrations
 base.TRANSLATION_MODE_CHOICES = [
     (f"Recommended for this Mac · {_RECOMMENDATION.label}", "contextual"),
     ("Fast legacy · OPUS · sentence-level", "opus"),
@@ -72,13 +72,11 @@ def _remove_contextual_settings(
     main_target_language: str,
     source_info: dict | None,
 ):
-    recommendation = active_recommendation()
     try:
-        removed = remove_recommended_contextual_model()
+        removed = remove_all_contextual_model_registrations()
         action = (
             "```text\n"
-            f"[model] recommended {recommendation.model_label} registration "
-            f"{'removed' if removed else 'was not installed'}\n"
+            f"[models] DubLocal contextual model registrations {'removed' if removed else 'were not installed'}\n"
             "[shared cache] shared Hugging Face files are kept\n"
             "```"
         )
