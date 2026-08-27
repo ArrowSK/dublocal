@@ -16,28 +16,25 @@ Nothing here grants rights to third-party video, audio or subtitles. Users remai
 | FFmpeg / ffprobe | Media inspection/extraction and later mixing/remuxing | Existing executable reused when available; any future bundled binary requires exact build/licence review |
 | whisper.cpp | Local speech-to-text | Optional external engine; existing `whisper-cli` reused when present |
 
-## v0.4.2 contextual translation — recommended quality path
+## v0.4.2 adaptive contextual translation
 
-The recommended quality translation path is local and uses a larger model plus a review pass.
+The recommended contextual translation path is local and hardware-aware. DubLocal does not install the same model on every Mac.
 
 | Component | Purpose | Licence / distribution policy |
 | --- | --- | --- |
 | `llama.cpp` | Local GGUF inference runtime / loopback llama-server | MIT upstream; DubLocal reuses an existing executable or can install it through Homebrew; not bundled in the development checkout |
-| `Qwen/Qwen3-8B-GGUF` / `Qwen3-8B-Q4_K_M.gguf` | Default context-aware multilingual subtitle translation and review | Apache-2.0 upstream; not bundled; explicit download only; pinned immutable revision and SHA-256; shared Hugging Face cache |
+| `Qwen/Qwen3-4B-GGUF` / `Qwen3-4B-Q4_K_M.gguf` | Lightweight contextual translation for low-memory Apple Silicon and modest Intel Macs | Apache-2.0 upstream; not bundled; explicit download only when recommended; pinned immutable revision and SHA-256; shared Hugging Face cache |
+| `Qwen/Qwen3-8B-GGUF` / `Qwen3-8B-Q4_K_M.gguf` | Balanced/best contextual translation and optional senior review | Apache-2.0 upstream; not bundled; explicit download only when recommended; pinned immutable revision and SHA-256; shared Hugging Face cache |
 
-The configured Qwen3 8B Q4_K_M weight is about 5.03 GB. Exact revision/hash are recorded in `MODEL_LICENSES.json`.
+Configured approximate weight sizes are 2.5 GB for Qwen3 4B Q4_K_M and 5.03 GB for Qwen3 8B Q4_K_M. Exact revisions/hashes are recorded in `MODEL_LICENSES.json`.
 
-DubLocal reserves part of the model context for instructions/output and scales source context with programme duration. The same loaded model session can be reused for translation, recovery and the optional senior-review pass.
+DubLocal scales both prompt/context use and the llama.cpp runtime context allocation according to detected architecture and memory. This is a runtime policy only; it does not alter the upstream model licence.
 
-Removing the quality model from DubLocal removes only DubLocal's registration/link. It does not delete the shared Hugging Face snapshot or uninstall `llama.cpp`, because another local application may use them.
+The same loaded model session can be reused for translation, recovery and, on the Best-quality profile, the optional senior-review pass.
+
+Removing contextual models from DubLocal removes DubLocal's registrations/links. It does not delete shared Hugging Face snapshots or uninstall `llama.cpp`, because another local application may use them.
 
 There is no cloud translation fallback.
-
-## Historical Qwen3 4B development model
-
-`Qwen/Qwen3-4B-GGUF` was used by the v0.4.1 development contextual translator. Real-language testing showed that it was not consistently strong enough for DubLocal's intended default quality level.
-
-v0.4.2 does not select/download it. Its exact Apache-2.0 model metadata remains in `MODEL_LICENSES.json` for provenance. A previously downloaded shared-cache snapshot is not automatically deleted.
 
 ## M3 fast legacy translation
 
@@ -52,7 +49,7 @@ The original OPUS/Marian backend remains as an explicit smaller/faster option.
 | `Helsinki-NLP/opus-mt-mul-en` | Supported languages → English | Apache-2.0; pinned safetensors revision/checksum; shared cache |
 | `Helsinki-NLP/opus-mt-en-mul` | English → supported languages | Apache-2.0; pinned safetensors revision/checksum; shared cache |
 
-These models are not described as the recommended quality route because they translate subtitle text sentence-by-sentence and do not provide long-form dialogue context.
+These models are not described as the recommended contextual route because they translate subtitle text sentence-by-sentence and do not provide long-form dialogue context.
 
 DubLocal never adds another application's `site-packages` to its own interpreter. Compatible Python environments are reused only by starting that environment's own Python as an isolated worker process.
 
