@@ -6,6 +6,7 @@ from pathlib import Path
 from platformdirs import user_cache_dir
 
 from .job_cache import prune_job_cache
+from .m52 import install_runtime_refinements
 from .ui_v050 import MATRIX_CSS, build_app
 
 
@@ -31,6 +32,10 @@ def main() -> None:
     # Generated SRT/WAV/intermediate media live in the macOS cache, not the repo or
     # user documents. Prune stale/oversized jobs before a new session starts.
     prune_job_cache()
+
+    # Keep the stable M5 public API but install the current timing fitter before any
+    # export job can run.
+    install_runtime_refinements()
 
     demo = build_app()
     demo.queue(default_concurrency_limit=1).launch(
