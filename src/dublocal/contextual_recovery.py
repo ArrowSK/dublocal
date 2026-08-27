@@ -11,6 +11,10 @@ from .timeline import Segment
 _CODE_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 _ID_LINE_RE = re.compile(r"^\s*\[?(\d+)\]?\s*(?::|[-–—])\s*(.+?)\s*$")
 _CONTAINER_KEYS = ("translations", "items", "results", "data", "output")
+_TRANSLATION_PREFIX_RE = re.compile(
+    r"^\s*(?:translation|translated text|перевод|переведенный текст)\s*:\s*",
+    re.IGNORECASE,
+)
 
 
 def _candidate_payloads(raw: str) -> list[Any]:
@@ -74,6 +78,44 @@ def _line_items(raw: str) -> list[dict[str, Any]]:
         if match:
             items.append({"id": int(match.group(1)), "text": match.group(2).strip()})
     return items
+
+
+def _all_candidate_items(raw: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for payload in _candidate_payloads(raw):
+        candidate = _items_from_payload(payload)
+        if candidate:
+            items.extend(candidate)
+    items.extend(_line_items(raw))
+    return items
+
+
+def recover_partial_output(raw: str, target_segments: Sequence[Segment]) -> dict[int, str]:
+    """Return unambiguous translations for any expected IDs present in model output.
+
+    This is intentionally partial. It is used only after a complete chunk failed strict
+    validation so DubLocal can preserve the good lines and recover only the missing IDs.
+    Duplicate/conflicting IDs are discarded and recovered individually instead.
+    """
+
+    expected = {segment.index for segment in target_segments}
+    values: dict[int, list[str]] = {}
+    for item in _all_candidate_items(raw):
+        try:
+            index = int(item["id"])
+            text = str(item["text"]).strip()
+        except (KeyError, TypeError, ValueError):
+            continue
+        if index not in expected or not text:
+            continue
+        values.setdefault(index, []).append(text)
+
+    recovered: dict[int, str] = {}
+    for index, candidates in values.items():
+        unique = list(dict.fromkeys(candidates))
+        if len(unique) == 1:
+            recovered[index] = unique[0]
+    return recovered
 
 
 def recover_chunk_output(raw: str, target_segments: Sequence[Segment]) -> list[str]:
@@ -142,3 +184,74 @@ def build_format_repair_prompt(
         "PREVIOUS RESPONSE TO RECOVER:\n"
         f"{previous}\n"
     )
+
+
+def build_single_line_recovery_prompt(
+    original_context_prompt: str,
+    segment: Segment,
+    target_language_label: str,
+    prior_chunk_output: str,
+) -> str:
+    """Build a final single-ID recovery prompt while retaining the original context."""
+
+    prior = (prior_chunk_output or "").strip()
+    if len(prior) > 8_000:
+        prior = prior[-8_000:]
+    return (
+        original_context_prompt.rstrip()
+        + "\n\nFINAL SINGLE-SUBTITLE RECOVERY TASK:\n"
+        + f"Use all programme, nearby and prior-translation context above. Translate ONLY subtitle [{segment.index}] "
+        + f"into natural {target_language_label}.\n"
+        + f"Source text: {segment.text}\n"
+        + "Return ONLY the translated subtitle text itself. Do not output an ID, JSON, Markdown, explanation, label or alternatives.\n"
+        + "Keep names, tone, profanity and meaning consistent with the surrounding dialogue.\n"
+        + "For reference, the previous chunk recovery output was:\n"
+        + prior
+        + "\n"
+    )
+
+
+def clean_single_line_output(raw: str, segment_id: int) -> str:
+    """Extract one subtitle translation from the final single-ID recovery response."""
+
+    text = (raw or "").strip()
+    if not text:
+        raise DubLocalError(f"Contextual translator returned no text for subtitle id {segment_id}.")
+
+    fenced = _CODE_FENCE_RE.search(text)
+    if fenced:
+        text = fenced.group(1).strip()
+
+    for payload in _candidate_payloads(text):
+        if isinstance(payload, dict) and "text" in payload:
+            candidate = str(payload["text"]).strip()
+            if candidate:
+                return candidate
+        if isinstance(payload, list) and len(payload) == 1 and isinstance(payload[0], dict):
+            candidate = str(payload[0].get("text") or "").strip()
+            if candidate:
+                return candidate
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        raise DubLocalError(f"Contextual translator returned no text for subtitle id {segment_id}.")
+
+    for line in lines:
+        match = _ID_LINE_RE.match(line)
+        if match and int(match.group(1)) == segment_id:
+            candidate = match.group(2).strip().strip('"“”')
+            if candidate:
+                return candidate
+
+    cleaned = [_TRANSLATION_PREFIX_RE.sub("", line).strip().strip('"“”') for line in lines]
+    cleaned = [line for line in cleaned if line]
+    candidate = " ".join(cleaned).strip()
+    if not candidate or len(candidate) > 2_000:
+        raise DubLocalError(
+            f"Contextual translator returned unusable text for subtitle id {segment_id}."
+        )
+    if "SOURCE TARGET LINES" in candidate or "FINAL SINGLE-SUBTITLE RECOVERY TASK" in candidate:
+        raise DubLocalError(
+            f"Contextual translator echoed instructions instead of translating subtitle id {segment_id}."
+        )
+    return candidate
