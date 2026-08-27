@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import dublocal.contextual_progress as contextual_progress
 from dublocal.timeline import Segment, parse_srt
@@ -103,6 +104,9 @@ def test_contextual_translation_preserves_standalone_tags(monkeypatch, tmp_path:
     class Runtime:
         mode = "fake-server"
 
+        def __init__(self, model_key: str = "8b"):
+            assert model_key == "8b"
+
         def __enter__(self):
             return self
 
@@ -115,7 +119,12 @@ def test_contextual_translation_preserves_standalone_tags(monkeypatch, tmp_path:
 
     monkeypatch.setattr(contextual_progress, "ContextualRuntime", Runtime)
     monkeypatch.setattr(contextual_progress, "_llama_command", lambda: ["llama-cli"])
-    monkeypatch.setattr(contextual_progress, "quality_registered_model_valid", lambda: True)
+    monkeypatch.setattr(contextual_progress, "contextual_model_valid", lambda key: key == "8b")
+    monkeypatch.setattr(
+        contextual_progress,
+        "active_recommendation",
+        lambda: SimpleNamespace(model_key="8b", review=False, context_cap_tokens=16384),
+    )
 
     result = contextual_progress.translate_srt_contextual_with_progress(
         source,
