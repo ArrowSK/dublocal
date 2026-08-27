@@ -1,69 +1,80 @@
 # DubLocal changelog
 
-DubLocal is still in active development. The versions below describe development builds from the `main` branch.
+DubLocal is still in active development. Versions below describe development builds from `main`.
 
-> **Current development build:** `v0.4.0.dev0` — **M4 Local Voice**
+> **Current development build:** `v0.4.1.dev0` — **M4 Local Voice + M3.1 Contextual Translation**
 >
-> A packaged GitHub Release has **not** been published yet. The first public packaged release will be created only after the corresponding build has been validated and the macOS distribution work is ready.
+> There is no packaged GitHub Release yet. The first packaged release will be published only after the Mac distribution work and release-level model/licence validation are complete.
 
-## v0.4.0.dev0 — M4 Local Voice — current
+## v0.4.1.dev0 — M3.1 Contextual Translation — current
 
-M4 adds the first local speech-synthesis stage without changing the source movie soundtrack yet.
+The original M3 OPUS implementation proved useful as a lightweight baseline but not good enough as the default for dialogue. It translated subtitle entries independently, which produced literal, awkward and sometimes nonsensical phrasing.
+
+M3.1 changes the default translation path rather than trying to hide that limitation.
 
 ### Added
 
+- **Contextual quality** as the default translation mode.
+- Official `Qwen/Qwen3-4B-GGUF` Q4_K_M (about 2.5 GB) as the local quality model.
+- `llama.cpp` as the local inference runtime; an existing installation is reused first, otherwise Model Manager can install it through Homebrew.
+- Exact immutable model revision and SHA-256 verification before DubLocal registers the shared model file.
+- A translation context made from three layers:
+  - programme-wide sampled source dialogue;
+  - nearby source dialogue before and after the lines being translated;
+  - recent translated lines carried forward as terminology/style memory.
+- A context budget that automatically grows with programme duration, from 4,096 tokens for short material up to a 24,576-token input ceiling within the model's native 32k context.
+- Chunked subtitle translation with constrained JSON output so subtitle IDs, segment count and timestamps stay aligned.
+- Explicit instructions to preserve speaker intent, recurring names, slang, jokes, profanity/register and non-dialogue cues.
+- `llama.cpp` reporting under **Settings → Local Resources**.
+
+### Kept deliberately
+
+- **Fast legacy · OPUS** remains available as an explicit low-storage/fast choice.
+- Existing OPUS downloads are not removed during upgrade.
+- There is no silent cloud fallback and no silent downgrade from Contextual quality to OPUS.
+
+M3.1 is not declared quality-validated until a real long-form translation is tested on the target Mac. Issue #9 tracks that validation.
+
+## v0.4.0.dev0 — M4 Local Voice
+
+M4 added the first local speech-synthesis stage without changing the source movie soundtrack.
+
 - Kokoro as the first local TTS backend.
-- Reuse of a compatible existing Kokoro virtual environment through a separate worker process instead of copying that environment's packages into DubLocal.
-- A fallback **Prepare Kokoro** action that installs DubLocal's optional Kokoro runtime only when no reusable runtime is available.
-- Official Kokoro language and voice selectors.
-- American and British English as separate pronunciation frontends/voice families.
-- Voice-only WAV generation from either the source SRT or translated SRT.
-- Per-subtitle segment WAV assets and a JSON generation manifest.
-- Timeline assembly that keeps every subtitle start time and reports speech that overruns its current subtitle window.
-- Model Manager controls for explicit Kokoro preparation/verification.
-- Shared Hugging Face cache reuse for Kokoro model/voice assets.
+- Reuse of a compatible existing Kokoro virtual environment through a separate worker process.
+- Fallback Kokoro preparation only when no reusable runtime exists.
+- Official Kokoro language/voice selectors.
+- Voice-only WAV generation from source or translated SRT.
+- Per-segment WAV assets and a JSON generation manifest.
+- Timeline assembly that preserves subtitle start times and reports overruns.
+- Shared Hugging Face cache reuse.
+- macOS venv identity-safe discovery, allowing environments such as `~/narroam-studio/.venv/bin/python` to be reused correctly.
 
-### Runtime-discovery fix
-
-M4 fixes an important macOS virtual-environment edge case. A venv's `bin/python` is often a symlink to the same framework Python used by other venvs. Earlier discovery resolved that symlink, which could make two different environments appear to be the same interpreter. DubLocal now preserves the venv entry-point path itself, so an environment such as `~/narroam-studio/.venv/bin/python` can be recognized as a distinct reusable runtime.
-
-### Scope boundary
-
-M4 does **not** replace dialogue in the original soundtrack and does not re-encode video. It produces a synchronized voice-only track. M5 adds duration fitting, original-audio ducking/mixing and the stream-copy/remux strategy for replacing the primary audio or adding a second selectable dubbed track.
-
-Official Kokoro currently covers American/British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin Chinese. Translation targets such as Hungarian, Russian and German remain subtitle-only until another compatible local TTS backend is added.
+M4 deliberately stops before source-soundtrack editing. M5 adds duration fitting, audio ducking/mixing and stream-copy/remux output.
 
 ## v0.3.0.dev0 — M3 Local Translation
 
-M3 turned the timestamped subtitle timeline from M2 into a fully local translation workflow.
-
 - Local subtitle translation with pinned Apache-2.0 Helsinki-NLP OPUS models.
-- English ↔ supported-language translation with one model, and non-English ↔ non-English translation through a local English pivot.
-- Original/translated side-by-side subtitle preview.
-- Translated SRT export with the original timestamps preserved exactly.
-- Whisper Auto-detected language handoff into the translation workflow.
-- Shared Hugging Face cache reuse instead of unnecessary duplicate model copies.
-- Compatible external Python-runtime discovery through isolated worker processes.
-- Reusable-resource reporting for FFmpeg, ffprobe, whisper.cpp and the Hugging Face cache.
-- **Repair installation** for Git-based development installs.
-- Main/Settings navigation with Settings → Updates, Model Manager and Local Resources.
-- Planned M5 behavior recorded: stream-copy compatible video and let the user replace the primary audio or add a second selectable dubbed track.
+- English ↔ supported-language translation with one model; non-English ↔ non-English through an English pivot.
+- Side-by-side subtitle preview and translated SRT export with timestamps preserved.
+- Shared Hugging Face cache reuse and compatible external Python-runtime reuse.
+- Main/Settings navigation with Updates, Model Manager and Local Resources.
+
+This remains the **Fast legacy** translation engine in v0.4.1.dev0.
 
 ## v0.2.0.dev0 — M2 Local Transcription
 
-- Added local `whisper.cpp` transcription.
-- Added Tiny, Base and Small Whisper model management with checksum verification.
-- Added source-language Auto/manual selection.
-- Added timestamped SRT generation and preview.
-- Added YouTube/local-file transcription fallback.
-- Added the first in-app GitHub updater.
-- Fixed Gradio output-path handling for generated subtitle files.
-- M2 transcription was validated on an Apple Silicon Mac before Issue #1 was closed.
+- Local `whisper.cpp` transcription.
+- Tiny, Base and Small Whisper model management with checksum verification.
+- Auto/manual source language selection.
+- Timestamped SRT generation and preview.
+- YouTube/local-file transcription fallback.
+- First in-app GitHub updater.
+- Gradio generated-file path fix.
 
 ## v0.1.0.dev0 — M1 Source and Captions
 
-- Added the Matrix-inspired Gradio shell.
-- Added local media inspection with ffprobe.
-- Added YouTube metadata/caption discovery with yt-dlp.
-- Added existing subtitle/caption extraction.
-- Added the branded macOS launcher and original DubLocal icon.
+- Matrix-inspired Gradio shell.
+- Local media inspection with ffprobe.
+- YouTube metadata/caption discovery with yt-dlp.
+- Existing subtitle/caption extraction.
+- Branded macOS launcher and DubLocal icon.
