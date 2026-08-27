@@ -1,6 +1,6 @@
 # Installing DubLocal on macOS
 
-**Current development build: v0.5.0.dev0 — M5 Local Dubbed Media Export**
+**Current development build: v0.5.1.dev0 — Voice Match + Export Refinement**
 
 DubLocal currently uses a Git checkout as its application source, but after first setup it behaves like a normal local Mac utility: launch **DubLocal.app**, update/repair inside the app, and install optional models only when you need them.
 
@@ -82,18 +82,25 @@ OPUS remains an explicit smaller/faster sentence-level option under **Fast legac
 
 Open **Settings → Model Manager → Kokoro**. DubLocal reuses a compatible external Kokoro environment first. Only if no reusable environment exists does it prepare another local runtime.
 
-## M5 has no new AI model dependency
+The v0.5.1 automatic voice matcher does not install or load a second TTS model. It performs a lightweight local acoustic analysis and can switch Kokoro voice presets per subtitle segment while the same Kokoro language pipeline remains loaded.
 
-M5 uses FFmpeg/ffprobe plus the existing M4 voice output. It does not require another neural model.
+## Export has no new heavy AI model dependency
 
-M5 can:
+The v0.5/v0.5.1 export path uses FFmpeg/ffprobe plus the existing voice output. Automatic original-vocal-range matching also uses FFmpeg + NumPy only; no diarization or source-separation model is downloaded.
+
+Export can:
 
 - timing-fit generated voice segments;
-- duck/mix the original primary soundtrack;
+- strongly suppress the original soundtrack across timed dialogue/singing windows;
 - replace the primary audio or append a second dubbed track;
-- stream-copy the video where compatible.
+- embed generated original and translated subtitles as selectable streams;
+- stream-copy the video where compatible;
+- choose a lower YouTube source resolution before download without local video encoding;
+- optionally downscale a local video only when the user explicitly selects a lower output resolution.
 
-MKV is the recommended container. MP4 is used only when the source streams can be remuxed compatibly; DubLocal does not silently re-encode video on an incompatible MP4 request.
+For local downscaling DubLocal uses FFmpeg's Apple VideoToolbox H.264 encoder. **Original / best available** remains the no-video-recode default.
+
+MKV is the recommended container. MP4 is used only when the selected streams can be packaged compatibly; DubLocal does not silently start a video transcode merely to satisfy MP4.
 
 ## Updating
 
@@ -138,7 +145,7 @@ Contextual translation may also create a temporary loopback-only llama-server on
 ~/Library/Caches/.../DubLocal/jobs/ generated/intermediate job files
 ```
 
-The jobs cache now includes M5 temporary source media, timing-fitted voice segments, dubbed audio mixes and remuxed outputs in addition to transcription/translation/TTS intermediates.
+The jobs cache includes temporary source media, voice-analysis PCM, timing-fitted voice segments, dubbed audio mixes, generated subtitle tracks and remuxed outputs in addition to transcription/translation/TTS intermediates.
 
 Normal startup removes job folders older than 24 hours and caps this temporary cache at 4 GiB. Persistent models/shared Hugging Face assets are outside that lifecycle.
 
