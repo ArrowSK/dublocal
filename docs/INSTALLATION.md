@@ -37,24 +37,46 @@ Settings → Model Manager → Whisper.
 
 Available local models include Tiny, Base, Small and the optional Accurate Large-v3-Turbo-Q5 model. Base (~142 MiB) remains the normal starting point; Accurate (~547 MiB) is intended for difficult audio such as songs, accents or noisy speech.
 
-### Contextual translation — recommended quality path
+### Contextual translation — Recommended for this Mac
 
-Settings → Model Manager → **Contextual translation · Qwen3 8B · quality** → **Prepare / verify contextual translation**.
+Open **Settings → Model Manager → Contextual translation** and click **Prepare / verify contextual translation**.
 
-That action:
+DubLocal first detects the Mac architecture and physical memory, then prepares only the contextual model recommended for that hardware. The ordinary Main workflow therefore stays simple; it shows **Recommended for this Mac · Lightweight / Balanced / Best quality** rather than asking the user to choose from a model matrix.
 
-1. reuses an existing compatible `llama.cpp` command when available;
-2. otherwise installs `llama.cpp` through Homebrew;
-3. downloads the official Qwen3 8B Q4_K_M GGUF (~5.03 GB) into the shared Hugging Face cache;
-4. verifies the pinned SHA-256 before registering the model with DubLocal.
+Current conservative defaults are:
 
-The model is local and Apache-2.0. Translation has no cloud fallback.
+```text
+Apple Silicon < 12 GB     Qwen3 4B · review off · 8k input cap
+Apple Silicon 12–23 GB    Qwen3 8B · review off · 16k input cap
+Apple Silicon 24 GB+      Qwen3 8B · review on  · 24k input cap
+Intel < 24 GB             Qwen3 4B · review off · smaller context
+Intel 24 GB+              Qwen3 8B · review off · reduced context
+```
 
-The previous Qwen3 4B development model is no longer selected by v0.4.2. If it was downloaded previously, its shared-cache snapshot may remain because DubLocal does not delete shared model assets that another application could be using.
+That preparation action:
+
+1. detects the recommended translation profile for the current Mac;
+2. reuses an existing compatible `llama.cpp` command when available;
+3. otherwise installs `llama.cpp` through Homebrew;
+4. downloads only the recommended official Qwen GGUF into the shared Hugging Face cache;
+5. verifies the pinned checksum before registering the model with DubLocal.
+
+Approximate contextual model sizes:
+
+- **Qwen3 4B Q4_K_M** — 2.5 GB; lightweight profile;
+- **Qwen3 8B Q4_K_M** — 5.03 GB; balanced/best profiles.
+
+Both are local Apache-2.0 model releases. There is no cloud translation fallback.
+
+The hardware profile also controls the **actual llama.cpp context allocation**, not only the amount of prompt text. For example, an 8 GB M1 does not reserve the model's full 32k context while receiving only an 8k prompt; DubLocal starts llama.cpp with a smaller runtime context to reduce unified-memory and swap pressure.
+
+If another contextual Qwen model was already registered by an earlier DubLocal build, Model Manager reports it as the alternate model. Preparing contextual translation does not download both models merely because both are supported.
+
+Removing DubLocal contextual models removes DubLocal's registrations/links. It does not erase the shared Hugging Face cache or uninstall `llama.cpp`, because another local application may use them.
 
 ### Fast legacy translation — optional
 
-The OPUS models remain under Settings → Model Manager → **Fast legacy translation · OPUS**. They are smaller (~310 MiB per direction) but translate sentence-by-sentence and are not the recommended quality path.
+The OPUS models remain under Settings → Model Manager → **Fast legacy translation · OPUS**. They are smaller (~310 MiB per direction) but translate sentence-by-sentence and are not the recommended contextual path.
 
 ### Kokoro
 
@@ -100,7 +122,7 @@ http://127.0.0.1:7861
 
 The launcher can open the running instance or perform **Stop All & Launch** after an update. `Stop DubLocal.app` stops the local service without Terminal.
 
-The contextual quality runtime also uses a temporary loopback-only llama-server on `127.0.0.1` when that executable is available. Its port is selected dynamically for the translation job and is not exposed on the LAN.
+The contextual runtime also uses a temporary loopback-only llama-server on `127.0.0.1` when that executable is available. Its port is selected dynamically for the translation job and is not exposed on the LAN.
 
 ## Where files live
 
