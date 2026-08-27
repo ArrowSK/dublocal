@@ -62,6 +62,27 @@ html, body, .gradio-container {
   max-width: 1040px !important;
   margin: 0 auto !important;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  --primary-400: #42ef83 !important;
+  --primary-500: #42ef83 !important;
+  --primary-600: #2bd26d !important;
+  --color-accent: #42ef83 !important;
+  --checkbox-background-color-selected: #42ef83 !important;
+  --checkbox-border-color-selected: #42ef83 !important;
+  --checkbox-label-background-fill-selected: rgba(66, 239, 131, 0.12) !important;
+}
+
+.gradio-container input[type="checkbox"],
+.gradio-container input[type="radio"],
+.gradio-container input[type="range"],
+.gradio-container progress {
+  accent-color: var(--dl-green) !important;
+}
+
+.gradio-container button[role="tab"][aria-selected="true"]::after,
+.gradio-container .tab-nav button.selected::after,
+.gradio-container .tabs button.selected::after {
+  background: var(--dl-green) !important;
+  background-color: var(--dl-green) !important;
 }
 
 .dl-header {
@@ -213,7 +234,24 @@ def _summary(info: dict[str, Any]) -> str:
     return "```text\n" + "\n".join(lines) + "\n```"
 
 
+def _notify_info(message: str) -> None:
+    try:
+        gr.Info(message)
+    except Exception:
+        # Notifications are supplemental; textual status remains the source of truth.
+        pass
+
+
+def _notify_error(message: str) -> None:
+    try:
+        gr.Warning(message)
+    except Exception:
+        # Event-less tests and non-interactive callers should still receive status text.
+        pass
+
+
 def _error_status(message: str) -> str:
+    _notify_error(message)
     return f"```text\n[error] {message}\n```"
 
 
@@ -262,6 +300,8 @@ def scan_source(source_type: str, youtube_url: str, local_file: str | None):
             value=value,
             interactive=bool(choices),
         )
+        title = str(info.get("title") or ("Local media" if source_type != "YouTube" else "YouTube video"))
+        _notify_info(f"Source loaded: {title} · {len(tracks)} caption track(s)")
         return _summary(info), selector, info, []
     except Exception as exc:
         message = str(exc) if isinstance(exc, DubLocalError) else f"Unexpected error: {exc}"
@@ -281,6 +321,8 @@ def extract_selected(info: dict[str, Any], track_value: str | None, rights_confi
     if not info:
         return None, [], _error_status("Scan a source first."), "", "auto"
     if not track_value:
+        message = "No caption track is selected. Use local Whisper transcription instead."
+        _notify_info(message)
         return None, [], (
             "```text\n"
             "[fallback] no caption track is selected\n"
@@ -291,6 +333,7 @@ def extract_selected(info: dict[str, Any], track_value: str | None, rights_confi
     try:
         output = extract_subtitle(info, track_value)
         language = _selected_track_language(info, track_value)
+        _notify_info(f"Source subtitles ready: {output.name}")
         return str(output), _preview_srt(output), (
             "```text\n"
             "[done] subtitle extraction complete\n"
@@ -300,6 +343,7 @@ def extract_selected(info: dict[str, Any], track_value: str | None, rights_confi
             "```"
         ), str(output), language
     except YoutubeRateLimitError as exc:
+        _notify_info("YouTube captions are rate-limited. Local Whisper transcription is available.")
         return None, [], (
             "```text\n"
             f"[caption] {exc}\n"
@@ -357,6 +401,7 @@ def transcribe_selected(
         result = transcribe_source(info, model_id=model_id, language=language)
         rows = segments_to_rows(result.segments)
         detected = normalise_language_code(result.language)
+        _notify_info(f"Local transcription complete: {len(result.segments)} subtitle segment(s)")
         return str(result.srt_path), rows, (
             "```text\n"
             "[done] local transcription complete\n"
@@ -425,6 +470,7 @@ def translate_selected(
     try:
         result = translate_srt(subtitle_path, source_language, target_language)
         rows = translated_segments_to_rows(result.segments)
+        _notify_info(f"Translation complete: {len(result.segments)} subtitle segment(s)")
         return str(result.srt_path), rows, (
             "```text\n"
             "[done] local subtitle translation complete\n"
