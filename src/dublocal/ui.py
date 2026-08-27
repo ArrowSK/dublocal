@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import gradio as gr
 
+from . import __version__
 from .app import (
     LANGUAGE_CHOICES,
-    MATRIX_CSS,
+    MATRIX_CSS as BASE_CSS,
     MODEL_CHOICES,
     TARGET_LANGUAGE_CHOICES,
     _error_status,
     _toggle_source,
     check_updates_ui,
     extract_selected,
-    install_selected_model,
     install_update_ui,
     prepare_translation_ui,
     refresh_resources_ui,
@@ -23,18 +23,22 @@ from .app import (
     transcribe_selected,
     translate_selected,
 )
+from .contextual_progress import translate_srt_contextual_with_progress
 from .contextual_translation import (
     contextual_translation_status,
     prepare_contextual_translation,
     remove_contextual_model,
-    translate_srt_contextual,
 )
 from .dependencies import local_resource_status
+from .progress import ProgressEstimator
+from .progress_operations import (
+    generate_voice_track_with_progress,
+    install_whisper_model_with_progress,
+)
 from .transcription import model_manager_status
 from .translation import translated_segments_to_rows, translation_manager_status
 from .tts import (
     KOKORO_LANGUAGE_CHOICES,
-    generate_voice_track,
     kokoro_default_voice,
     kokoro_runtime_status,
     kokoro_voice_choices,
@@ -42,6 +46,76 @@ from .tts import (
     suggested_kokoro_language,
     voice_segments_to_rows,
 )
+
+
+MATRIX_CSS = BASE_CSS + r"""
+:root {
+  --primary-50: #effff5 !important;
+  --primary-100: #d8ffe6 !important;
+  --primary-200: #aafcc6 !important;
+  --primary-300: #78f4a4 !important;
+  --primary-400: #42ef83 !important;
+  --primary-500: #42ef83 !important;
+  --primary-600: #2bd26d !important;
+  --primary-700: #20aa57 !important;
+  --primary-800: #198646 !important;
+  --primary-900: #126638 !important;
+  --color-accent: #42ef83 !important;
+  accent-color: #42ef83 !important;
+}
+
+button[role="tab"][aria-selected="true"],
+button.selected,
+.tab-nav button.selected,
+.tabs button.selected {
+  color: var(--dl-green) !important;
+  border-color: var(--dl-green) !important;
+  box-shadow: inset 0 -2px 0 var(--dl-green) !important;
+}
+
+button[role="tab"]:hover,
+.tab-nav button:hover,
+.tabs button:hover {
+  color: var(--dl-green-soft) !important;
+}
+
+input[type="range"], progress {
+  accent-color: var(--dl-green) !important;
+}
+
+.dl-version-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 18px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--dl-border);
+  border-radius: 10px;
+  background: rgba(8, 18, 12, 0.72);
+}
+
+.dl-version-number {
+  color: var(--dl-green);
+  font: 700 14px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.dl-flow {
+  margin: 4px 0 14px 0;
+  color: var(--dl-muted);
+  font-size: 13px;
+}
+
+.dl-flow strong { color: var(--dl-green-soft); }
+
+.dl-compact-note {
+  color: var(--dl-muted);
+  font-size: 12px;
+  margin: 4px 0 8px 0;
+}
+
+.console { min-height: 72px !important; }
+"""
 
 
 TRANSLATION_MODE_CHOICES = [
@@ -54,6 +128,15 @@ TRANSLATION_ROUTE_CHOICES = [
     ("Supported languages → English · ~310 MiB", "many-to-en"),
     ("Non-English ↔ non-English · both models · ~620 MiB", "both"),
 ]
+
+
+def _progress_callback(progress: gr.Progress):
+    estimator = ProgressEstimator()
+
+    def update(fraction: float, label: str) -> None:
+        progress(fraction, desc=estimator.message(fraction, label))
+
+    return update
 
 
 def _translation_route_languages(route: str) -> tuple[str, str]:
@@ -95,8 +178,62 @@ def _translation_status_for_ui(
         return _error_status(str(exc))
 
 
-def _install_whisper_settings(model_id: str):
-    status, action = install_selected_model(model_id)
+def _scan_source_ui(
+    source_type: str,
+    youtube_url: str,
+    local_file: str | None,
+    progress: gr.Progress = gr.Progress(track_tqdm=True),
+):
+    update = _progress_callback(progress)
+    update(0.05, "Inspecting source")
+    result = scan_source(source_type, youtube_url, local_file)
+    update(1.0, "Source ready")
+    return result
+
+
+def _extract_ui(
+    info: dict,
+    track_value: str | None,
+    rights_confirmed: bool,
+    progress: gr.Progress = gr.Progress(track_tqdm=True),
+):
+    update = _progress_callback(progress)
+    update(0.08, "Extracting subtitle track")
+    result = extract_selected(info, track_value, rights_confirmed)
+    update(1.0, "Subtitle timeline ready")
+    return result
+
+
+def _transcribe_ui(
+    info: dict,
+    rights_confirmed: bool,
+    model_id: str,
+    language: str,
+    progress: gr.Progress = gr.Progress(track_tqdm=True),
+):
+    update = _progress_callback(progress)
+    update(0.04, "Preparing local transcription")
+    result = transcribe_selected(info, rights_confirmed, model_id, language)
+    update(1.0, "Transcription complete")
+    return result
+
+
+def _install_whisper_settings(
+    model_id: str,
+    progress: gr.Progress = gr.Progress(track_tqdm=True),
+):
+    update = _progress_callback(progress)
+    try:
+        path = install_whisper_model_with_progress(model_id, progress_callback=update)
+        action = (
+            "```text\n"
+            f"[done] Whisper {model_id} installed and checksum verified\n"
+            f"[model] {path.name}\n"
+            "```"
+        )
+    except Exception as exc:
+        action = _error_status(str(exc))
+    status = model_manager_status()
     return status, status, action
 
 
@@ -111,9 +248,13 @@ def _prepare_translation_settings(
     main_source_language: str,
     main_target_language: str,
     source_info: dict | None,
+    progress: gr.Progress = gr.Progress(track_tqdm=True),
 ):
+    update = _progress_callback(progress)
+    update(0.03, "Preparing legacy translation runtime/models")
     source, target = _translation_route_languages(route)
     settings_status, action = prepare_translation_ui(source, target)
+    update(1.0, "Legacy translation ready")
     main_status = _translation_status_for_ui(
         main_mode, main_source_language, main_target_language, source_info
     )
@@ -140,16 +281,18 @@ def _prepare_contextual_settings(
     main_source_language: str,
     main_target_language: str,
     source_info: dict | None,
+    progress: gr.Progress = gr.Progress(track_tqdm=True),
 ):
+    update = _progress_callback(progress)
     try:
+        update(0.02, "Checking llama.cpp and contextual model")
         prepared = prepare_contextual_translation()
+        update(1.0, "Contextual translation ready")
         action = (
             "```text\n"
             "[done] contextual translation is ready\n"
             f"[runtime/model] {prepared}\n"
             "[engine] Qwen3 4B Q4_K_M through llama.cpp\n"
-            "[context] surrounding source + rolling prior translations; budget grows with video duration\n"
-            "[next] use Main → Local translation with Contextual quality selected\n"
             "```"
         )
     except Exception as exc:
@@ -172,8 +315,7 @@ def _remove_contextual_settings(
         action = (
             "```text\n"
             f"[model] contextual Qwen3 registration {'removed' if removed else 'was not installed'}\n"
-            "[shared cache] Hugging Face cache is kept so other local apps are not broken\n"
-            "[runtime] llama.cpp is kept because it may be reused elsewhere\n"
+            "[shared cache] shared Hugging Face files are kept\n"
             "```"
         )
     except Exception as exc:
@@ -188,11 +330,7 @@ def _remove_contextual_settings(
 def _voice_dropdown(language: str | None):
     choices = kokoro_voice_choices(language)
     value = kokoro_default_voice(language)
-    return gr.Dropdown(
-        choices=choices,
-        value=value,
-        interactive=bool(choices),
-    )
+    return gr.Dropdown(choices=choices, value=value, interactive=bool(choices))
 
 
 def _suggest_voice_controls(
@@ -203,16 +341,11 @@ def _suggest_voice_controls(
     language = source_language if timeline_source == "Source subtitles" else target_language
     suggested = suggested_kokoro_language(language)
     if suggested is None:
-        return (
-            gr.Dropdown(value=None),
-            gr.Dropdown(choices=[], value=None, interactive=False),
-        )
+        return gr.Dropdown(value=None), gr.Dropdown(choices=[], value=None, interactive=False)
     return gr.Dropdown(value=suggested), _voice_dropdown(suggested)
 
 
 def _translation_preview_rows(rows: list[list[str]]) -> list[list[str]]:
-    """Put translated text before source text so it stays visible on normal-width windows."""
-
     return [
         [row[0], row[1], row[3], row[2]] if len(row) >= 4 else list(row)
         for row in rows
@@ -221,11 +354,7 @@ def _translation_preview_rows(rows: list[list[str]]) -> list[list[str]]:
 
 def _translation_result_note(rows: list[list[str]]) -> str:
     comparable = [row for row in rows if len(row) >= 4]
-    changed = sum(
-        1
-        for row in comparable
-        if str(row[2]).strip() != str(row[3]).strip()
-    )
+    changed = sum(1 for row in comparable if str(row[2]).strip() != str(row[3]).strip())
     return f"[translation] {changed}/{len(comparable)} segment(s) differ from the source"
 
 
@@ -234,22 +363,25 @@ def _translate_with_state(
     subtitle_path: str,
     source_language: str,
     target_language: str,
+    progress: gr.Progress = gr.Progress(track_tqdm=True),
 ):
     if not subtitle_path:
         return None, [], _error_status(
             "Extract or transcribe subtitles first. Translation reuses that timed SRT."
         ), ""
 
+    update = _progress_callback(progress)
     if mode == "opus":
-        output, rows, status = translate_selected(
-            subtitle_path, source_language, target_language
-        )
+        update(0.05, "Running fast legacy translation")
+        output, rows, status = translate_selected(subtitle_path, source_language, target_language)
+        update(1.0, "Translation complete")
     else:
         try:
-            result = translate_srt_contextual(
+            result = translate_srt_contextual_with_progress(
                 subtitle_path,
                 source_language,
                 target_language,
+                progress_callback=update,
             )
             output = str(result.srt_path)
             rows = translated_segments_to_rows(result.segments)
@@ -260,7 +392,6 @@ def _translate_with_state(
                 f"[segments] {len(result.segments)} · original timings preserved\n"
                 "[quality] surrounding source context + rolling prior translations were used\n"
                 f"[output] {result.srt_path.name}\n"
-                "[next] review the translated preview, then generate a voice track if the target language has a TTS backend\n"
                 "```"
             )
         except Exception as exc:
@@ -279,12 +410,9 @@ def _generate_voice_ui(
     language: str | None,
     voice: str | None,
     speed: float,
+    progress: gr.Progress = gr.Progress(track_tqdm=True),
 ):
-    selected = (
-        source_subtitle_path
-        if timeline_source == "Source subtitles"
-        else translated_subtitle_path
-    )
+    selected = source_subtitle_path if timeline_source == "Source subtitles" else translated_subtitle_path
     if not selected:
         missing = (
             "Extract or transcribe source subtitles first."
@@ -294,20 +422,21 @@ def _generate_voice_ui(
         return None, None, [], _error_status(missing)
     if not language or not voice:
         return None, None, [], _error_status(
-            "Official Kokoro does not support the selected subtitle language, or no compatible voice is selected. "
-            "Choose a supported Kokoro language/voice or keep the subtitle-only output."
+            "Official Kokoro does not support the selected subtitle language, or no compatible voice is selected."
         )
 
+    update = _progress_callback(progress)
     try:
-        result = generate_voice_track(
+        result = generate_voice_track_with_progress(
             selected,
             language=language,
             voice=voice,
             speed=float(speed),
+            progress_callback=update,
         )
         overflow_count = sum(1 for item in result.segments if item.overflow_ms > 0)
         overflow_note = (
-            f"{overflow_count} segment(s) exceed their subtitle window; M5 will add duration fitting"
+            f"{overflow_count} segment(s) exceed their subtitle window"
             if overflow_count
             else "all generated segments fit inside their current subtitle windows"
         )
@@ -319,7 +448,6 @@ def _generate_voice_ui(
             f"[segments] {len(result.segments)}\n"
             f"[timing] {overflow_note}\n"
             f"[output] {result.wav_path.name}\n"
-            "[scope] M4 output is voice-only; original-audio ducking/mixing and stream-copy media export arrive in M5\n"
             "```"
         )
         rows = voice_segments_to_rows(result.segments)
@@ -329,20 +457,34 @@ def _generate_voice_ui(
         return None, None, [], _error_status(str(exc))
 
 
-def _prepare_kokoro_settings(language: str, voice: str):
+def _prepare_kokoro_settings(
+    language: str,
+    voice: str,
+    progress: gr.Progress = gr.Progress(track_tqdm=True),
+):
+    update = _progress_callback(progress)
     try:
+        update(0.05, "Preparing Kokoro runtime and voice assets")
         runtime = prepare_kokoro(language, voice, 1.0)
+        update(1.0, "Kokoro ready")
         action = (
             "```text\n"
             "[done] Kokoro is ready\n"
             f"[runtime] {runtime}\n"
-            "[model] official Kokoro-82M/voice assets verified through the shared Hugging Face cache\n"
-            "[next] use Main → Local voice · Kokoro\n"
             "```"
         )
     except Exception as exc:
         action = _error_status(str(exc))
     return kokoro_runtime_status(), local_resource_status(), action
+
+
+def _settings_version_html() -> str:
+    return (
+        '<div class="dl-version-card">'
+        '<div><strong>DubLocal</strong><div class="dl-note">Running local development build</div></div>'
+        f'<div class="dl-version-number">v{__version__}</div>'
+        '</div>'
+    )
 
 
 def build_app() -> gr.Blocks:
@@ -362,12 +504,16 @@ def build_app() -> gr.Blocks:
 
         with gr.Tabs():
             with gr.Tab("Main"):
+                gr.HTML(
+                    '<div class="dl-flow"><strong>1 Source</strong> → 2 Subtitles → 3 Translate → 4 Voice-over. '
+                    'Open only the stage you need.</div>'
+                )
+
                 with gr.Group():
-                    source_type = gr.Radio(
-                        ["YouTube", "Local file"],
-                        value="YouTube",
-                        label="Source",
-                    )
+                    with gr.Row():
+                        source_type = gr.Radio(
+                            ["YouTube", "Local file"], value="YouTube", label="Source"
+                        )
                     youtube_url = gr.Textbox(
                         label="YouTube URL",
                         placeholder="https://www.youtube.com/watch?v=...",
@@ -378,9 +524,9 @@ def build_app() -> gr.Blocks:
                         type="filepath",
                         visible=False,
                     )
-                    scan_button = gr.Button("Scan source", variant="primary")
+                    scan_button = gr.Button("Load source", variant="primary")
 
-                with gr.Group():
+                with gr.Accordion("2 · Subtitles", open=False):
                     subtitle_track = gr.Dropdown(
                         label="Existing subtitle / caption track",
                         choices=[],
@@ -390,76 +536,39 @@ def build_app() -> gr.Blocks:
                         label="I have the right or legal authority to process this media",
                         value=False,
                     )
-                    extract_button = gr.Button("Extract existing subtitles", variant="secondary")
-
-                with gr.Accordion("Local transcription · Whisper", open=True):
-                    model_status_main = gr.Markdown(model_manager_status(), elem_classes=["console"])
-                    with gr.Row():
-                        whisper_model_main = gr.Dropdown(
-                            label="Whisper model",
-                            choices=MODEL_CHOICES,
-                            value="base",
+                    extract_button = gr.Button("Use existing subtitles", variant="primary")
+                    with gr.Accordion("No usable captions? Transcribe locally with Whisper", open=False):
+                        with gr.Row():
+                            whisper_model_main = gr.Dropdown(
+                                label="Whisper model", choices=MODEL_CHOICES, value="base"
+                            )
+                            source_language = gr.Dropdown(
+                                label="Spoken language", choices=LANGUAGE_CHOICES, value="auto"
+                            )
+                        transcribe_button = gr.Button("Transcribe locally", variant="primary")
+                        gr.HTML(
+                            '<div class="dl-compact-note">Model install/remove lives in Settings → Model Manager.</div>'
                         )
-                        source_language = gr.Dropdown(
-                            label="Spoken language",
-                            choices=LANGUAGE_CHOICES,
-                            value="auto",
-                        )
-                    transcribe_button = gr.Button("Transcribe locally", variant="primary")
-                    gr.HTML(
-                        """
-                        <div class="dl-note">
-                          Whisper model installation and removal live in <strong>Settings → Model Manager</strong>.
-                        </div>
-                        """
-                    )
 
-                status = gr.Markdown(
-                    "```text\n[ready] choose a source and scan it\n[mode] M4 + M3.1 · captions + transcription + contextual translation + Kokoro voice\n```",
-                    elem_classes=["console"],
-                )
-                subtitle_output = gr.File(label="Source subtitle output", interactive=False)
-                subtitle_preview = gr.Dataframe(
-                    headers=["Start", "End", "Text"],
-                    datatype=["str", "str", "str"],
-                    value=[],
-                    interactive=False,
-                    wrap=True,
-                    label="Timed source subtitle preview",
-                )
-
-                with gr.Accordion("Local translation", open=True):
-                    translation_mode = gr.Radio(
+                with gr.Accordion("3 · Translate", open=False):
+                    translation_mode = gr.Dropdown(
                         choices=TRANSLATION_MODE_CHOICES,
                         value="contextual",
                         label="Translation quality",
                     )
                     with gr.Row():
                         translation_source_language = gr.Dropdown(
-                            label="Subtitle language",
-                            choices=LANGUAGE_CHOICES,
-                            value="auto",
+                            label="From", choices=LANGUAGE_CHOICES, value="auto"
                         )
                         translation_target_language = gr.Dropdown(
-                            label="Translate to",
-                            choices=TARGET_LANGUAGE_CHOICES,
-                            value="en",
+                            label="To", choices=TARGET_LANGUAGE_CHOICES, value="en"
                         )
-                    translation_status_main = gr.Markdown(
-                        contextual_translation_status("auto", "en", 0),
-                        elem_classes=["console"],
-                    )
                     translate_button = gr.Button("Translate subtitles", variant="primary")
-                    gr.HTML(
-                        """
-                        <div class="dl-note">
-                          <strong>Contextual quality</strong> is the default. It translates groups of subtitles with nearby
-                          source dialogue, programme-wide reference lines and recent translated lines. The context budget grows
-                          automatically with video duration. <strong>Fast legacy</strong> keeps the older sentence-level OPUS
-                          path only when you explicitly choose it. Prepare models in <strong>Settings → Model Manager</strong>.
-                        </div>
-                        """
-                    )
+                    with gr.Accordion("Translation engine details", open=False):
+                        translation_status_main = gr.Markdown(
+                            contextual_translation_status("auto", "en", 0),
+                            elem_classes=["console"],
+                        )
                     translated_output = gr.File(label="Translated SRT", interactive=False)
                     translated_preview = gr.Dataframe(
                         headers=["Start", "End", "Translation", "Original"],
@@ -471,7 +580,7 @@ def build_app() -> gr.Blocks:
                         label="Translated subtitle preview",
                     )
 
-                with gr.Accordion("Local voice · Kokoro", open=True):
+                with gr.Accordion("4 · Voice-over", open=False):
                     voice_source = gr.Radio(
                         ["Translated subtitles", "Source subtitles"],
                         value="Translated subtitles",
@@ -484,7 +593,7 @@ def build_app() -> gr.Blocks:
                             value="en-US",
                         )
                         tts_voice = gr.Dropdown(
-                            label="Kokoro voice",
+                            label="Voice",
                             choices=kokoro_voice_choices("en-US"),
                             value=kokoro_default_voice("en-US"),
                         )
@@ -493,47 +602,47 @@ def build_app() -> gr.Blocks:
                             maximum=2.0,
                             value=1.0,
                             step=0.05,
-                            label="Voice speed",
+                            label="Speed",
                         )
                     generate_voice_button = gr.Button("Generate voice track", variant="primary")
-                    gr.HTML(
-                        """
-                        <div class="dl-note">
-                          M4 generates a synchronized <strong>voice-only WAV</strong> from the selected SRT and keeps every
-                          subtitle start time. It does not yet modify the movie soundtrack. Official Kokoro currently covers
-                          American/British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin.
-                          Hungarian, Russian, German and other unsupported targets remain subtitle-only until another local TTS
-                          backend is added. Prepare Kokoro under <strong>Settings → Model Manager</strong> first.
-                        </div>
-                        """
-                    )
                     voice_audio = gr.Audio(
-                        label="Voice-only preview",
-                        type="filepath",
-                        interactive=False,
+                        label="Voice preview", type="filepath", interactive=False
                     )
                     voice_output = gr.File(label="Voice-only WAV", interactive=False)
-                    voice_preview = gr.Dataframe(
-                        headers=["Start", "End", "Voice duration", "Window fit", "Text"],
-                        datatype=["str", "str", "str", "str", "str"],
+                    with gr.Accordion("Voice timing details", open=False):
+                        voice_preview = gr.Dataframe(
+                            headers=["Start", "End", "Voice duration", "Window fit", "Text"],
+                            datatype=["str", "str", "str", "str", "str"],
+                            value=[],
+                            interactive=False,
+                            wrap=True,
+                        )
+
+                with gr.Accordion("Results & activity details", open=False):
+                    status = gr.Markdown(
+                        "```text\n[ready] choose a source and load it\n```",
+                        elem_classes=["console"],
+                    )
+                    subtitle_output = gr.File(label="Source subtitle output", interactive=False)
+                    subtitle_preview = gr.Dataframe(
+                        headers=["Start", "End", "Text"],
+                        datatype=["str", "str", "str"],
                         value=[],
                         interactive=False,
                         wrap=True,
-                        label="Generated voice timeline",
+                        label="Timed source subtitle preview",
                     )
 
             with gr.Tab("Settings"):
+                gr.HTML(_settings_version_html())
                 with gr.Tabs():
                     with gr.Tab("Updates"):
                         update_status = gr.Markdown(
-                            "```text\n[updates] Compare the running app, local checkout and official GitHub main\n[repair] Repair can restore modified tracked program files after saving a patch backup\n```",
+                            "```text\n[updates] Check official GitHub main, install clean fast-forwards or repair the local installation\n```",
                             elem_classes=["console"],
                         )
                         repair_confirm = gr.Checkbox(
-                            label=(
-                                "Allow Repair installation to replace modified tracked DubLocal program files "
-                                "(a patch backup is saved first)"
-                            ),
+                            label="Allow Repair installation to replace modified tracked DubLocal files after saving a patch backup",
                             value=False,
                         )
                         with gr.Row():
@@ -541,65 +650,34 @@ def build_app() -> gr.Blocks:
                             install_update_button = gr.Button("Install update", variant="secondary")
                             repair_button = gr.Button("Repair installation", variant="secondary")
                             restart_button = gr.Button("Restart DubLocal", variant="primary")
-                        gr.HTML(
-                            """
-                            <div class="dl-note">
-                              Normal updates are clean fast-forwards only. Repair is explicit and preserves models,
-                              shared caches, generated jobs and untracked user files.
-                            </div>
-                            """
-                        )
 
                     with gr.Tab("Model Manager"):
                         gr.HTML(
-                            """
-                            <div class="dl-note" style="margin-bottom:12px">
-                              Install optional AI resources here. DubLocal reuses compatible local engines and shared model
-                              caches before downloading another copy.
-                            </div>
-                            """
+                            '<div class="dl-compact-note">Install optional AI resources only when you need them. Existing compatible local tools/caches are reused first.</div>'
                         )
-
-                        with gr.Accordion("Whisper · transcription", open=True):
+                        with gr.Accordion("Whisper · transcription", open=False):
                             whisper_settings_status = gr.Markdown(
                                 model_manager_status(), elem_classes=["console"]
                             )
                             whisper_model_settings = gr.Dropdown(
-                                label="Whisper model",
-                                choices=MODEL_CHOICES,
-                                value="base",
+                                label="Whisper model", choices=MODEL_CHOICES, value="base"
                             )
                             with gr.Row():
-                                install_whisper_button = gr.Button(
-                                    "Install / verify model", variant="primary"
-                                )
-                                remove_whisper_button = gr.Button(
-                                    "Remove model", variant="secondary"
-                                )
+                                install_whisper_button = gr.Button("Install / verify model", variant="primary")
+                                remove_whisper_button = gr.Button("Remove model", variant="secondary")
 
-                        with gr.Accordion("Contextual translation · Qwen3 4B", open=True):
+                        with gr.Accordion("Contextual translation · Qwen3 4B", open=False):
                             contextual_settings_status = gr.Markdown(
                                 contextual_translation_status("en", "ru", 0),
                                 elem_classes=["console"],
                             )
                             with gr.Row():
                                 prepare_contextual_button = gr.Button(
-                                    "Prepare / verify contextual translation",
-                                    variant="primary",
+                                    "Prepare / verify contextual translation", variant="primary"
                                 )
                                 remove_contextual_button = gr.Button(
-                                    "Remove DubLocal contextual model",
-                                    variant="secondary",
+                                    "Remove DubLocal contextual model", variant="secondary"
                                 )
-                            gr.HTML(
-                                """
-                                <div class="dl-note">
-                                  Recommended quality path. Uses the official Apache-2.0 Qwen3 4B Q4_K_M model (~2.5 GB)
-                                  through MIT-licensed llama.cpp. DubLocal reuses llama.cpp if already installed and stores the
-                                  model in the shared Hugging Face cache. No cloud translation fallback is used.
-                                </div>
-                                """
-                            )
 
                         with gr.Accordion("Fast legacy translation · OPUS", open=False):
                             translation_route = gr.Dropdown(
@@ -608,26 +686,17 @@ def build_app() -> gr.Blocks:
                                 value="en-to-many",
                             )
                             translation_settings_status = gr.Markdown(
-                                _translation_route_status("en-to-many"),
-                                elem_classes=["console"],
+                                _translation_route_status("en-to-many"), elem_classes=["console"]
                             )
                             with gr.Row():
                                 install_translation_button = gr.Button(
                                     "Install / verify legacy model(s)", variant="secondary"
                                 )
                                 remove_translation_button = gr.Button(
-                                    "Remove DubLocal legacy translation models", variant="secondary"
+                                    "Remove legacy translation models", variant="secondary"
                                 )
-                            gr.HTML(
-                                """
-                                <div class="dl-note">
-                                  The OPUS path is kept for low-storage/fast use. It is sentence-level and is no longer the
-                                  recommended default because it cannot provide the same dialogue context or translation quality.
-                                </div>
-                                """
-                            )
 
-                        with gr.Accordion("Kokoro · voice generation", open=True):
+                        with gr.Accordion("Kokoro · voice generation", open=False):
                             kokoro_settings_status = gr.Markdown(
                                 kokoro_runtime_status(), elem_classes=["console"]
                             )
@@ -645,15 +714,6 @@ def build_app() -> gr.Blocks:
                             prepare_kokoro_button = gr.Button(
                                 "Prepare / verify Kokoro", variant="primary"
                             )
-                            gr.HTML(
-                                """
-                                <div class="dl-note">
-                                  DubLocal first looks for a compatible existing Kokoro environment. If found, it runs Kokoro
-                                  there through an isolated worker and does not install a duplicate Python stack. Official
-                                  model/voice assets use the shared Hugging Face cache.
-                                </div>
-                                """
-                            )
 
                         model_action = gr.Markdown(
                             "```text\n[model manager] choose a model action above\n```",
@@ -664,26 +724,7 @@ def build_app() -> gr.Blocks:
                         resource_status = gr.Markdown(
                             local_resource_status(), elem_classes=["console"]
                         )
-                        refresh_resources_button = gr.Button(
-                            "Rescan local resources", variant="secondary"
-                        )
-                        gr.HTML(
-                            """
-                            <div class="dl-note">
-                              This view reports reusable system tools, shared caches and compatible external Python runtimes.
-                              DubLocal never injects another application's site-packages into its own interpreter.
-                            </div>
-                            """
-                        )
-
-        gr.HTML(
-            """
-            <div class="dl-note">
-              Current development version: 0.4.1.dev0 / M4 + M3.1. Context-aware local translation is now the default;
-              duration fitting, original-audio ducking and stream-copy media export follow in M5.
-            </div>
-            """
-        )
+                        refresh_resources_button = gr.Button("Rescan local resources", variant="secondary")
 
         source_type.change(
             fn=_toggle_source,
@@ -692,69 +733,38 @@ def build_app() -> gr.Blocks:
             queue=False,
         )
         scan_event = scan_button.click(
-            fn=scan_source,
+            fn=_scan_source_ui,
             inputs=[source_type, youtube_url, local_file],
             outputs=[status, subtitle_track, source_state, subtitle_preview],
         )
         scan_event.then(
             fn=_translation_status_for_ui,
-            inputs=[
-                translation_mode,
-                translation_source_language,
-                translation_target_language,
-                source_state,
-            ],
+            inputs=[translation_mode, translation_source_language, translation_target_language, source_state],
             outputs=[translation_status_main],
             queue=False,
         )
         extract_button.click(
-            fn=extract_selected,
+            fn=_extract_ui,
             inputs=[source_state, subtitle_track, rights],
-            outputs=[
-                subtitle_output,
-                subtitle_preview,
-                status,
-                subtitle_path_state,
-                translation_source_language,
-            ],
+            outputs=[subtitle_output, subtitle_preview, status, subtitle_path_state, translation_source_language],
         )
         transcribe_button.click(
-            fn=transcribe_selected,
+            fn=_transcribe_ui,
             inputs=[source_state, rights, whisper_model_main, source_language],
-            outputs=[
-                subtitle_output,
-                subtitle_preview,
-                status,
-                subtitle_path_state,
-                translation_source_language,
-            ],
+            outputs=[subtitle_output, subtitle_preview, status, subtitle_path_state, translation_source_language],
         )
 
-        for component in (
-            translation_mode,
-            translation_source_language,
-            translation_target_language,
-        ):
+        for component in (translation_mode, translation_source_language, translation_target_language):
             component.change(
                 fn=_translation_status_for_ui,
-                inputs=[
-                    translation_mode,
-                    translation_source_language,
-                    translation_target_language,
-                    source_state,
-                ],
+                inputs=[translation_mode, translation_source_language, translation_target_language, source_state],
                 outputs=[translation_status_main],
                 queue=False,
             )
 
         translate_button.click(
             fn=_translate_with_state,
-            inputs=[
-                translation_mode,
-                subtitle_path_state,
-                translation_source_language,
-                translation_target_language,
-            ],
+            inputs=[translation_mode, subtitle_path_state, translation_source_language, translation_target_language],
             outputs=[translated_output, translated_preview, status, translated_path_state],
         )
 
@@ -776,22 +786,10 @@ def build_app() -> gr.Blocks:
             outputs=[tts_language, tts_voice],
             queue=False,
         )
-        tts_language.change(
-            fn=_voice_dropdown,
-            inputs=[tts_language],
-            outputs=[tts_voice],
-            queue=False,
-        )
+        tts_language.change(fn=_voice_dropdown, inputs=[tts_language], outputs=[tts_voice], queue=False)
         generate_voice_button.click(
             fn=_generate_voice_ui,
-            inputs=[
-                voice_source,
-                subtitle_path_state,
-                translated_path_state,
-                tts_language,
-                tts_voice,
-                tts_speed,
-            ],
+            inputs=[voice_source, subtitle_path_state, translated_path_state, tts_language, tts_voice, tts_speed],
             outputs=[voice_audio, voice_output, voice_preview, status],
         )
 
@@ -810,43 +808,23 @@ def build_app() -> gr.Blocks:
         install_whisper_button.click(
             fn=_install_whisper_settings,
             inputs=[whisper_model_settings],
-            outputs=[whisper_settings_status, model_status_main, model_action],
+            outputs=[whisper_settings_status, gr.State(), model_action],
         )
         remove_whisper_button.click(
             fn=_remove_whisper_settings,
             inputs=[whisper_model_settings],
-            outputs=[whisper_settings_status, model_status_main, model_action],
+            outputs=[whisper_settings_status, gr.State(), model_action],
         )
 
         prepare_contextual_button.click(
             fn=_prepare_contextual_settings,
-            inputs=[
-                translation_mode,
-                translation_source_language,
-                translation_target_language,
-                source_state,
-            ],
-            outputs=[
-                contextual_settings_status,
-                translation_status_main,
-                resource_status,
-                model_action,
-            ],
+            inputs=[translation_mode, translation_source_language, translation_target_language, source_state],
+            outputs=[contextual_settings_status, translation_status_main, resource_status, model_action],
         )
         remove_contextual_button.click(
             fn=_remove_contextual_settings,
-            inputs=[
-                translation_mode,
-                translation_source_language,
-                translation_target_language,
-                source_state,
-            ],
-            outputs=[
-                contextual_settings_status,
-                translation_status_main,
-                resource_status,
-                model_action,
-            ],
+            inputs=[translation_mode, translation_source_language, translation_target_language, source_state],
+            outputs=[contextual_settings_status, translation_status_main, resource_status, model_action],
         )
 
         translation_route.change(
@@ -857,24 +835,12 @@ def build_app() -> gr.Blocks:
         )
         install_translation_button.click(
             fn=_prepare_translation_settings,
-            inputs=[
-                translation_route,
-                translation_mode,
-                translation_source_language,
-                translation_target_language,
-                source_state,
-            ],
+            inputs=[translation_route, translation_mode, translation_source_language, translation_target_language, source_state],
             outputs=[translation_settings_status, translation_status_main, model_action],
         )
         remove_translation_button.click(
             fn=_remove_translation_settings,
-            inputs=[
-                translation_route,
-                translation_mode,
-                translation_source_language,
-                translation_target_language,
-                source_state,
-            ],
+            inputs=[translation_route, translation_mode, translation_source_language, translation_target_language, source_state],
             outputs=[translation_settings_status, translation_status_main, model_action],
         )
 
@@ -890,26 +856,14 @@ def build_app() -> gr.Blocks:
             outputs=[kokoro_settings_status, resource_status, model_action],
         )
 
-        refresh_resources_button.click(
-            fn=refresh_resources_ui,
-            outputs=[resource_status],
-        )
-        check_update_button.click(
-            fn=check_updates_ui,
-            outputs=[update_status],
-        )
-        install_update_button.click(
-            fn=install_update_ui,
-            outputs=[update_status],
-        )
+        refresh_resources_button.click(fn=refresh_resources_ui, outputs=[resource_status])
+        check_update_button.click(fn=check_updates_ui, outputs=[update_status])
+        install_update_button.click(fn=install_update_ui, outputs=[update_status])
         repair_button.click(
             fn=repair_installation_ui,
             inputs=[repair_confirm],
             outputs=[update_status],
         )
-        restart_button.click(
-            fn=restart_ui,
-            outputs=[update_status],
-        )
+        restart_button.click(fn=restart_ui, outputs=[update_status])
 
     return demo

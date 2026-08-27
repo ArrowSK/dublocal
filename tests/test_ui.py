@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import dublocal
 from dublocal.ui import (
+    MATRIX_CSS,
+    _settings_version_html,
     _suggest_voice_controls,
     _translation_preview_rows,
     _translation_result_note,
@@ -48,6 +51,18 @@ def test_source_english_suggests_american_kokoro():
     )
     assert language_update.value == "en-US"
     assert voice_update.value == "af_heart"
+
+
+def test_settings_version_is_visible_and_uses_running_package_version():
+    html = _settings_version_html()
+    assert "Running local development build" in html
+    assert f"v{dublocal.__version__}" in html
+
+
+def test_primary_framework_accent_is_overridden_to_dublocal_green():
+    assert "--primary-500: #42ef83" in MATRIX_CSS
+    assert "button[role=\"tab\"][aria-selected=\"true\"]" in MATRIX_CSS
+    assert "accent-color: #42ef83" in MATRIX_CSS
 
 
 def test_tabbed_ui_builds():

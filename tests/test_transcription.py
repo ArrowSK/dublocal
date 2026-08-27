@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import dublocal.transcription as transcription
 
@@ -32,9 +31,10 @@ def test_transcribe_source_produces_normalized_segments(monkeypatch, tmp_path: P
     monkeypatch.setattr(transcription, "_convert_to_whisper_wav", lambda source_path, output_dir: wav)
     monkeypatch.setattr(transcription.platform, "machine", lambda: "arm64")
 
-    def fake_run(command, **kwargs):
+    def fake_whisper(command):
         assert "-osrt" in command
         assert "-oj" in command
+        assert "-pp" in command
         assert command[command.index("-l") + 1] == "auto"
         output_prefix = Path(command[command.index("-of") + 1])
         output_prefix.with_suffix(".srt").write_text(
@@ -45,9 +45,8 @@ def test_transcribe_source_produces_normalized_segments(monkeypatch, tmp_path: P
             json.dumps({"result": {"language": "en"}}),
             encoding="utf-8",
         )
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(transcription.subprocess, "run", fake_run)
+    monkeypatch.setattr(transcription, "_run_whisper_with_progress", fake_whisper)
 
     result = transcription.transcribe_source({"kind": "local", "path": str(source)})
 
@@ -78,7 +77,7 @@ def test_intel_transcription_forces_cpu_mode(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(transcription, "_convert_to_whisper_wav", lambda source_path, output_dir: wav)
     monkeypatch.setattr(transcription.platform, "machine", lambda: "x86_64")
 
-    def fake_run(command, **kwargs):
+    def fake_whisper(command):
         captured.extend(command)
         output_prefix = Path(command[command.index("-of") + 1])
         output_prefix.with_suffix(".srt").write_text(
@@ -89,11 +88,11 @@ def test_intel_transcription_forces_cpu_mode(monkeypatch, tmp_path: Path):
             json.dumps({"result": {"language": "en"}}),
             encoding="utf-8",
         )
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(transcription.subprocess, "run", fake_run)
+    monkeypatch.setattr(transcription, "_run_whisper_with_progress", fake_whisper)
 
     transcription.transcribe_source({"kind": "local", "path": str(source)}, model_id="tiny")
 
     assert "-ng" in captured
     assert "-oj" in captured
+    assert "-pp" in captured
