@@ -439,6 +439,7 @@ def generate_voice_track(
     language: str,
     voice: str,
     speed: float = 1.0,
+    segment_voices: dict[int, str] | None = None,
 ) -> VoiceTrackResult:
     source = Path(subtitle_path)
     if not source.is_file():
@@ -446,7 +447,9 @@ def generate_voice_track(
     if source.suffix.lower() != ".srt":
         raise DubLocalError("M4 Kokoro voice generation currently expects an SRT timeline.")
 
-    metadata = _validate_kokoro_selection(language, voice, float(speed))
+    segment_voices = {int(key): str(value) for key, value in (segment_voices or {}).items() if value}
+    all_voices = list(dict.fromkeys([voice, *segment_voices.values()]))
+    metadata = _validate_kokoro_selection(language, ",".join(all_voices), float(speed))
     if kokoro_runtime() is None:
         raise DubLocalError(
             "Kokoro is not prepared yet. Open Settings → Model Manager → Kokoro and click Prepare Kokoro first."
@@ -468,7 +471,14 @@ def generate_voice_track(
             "speed": float(speed),
             "repo_id": KOKORO_OFFICIAL_MODEL_REPO,
             "output_dir": str(segment_dir),
-            "segments": [{"index": item.index, "text": item.text} for item in timeline],
+            "segments": [
+                {
+                    "index": item.index,
+                    "text": item.text,
+                    "voice": segment_voices.get(item.index, voice),
+                }
+                for item in timeline
+            ],
         },
         job_dir,
     )
@@ -513,6 +523,7 @@ def generate_voice_track(
                 "language": language,
                 "lang_code": metadata["lang_code"],
                 "voice": voice,
+                "segment_voices": segment_voices,
                 "speed": float(speed),
                 "sample_rate": int(response["sample_rate"]),
                 "source_srt": str(source),
@@ -522,6 +533,7 @@ def generate_voice_track(
                         "start_ms": item.start_ms,
                         "end_ms": item.end_ms,
                         "text": item.text,
+                        "voice": segment_voices.get(item.index, voice),
                         "voice_duration_ms": item.voice_duration_ms,
                         "slot_ms": item.slot_ms,
                         "overflow_ms": item.overflow_ms,
