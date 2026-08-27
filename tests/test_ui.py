@@ -55,7 +55,7 @@ def test_source_english_suggests_american_kokoro():
 
 
 def test_source_card_status_is_persistent_and_human_readable():
-    assert "Not loaded" in _source_card_status({})
+    assert "not loaded" in _source_card_status({}).lower()
     loaded = _source_card_status(
         {
             "kind": "youtube",
@@ -80,7 +80,7 @@ def test_primary_framework_accent_is_overridden_to_dublocal_green():
     assert "--primary-500: #42ef83" in MATRIX_CSS
     assert "button[role=\"tab\"][aria-selected=\"true\"]" in MATRIX_CSS
     assert "accent-color: #42ef83" in MATRIX_CSS
-    assert ".dl-source-status" in MATRIX_CSS
+    assert ".dl-stage-status" in MATRIX_CSS
 
 
 def test_tabbed_ui_builds():
