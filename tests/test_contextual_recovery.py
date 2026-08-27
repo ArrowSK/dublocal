@@ -41,4 +41,5 @@ def test_repair_prompt_names_target_language_and_ids():
     assert "natural Russian" in prompt
     assert "1, 2" in prompt
     assert "bad output" in prompt
-    assert "STRICT JSON" in prompt
+    assert "[ID] - translated text" in prompt
+    assert "Do not output JSON" in prompt
