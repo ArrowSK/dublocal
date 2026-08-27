@@ -115,9 +115,14 @@ def test_contextual_translation_preserves_standalone_tags(monkeypatch, tmp_path:
 
     monkeypatch.setattr(contextual_progress, "ContextualRuntime", Runtime)
     monkeypatch.setattr(contextual_progress, "_llama_command", lambda: ["llama-cli"])
-    monkeypatch.setattr(contextual_progress, "_registered_model_valid", lambda: True)
+    monkeypatch.setattr(contextual_progress, "quality_registered_model_valid", lambda: True)
 
-    result = contextual_progress.translate_srt_contextual_with_progress(source, "en", "ru")
+    result = contextual_progress.translate_srt_contextual_with_progress(
+        source,
+        "en",
+        "ru",
+        review=False,
+    )
     segments = parse_srt(result.srt_path.read_text(encoding="utf-8"))
     assert segments[0].text == "[MUSIC]"
     assert segments[1].text == "Я чувствую себя таким."
