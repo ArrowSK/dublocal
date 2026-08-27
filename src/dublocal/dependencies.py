@@ -49,8 +49,6 @@ def _python_from_entrypoint(name: str) -> Path | None:
     if not first.startswith("#!"):
         return None
     raw = first[2:].strip()
-    # `#!/path/to/python` is the useful virtualenv case. `/usr/bin/env python`
-    # does not identify a separate environment and is therefore ignored.
     if not raw or raw.startswith("/usr/bin/env ") or " " in raw:
         return None
     candidate = _identity_path(Path(raw))
@@ -96,7 +94,6 @@ def _candidate_pythons() -> list[tuple[Path, str]]:
             base = parent / name
             candidates.append((base / ".venv" / "bin" / "python", base.name))
             candidates.append((base / "venv" / "bin" / "python", base.name))
-            # Named venv roots such as ~/.venvs/kokoro already are the venv.
             candidates.append((base / "bin" / "python", base.name))
 
     pipx = home / ".local" / "pipx" / "venvs"
@@ -164,11 +161,7 @@ def discover_python_runtime(
 
 
 def preferred_python_for(required_modules: Iterable[str]) -> PythonRuntime | None:
-    """Return a compatible existing Python runtime without modifying it.
-
-    Backends that support an external-process bridge can use this runtime rather
-    than reinstalling the same heavy Python stack into DubLocal's own venv.
-    """
+    """Return a compatible existing Python runtime without modifying it."""
 
     return discover_python_runtime(required_modules, allow_current=True)
 
@@ -186,6 +179,19 @@ def shared_huggingface_cache() -> Path:
     return Path.home() / ".cache" / "huggingface" / "hub"
 
 
+def _llama_resource() -> str:
+    cli = shutil.which("llama-cli")
+    if cli:
+        return cli
+    llama = shutil.which("llama")
+    if llama:
+        return f"{llama} cli"
+    for candidate in ("/opt/homebrew/bin/llama-cli", "/usr/local/bin/llama-cli"):
+        if Path(candidate).is_file():
+            return candidate
+    return "not found"
+
+
 def local_resource_status() -> str:
     lines: list[str] = []
 
@@ -193,6 +199,7 @@ def local_resource_status() -> str:
         resolved = shutil.which(executable)
         state = resolved or "not found"
         lines.append(f"[{executable}] {state}")
+    lines.append(f"[llama.cpp] {_llama_resource()}")
 
     hf_cache = shared_huggingface_cache()
     cache_state = "available" if hf_cache.exists() else "will be created on first Hugging Face model use"
