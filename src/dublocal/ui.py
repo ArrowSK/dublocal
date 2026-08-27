@@ -114,6 +114,19 @@ input[type="range"], progress {
   margin: 4px 0 8px 0;
 }
 
+.dl-source-status {
+  margin-top: 8px !important;
+  padding: 9px 12px !important;
+  border: 1px solid rgba(43, 108, 66, 0.55) !important;
+  border-radius: 8px !important;
+  background: rgba(5, 14, 9, 0.72) !important;
+  color: var(--dl-muted) !important;
+  min-height: 0 !important;
+}
+
+.dl-source-status p { margin: 0 !important; }
+.dl-source-status strong { color: var(--dl-green-soft) !important; }
+
 .console { min-height: 72px !important; }
 """
 
@@ -158,6 +171,30 @@ def _media_duration_ms(source_info: dict | None) -> int:
     except (TypeError, ValueError):
         seconds = 0.0
     return max(0, int(seconds * 1000))
+
+
+def _duration_compact(source_info: dict | None) -> str:
+    total_seconds = _media_duration_ms(source_info) // 1000
+    if total_seconds <= 0:
+        return "duration unknown"
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+
+def _source_card_status(source_info: dict | None) -> str:
+    info = source_info or {}
+    if not info:
+        return "**Not loaded** · choose a source and click Load source."
+    title = str(info.get("title") or "Media").replace("\n", " ").strip()
+    tracks = len(info.get("subtitle_tracks", []) or [])
+    kind = "YouTube" if info.get("kind") == "youtube" else "Local file"
+    return (
+        f"✓ **Loaded · OK** · {kind} · {title} · {_duration_compact(info)} · "
+        f"{tracks} caption track{'s' if tracks != 1 else ''}"
+    )
 
 
 def _translation_status_for_ui(
@@ -525,6 +562,10 @@ def build_app() -> gr.Blocks:
                         visible=False,
                     )
                     scan_button = gr.Button("Load source", variant="primary")
+                    source_card_status = gr.Markdown(
+                        "**Not loaded** · choose a source and click Load source.",
+                        elem_classes=["dl-source-status"],
+                    )
 
                 with gr.Accordion("2 · Subtitles", open=False):
                     subtitle_track = gr.Dropdown(
@@ -732,10 +773,21 @@ def build_app() -> gr.Blocks:
             outputs=[youtube_url, local_file],
             queue=False,
         )
-        scan_event = scan_button.click(
+        load_begin = scan_button.click(
+            fn=lambda: "**Loading source…**",
+            outputs=[source_card_status],
+            queue=False,
+        )
+        scan_event = load_begin.then(
             fn=_scan_source_ui,
             inputs=[source_type, youtube_url, local_file],
             outputs=[status, subtitle_track, source_state, subtitle_preview],
+        )
+        scan_event.then(
+            fn=_source_card_status,
+            inputs=[source_state],
+            outputs=[source_card_status],
+            queue=False,
         )
         scan_event.then(
             fn=_translation_status_for_ui,

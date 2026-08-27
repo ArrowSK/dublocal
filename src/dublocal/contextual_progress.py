@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Sequence
 
+from .contextual_fallback import run_llama_unconstrained
 from .contextual_recovery import build_format_repair_prompt, recover_chunk_output
 from .contextual_translation import (
     ContextualTranslationMissingError,
@@ -40,11 +41,11 @@ def _translate_chunk_with_recovery(
     raw = _run_llama(prompt, max_output_tokens=max_output_tokens)
     try:
         return recover_chunk_output(raw, target_segments)
-    except DubLocalError as first_error:
+    except DubLocalError:
         if progress_callback:
             progress_callback(
                 max(0.02, min(0.95, (chunk_number - 0.4) / max(1, total_chunks) * 0.94 + 0.02)),
-                f"Repairing structured output for chunk {chunk_number}/{total_chunks}",
+                f"Recovering structured output for chunk {chunk_number}/{total_chunks}",
             )
 
         repair_prompt = build_format_repair_prompt(
@@ -52,7 +53,7 @@ def _translate_chunk_with_recovery(
             target_segments,
             TRANSLATION_LANGUAGES[target_language]["label"],
         )
-        repaired = _run_llama(
+        repaired = run_llama_unconstrained(
             repair_prompt,
             max_output_tokens=max(512, max_output_tokens),
         )
@@ -60,9 +61,9 @@ def _translate_chunk_with_recovery(
             return recover_chunk_output(repaired, target_segments)
         except DubLocalError as second_error:
             raise DubLocalError(
-                "Contextual translator returned malformed structured output twice "
-                f"for chunk {chunk_number}/{total_chunks}. DubLocal kept subtitle alignment strict and stopped "
-                "instead of writing a corrupted SRT. Retry once; if it repeats, report this exact message."
+                "Contextual translator could not preserve the required subtitle IDs "
+                f"for chunk {chunk_number}/{total_chunks}, even after the plain-text recovery pass. "
+                "DubLocal stopped instead of writing a corrupted SRT."
             ) from second_error
 
 
