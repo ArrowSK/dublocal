@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import platform
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 from pathlib import Path
 
 from . import transcription
@@ -73,8 +72,8 @@ def _candidate_regions(segments: list[Segment], model_id: str) -> list[_Recovery
             candidates.append(
                 _RecoveryRegion(
                     kind="sparse",
-                    start_ms=max(0, segment.start_ms - 350),
-                    end_ms=segment.end_ms + 350,
+                    start_ms=segment.start_ms,
+                    end_ms=segment.end_ms,
                     segment_index=segment.index,
                     original_text=segment.text,
                 )
@@ -250,7 +249,7 @@ def _verified_recovery(
 
     # For a sparse existing line, only accept a richer consensus transcription that
     # still resembles the original. This prevents replacement with a plausible but
-    # unrelated hallucination.
+    # unrelated hallucination. Preserve the original subtitle time window exactly.
     original_words = len(_words(region.original_text))
     if len(_words(chosen_text)) < original_words + 2:
         return None
@@ -259,8 +258,8 @@ def _verified_recovery(
     return [
         Segment(
             index=region.segment_index or 0,
-            start_ms=max(0, region.start_ms + 350),
-            end_ms=max(region.start_ms + 351, region.end_ms - 350),
+            start_ms=region.start_ms,
+            end_ms=region.end_ms,
             text=chosen_text,
         )
     ]
