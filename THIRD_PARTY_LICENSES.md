@@ -1,71 +1,83 @@
 # Third-party licences
 
-DubLocal is open source under Apache-2.0. The software, models and media tools it uses keep their own licences. This file is the human-readable inventory; `MODEL_LICENSES.json` records model-specific machine-readable metadata.
+DubLocal is open source under Apache-2.0. Software, model weights and media tools it invokes keep their own licences. `MODEL_LICENSES.json` is the machine-readable model registry; this file is the human-readable inventory.
 
-Nothing in this project grants rights to third-party video, audio or subtitles. DubLocal users remain responsible for having the right or legal authority to process their media.
+Nothing here grants rights to third-party video, audio or subtitles. Users remain responsible for having the right or legal authority to process their media.
 
 ## Core application dependencies
 
-| Component | Purpose | How DubLocal uses it |
+| Component | Purpose | DubLocal policy |
 | --- | --- | --- |
-| Gradio | Local user interface | Python dependency; the UI is served only on the local machine by default |
-| NumPy | Audio/timeline array processing | Core dependency from M4 onward; used to assemble the voice-only WAV without loading an entire long soundtrack into RAM |
-| yt-dlp | YouTube metadata, captions and user-requested audio acquisition for local transcription | Python dependency only; DubLocal does not bundle unrelated yt-dlp executable builds |
-| platformdirs | Safe macOS application/cache paths | Python dependency |
-| FFmpeg / ffprobe | Media inspection, subtitle normalization/extraction and later audio/video processing | Reuses an existing executable when present. Any future bundled binary must have its exact build configuration and corresponding licence/source obligations documented before release |
-| whisper.cpp | Local speech-to-text engine | Optional external engine; an existing `whisper-cli` is reused when present; Whisper model weights are opt-in |
+| Gradio | Local user interface | Python dependency; local-only server by default |
+| NumPy | Timeline/audio array processing | Core Python dependency |
+| yt-dlp | YouTube metadata/captions and explicit audio acquisition for local transcription | Python dependency; no DRM/access-control bypass |
+| platformdirs | Application/cache paths | Core Python dependency |
+| Hugging Face Hub | Shared model downloads/cache | Core helper from v0.4.1.dev0; models still download only on explicit user action |
+| FFmpeg / ffprobe | Media inspection/extraction and later mixing/remuxing | Existing executable reused when available; any future bundled binary requires exact build/licence review |
+| whisper.cpp | Local speech-to-text | Optional external engine; existing `whisper-cli` reused when present |
 
-## Optional M3 translation stack
+## M3.1 contextual translation — recommended path
 
-Local subtitle translation is not part of the base Python installation. **Prepare translation** first looks for a compatible local runtime that already provides the required stack. If one is found in a recognized external environment, DubLocal may run it through an isolated worker process rather than copy those Python packages into DubLocal's virtual environment. If no compatible runtime exists, the optional `translation` extra is installed into DubLocal's own venv.
+The default translation path in **v0.4.1.dev0** is context-aware and local.
 
-DubLocal never adds another application's `site-packages` directory to its own interpreter path.
-
-| Component | Purpose | Distribution / reuse policy |
+| Component | Purpose | Licence / distribution policy |
 | --- | --- | --- |
-| PyTorch | Local tensor/inference runtime | Optional; may run from DubLocal's venv or a compatible external Python worker; not redistributed by DubLocal as a model |
-| Transformers | Marian/OPUS model loading and generation | Optional; same isolated-runtime reuse policy |
-| SentencePiece | OPUS tokenizer support | Optional; same isolated-runtime reuse policy |
-| safetensors | Safe local model-weight loading | Optional; same isolated-runtime reuse policy |
-| `Helsinki-NLP/opus-mt-mul-en` | Allowlisted multilingual languages → English | Apache-2.0 model; pinned safetensors revision; explicit user preparation only; registered from the shared Hugging Face cache when possible |
-| `Helsinki-NLP/opus-mt-en-mul` | English → allowlisted multilingual languages | Apache-2.0 model; pinned safetensors revision; explicit user preparation only; registered from the shared Hugging Face cache when possible |
+| `llama.cpp` | Local GGUF inference runtime | MIT upstream; DubLocal reuses an existing executable or can install it through Homebrew; not bundled in the development checkout |
+| `Qwen/Qwen3-4B-GGUF` / `Qwen3-4B-Q4_K_M.gguf` | Context-aware multilingual subtitle translation | Apache-2.0 upstream; not bundled; explicit download only; pinned immutable revision and SHA-256; shared Hugging Face cache |
 
-The exact revisions and verified weight hashes are recorded in `MODEL_LICENSES.json`. English ↔ another supported language needs one approximately 310 MiB OPUS model. A non-English ↔ non-English route uses English as a local pivot and therefore needs both models.
+DubLocal reserves part of Qwen3's native context for output/instructions and scales the source context budget with programme duration. Model identity and checksum are recorded in `MODEL_LICENSES.json`.
 
-Hugging Face snapshots use the normal shared cache. Removing a translation model from DubLocal removes DubLocal's registration/link but does not automatically delete the shared cache snapshot, because another local application may still rely on it.
+Removing the contextual model from DubLocal removes only DubLocal's registration/link. It does not delete the shared Hugging Face snapshot or uninstall `llama.cpp`, because another local application may use them.
 
-DubLocal does not silently substitute a cloud translation API.
+There is no cloud translation fallback.
+
+## M3 fast legacy translation
+
+The original OPUS/Marian backend remains as an explicit smaller/faster option.
+
+| Component | Purpose | Policy |
+| --- | --- | --- |
+| PyTorch | Marian inference runtime | Optional Python stack; may run in DubLocal or a compatible isolated external worker |
+| Transformers | OPUS model loading/generation | Optional; same isolated-runtime policy |
+| SentencePiece | OPUS tokenization | Optional |
+| safetensors | Safe model-weight loading | Optional |
+| `Helsinki-NLP/opus-mt-mul-en` | Supported languages → English | Apache-2.0; pinned safetensors revision/checksum; shared cache |
+| `Helsinki-NLP/opus-mt-en-mul` | English → supported languages | Apache-2.0; pinned safetensors revision/checksum; shared cache |
+
+These models are no longer described as the recommended quality route because they translate subtitle text sentence-by-sentence and do not supply long-form dialogue context.
+
+DubLocal never adds another application's `site-packages` to its own interpreter. Compatible Python environments are reused only by starting that environment's own Python as an isolated worker process.
 
 ## M4 local voice generation
 
-M4 adds Kokoro as the first local TTS backend.
-
-| Component | Purpose | Distribution / reuse policy |
+| Component | Purpose | Policy |
 | --- | --- | --- |
-| `kokoro` | Local text-to-speech runtime | Optional. DubLocal first reuses a compatible existing Python environment through an isolated worker. Only if none exists does **Prepare Kokoro** install the optional `kokoro` extra into DubLocal's own venv |
-| `misaki` | Kokoro language/G2P support | Optional dependency when DubLocal must create its own Kokoro runtime; Japanese/Mandarin extras are included in that optional install |
-| `hexgrad/Kokoro-82M` | Official Kokoro model and voice assets | Apache-2.0 according to the upstream project/model metadata used by this development baseline; not bundled; downloaded only after an explicit Prepare/Generate action; shared Hugging Face cache is reused |
+| `kokoro` | Local TTS runtime | Optional; compatible existing Python environment is reused first through an isolated worker |
+| `misaki` | Kokoro G2P/language support | Optional dependency when DubLocal owns the Kokoro runtime |
+| `hexgrad/Kokoro-82M` | Official Kokoro model/voice assets | Apache-2.0 upstream baseline; not bundled; explicit/shared-cache download |
 
-Kokoro runs through `src/dublocal/kokoro_worker.py` when an external runtime is used. The worker is launched by that environment's own Python executable, receives a narrow JSON request, writes local segment WAV files/JSON results, and exits. DubLocal never imports another application's `site-packages` into its own process.
+Kokoro runs through `src/dublocal/kokoro_worker.py` when an external runtime is selected. The worker receives a narrow JSON request, writes local WAV/JSON outputs and exits; DubLocal does not modify the external environment.
 
-The current official Kokoro frontend exposed by DubLocal covers American English, British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin Chinese. DubLocal does not silently present Hungarian, Russian, German or other unsupported languages as Kokoro-capable.
+Official Kokoro frontends currently exposed cover American/British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin Chinese. A translation-capable language is not automatically a Kokoro-capable language.
 
-M4 produces a voice-only WAV. It does not modify the source video's original audio. Soundtrack ducking/mixing and media remuxing are separate M5 work.
+M4 produces a voice-only WAV. M5 handles source-audio ducking/mixing and media remuxing.
 
-The first packaged DubLocal release must pin an immutable Kokoro model revision and complete the release manifest/checksum obligations before distribution. The current development build deliberately does not claim that a floating upstream snapshot is release-pinned.
+## Shared-cache rule
 
-Dependency reuse does not transfer or change a component's licence. DubLocal must comply with the licence of each component it invokes or distributes regardless of whether that component was installed by DubLocal or another local application.
+A model being present in the Hugging Face cache does not make it owned by DubLocal. DubLocal registrations can be removed without erasing shared snapshots that another local application may need.
+
+Dependency reuse also does not change a component's licence. DubLocal must comply with each component's licence whether that component was installed by DubLocal or already existed on the Mac.
 
 ## Release rule
 
-No binary, model, voice pack, translation pack or other third-party asset may be added to a DubLocal packaged release unless all of the following are recorded:
+No model, voice pack, binary or other third-party asset may be added to a packaged DubLocal release unless the release manifest records:
 
-1. exact upstream project/model identifier;
+1. exact upstream identifier;
 2. exact version or immutable revision;
-3. licence identifier and licence text/location;
-4. whether redistribution is permitted;
-5. whether commercial use is permitted;
-6. attribution or source-offer obligations, if any;
-7. a cryptographic checksum for redistributed/downloaded model or binary assets where practical.
+3. licence identifier and licence-text/location;
+4. redistribution permission;
+5. commercial-use status;
+6. attribution/source obligations;
+7. cryptographic checksum where practical.
 
-The release process should validate `MODEL_LICENSES.json` and the packaged third-party manifest before publishing a packaged GitHub Release.
+The release process must validate `MODEL_LICENSES.json` and the packaged third-party manifest before publishing a packaged GitHub Release.
