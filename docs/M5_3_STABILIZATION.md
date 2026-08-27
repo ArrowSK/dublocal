@@ -40,6 +40,21 @@ A candidate recovery is accepted only when two isolated no-context decoding pass
 
 This is deliberately asymmetric: DubLocal prefers leaving an uncertain gap over inserting invented speech.
 
+## Subtitle-source UX
+
+YouTube can expose a very large automatic-caption catalogue because the source caption is accompanied by machine-translated variants for many languages. DubLocal no longer presents that raw catalogue as if every entry were an equivalent source subtitle track.
+
+The normal **Available subtitles** selector now:
+
+- uses human language names rather than raw codes such as `aa` or `en-orig`;
+- shows creator-provided caption tracks;
+- shows genuine/original YouTube automatic-caption tracks;
+- hides YouTube's mass machine-translated variants from the normal list when the original track can be identified;
+- reports how many machine-translated variants were hidden and directs the user to DubLocal's own Translate stage instead;
+- keeps the complete raw inventory internally for diagnostics/future advanced controls.
+
+Local embedded subtitle tracks are also shown with human-readable language/type descriptions rather than raw codec/language identifiers.
+
 ## M1 / low-memory Macs
 
 No additional AI model is loaded for these refinements. Timing and mixing use FFmpeg. Smart recovery reuses the already installed Whisper model and only rechecks short ranges.
