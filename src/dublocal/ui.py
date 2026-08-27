@@ -22,11 +22,16 @@ from .app import (
     scan_source,
     transcribe_selected,
     translate_selected,
-    translation_status_ui,
+)
+from .contextual_translation import (
+    contextual_translation_status,
+    prepare_contextual_translation,
+    remove_contextual_model,
+    translate_srt_contextual,
 )
 from .dependencies import local_resource_status
 from .transcription import model_manager_status
-from .translation import translation_manager_status
+from .translation import translated_segments_to_rows, translation_manager_status
 from .tts import (
     KOKORO_LANGUAGE_CHOICES,
     generate_voice_track,
@@ -38,6 +43,11 @@ from .tts import (
     voice_segments_to_rows,
 )
 
+
+TRANSLATION_MODE_CHOICES = [
+    ("Contextual quality · Qwen3 4B · recommended", "contextual"),
+    ("Fast legacy · OPUS · sentence-level", "opus"),
+]
 
 TRANSLATION_ROUTE_CHOICES = [
     ("English → supported languages · ~310 MiB", "en-to-many"),
@@ -59,6 +69,32 @@ def _translation_route_status(route: str) -> str:
     return translation_manager_status(source, target)
 
 
+def _media_duration_ms(source_info: dict | None) -> int:
+    try:
+        seconds = float((source_info or {}).get("duration") or 0.0)
+    except (TypeError, ValueError):
+        seconds = 0.0
+    return max(0, int(seconds * 1000))
+
+
+def _translation_status_for_ui(
+    mode: str,
+    source_language: str,
+    target_language: str,
+    source_info: dict | None,
+) -> str:
+    try:
+        if mode == "opus":
+            return translation_manager_status(source_language, target_language)
+        return contextual_translation_status(
+            source_language,
+            target_language,
+            _media_duration_ms(source_info),
+        )
+    except Exception as exc:
+        return _error_status(str(exc))
+
+
 def _install_whisper_settings(model_id: str):
     status, action = install_selected_model(model_id)
     return status, status, action
@@ -71,24 +107,82 @@ def _remove_whisper_settings(model_id: str):
 
 def _prepare_translation_settings(
     route: str,
+    main_mode: str,
     main_source_language: str,
     main_target_language: str,
+    source_info: dict | None,
 ):
     source, target = _translation_route_languages(route)
     settings_status, action = prepare_translation_ui(source, target)
-    main_status = translation_status_ui(main_source_language, main_target_language)
+    main_status = _translation_status_for_ui(
+        main_mode, main_source_language, main_target_language, source_info
+    )
     return settings_status, main_status, action
 
 
 def _remove_translation_settings(
     route: str,
+    main_mode: str,
     main_source_language: str,
     main_target_language: str,
+    source_info: dict | None,
 ):
     source, target = _translation_route_languages(route)
     settings_status, action = remove_translation_models_ui(source, target)
-    main_status = translation_status_ui(main_source_language, main_target_language)
+    main_status = _translation_status_for_ui(
+        main_mode, main_source_language, main_target_language, source_info
+    )
     return settings_status, main_status, action
+
+
+def _prepare_contextual_settings(
+    main_mode: str,
+    main_source_language: str,
+    main_target_language: str,
+    source_info: dict | None,
+):
+    try:
+        prepared = prepare_contextual_translation()
+        action = (
+            "```text\n"
+            "[done] contextual translation is ready\n"
+            f"[runtime/model] {prepared}\n"
+            "[engine] Qwen3 4B Q4_K_M through llama.cpp\n"
+            "[context] surrounding source + rolling prior translations; budget grows with video duration\n"
+            "[next] use Main → Local translation with Contextual quality selected\n"
+            "```"
+        )
+    except Exception as exc:
+        action = _error_status(str(exc))
+    settings_status = contextual_translation_status("en", "ru", 0)
+    main_status = _translation_status_for_ui(
+        main_mode, main_source_language, main_target_language, source_info
+    )
+    return settings_status, main_status, local_resource_status(), action
+
+
+def _remove_contextual_settings(
+    main_mode: str,
+    main_source_language: str,
+    main_target_language: str,
+    source_info: dict | None,
+):
+    try:
+        removed = remove_contextual_model()
+        action = (
+            "```text\n"
+            f"[model] contextual Qwen3 registration {'removed' if removed else 'was not installed'}\n"
+            "[shared cache] Hugging Face cache is kept so other local apps are not broken\n"
+            "[runtime] llama.cpp is kept because it may be reused elsewhere\n"
+            "```"
+        )
+    except Exception as exc:
+        action = _error_status(str(exc))
+    settings_status = contextual_translation_status("en", "ru", 0)
+    main_status = _translation_status_for_ui(
+        main_mode, main_source_language, main_target_language, source_info
+    )
+    return settings_status, main_status, local_resource_status(), action
 
 
 def _voice_dropdown(language: str | None):
@@ -118,6 +212,7 @@ def _suggest_voice_controls(
 
 def _translation_preview_rows(rows: list[list[str]]) -> list[list[str]]:
     """Put translated text before source text so it stays visible on normal-width windows."""
+
     return [
         [row[0], row[1], row[3], row[2]] if len(row) >= 4 else list(row)
         for row in rows
@@ -135,11 +230,42 @@ def _translation_result_note(rows: list[list[str]]) -> str:
 
 
 def _translate_with_state(
+    mode: str,
     subtitle_path: str,
     source_language: str,
     target_language: str,
 ):
-    output, rows, status = translate_selected(subtitle_path, source_language, target_language)
+    if not subtitle_path:
+        return None, [], _error_status(
+            "Extract or transcribe subtitles first. Translation reuses that timed SRT."
+        ), ""
+
+    if mode == "opus":
+        output, rows, status = translate_selected(
+            subtitle_path, source_language, target_language
+        )
+    else:
+        try:
+            result = translate_srt_contextual(
+                subtitle_path,
+                source_language,
+                target_language,
+            )
+            output = str(result.srt_path)
+            rows = translated_segments_to_rows(result.segments)
+            status = (
+                "```text\n"
+                "[done] contextual subtitle translation complete\n"
+                f"[route] {result.route}\n"
+                f"[segments] {len(result.segments)} · original timings preserved\n"
+                "[quality] surrounding source context + rolling prior translations were used\n"
+                f"[output] {result.srt_path.name}\n"
+                "[next] review the translated preview, then generate a voice track if the target language has a TTS backend\n"
+                "```"
+            )
+        except Exception as exc:
+            return None, [], _error_status(str(exc)), ""
+
     if output and rows:
         note = _translation_result_note(rows)
         status = status.replace("\n```", f"\n{note}\n```", 1)
@@ -225,7 +351,7 @@ def build_app() -> gr.Blocks:
             """
             <div class="dl-header">
               <div class="dl-brand">DubLocal<span class="dl-cursor">_</span><span class="dl-local">LOCAL</span></div>
-              <div class="dl-subtitle">Subtitles, translation and local AI voice-over — processed on your Mac.</div>
+              <div class="dl-subtitle">Subtitles, contextual translation and local AI voice-over — processed on your Mac.</div>
             </div>
             """
         )
@@ -289,7 +415,7 @@ def build_app() -> gr.Blocks:
                     )
 
                 status = gr.Markdown(
-                    "```text\n[ready] choose a source and scan it\n[mode] M4 · captions + transcription + translation + Kokoro voice\n```",
+                    "```text\n[ready] choose a source and scan it\n[mode] M4 + M3.1 · captions + transcription + contextual translation + Kokoro voice\n```",
                     elem_classes=["console"],
                 )
                 subtitle_output = gr.File(label="Source subtitle output", interactive=False)
@@ -303,6 +429,11 @@ def build_app() -> gr.Blocks:
                 )
 
                 with gr.Accordion("Local translation", open=True):
+                    translation_mode = gr.Radio(
+                        choices=TRANSLATION_MODE_CHOICES,
+                        value="contextual",
+                        label="Translation quality",
+                    )
                     with gr.Row():
                         translation_source_language = gr.Dropdown(
                             label="Subtitle language",
@@ -315,15 +446,17 @@ def build_app() -> gr.Blocks:
                             value="en",
                         )
                     translation_status_main = gr.Markdown(
-                        translation_manager_status("auto", "en"),
+                        contextual_translation_status("auto", "en", 0),
                         elem_classes=["console"],
                     )
                     translate_button = gr.Button("Translate subtitles", variant="primary")
                     gr.HTML(
                         """
                         <div class="dl-note">
-                          Translation runs locally. Install or verify translation models in
-                          <strong>Settings → Model Manager</strong>.
+                          <strong>Contextual quality</strong> is the default. It translates groups of subtitles with nearby
+                          source dialogue, programme-wide reference lines and recent translated lines. The context budget grows
+                          automatically with video duration. <strong>Fast legacy</strong> keeps the older sentence-level OPUS
+                          path only when you explicitly choose it. Prepare models in <strong>Settings → Model Manager</strong>.
                         </div>
                         """
                     )
@@ -444,9 +577,33 @@ def build_app() -> gr.Blocks:
                                     "Remove model", variant="secondary"
                                 )
 
-                        with gr.Accordion("OPUS · subtitle translation", open=True):
+                        with gr.Accordion("Contextual translation · Qwen3 4B", open=True):
+                            contextual_settings_status = gr.Markdown(
+                                contextual_translation_status("en", "ru", 0),
+                                elem_classes=["console"],
+                            )
+                            with gr.Row():
+                                prepare_contextual_button = gr.Button(
+                                    "Prepare / verify contextual translation",
+                                    variant="primary",
+                                )
+                                remove_contextual_button = gr.Button(
+                                    "Remove DubLocal contextual model",
+                                    variant="secondary",
+                                )
+                            gr.HTML(
+                                """
+                                <div class="dl-note">
+                                  Recommended quality path. Uses the official Apache-2.0 Qwen3 4B Q4_K_M model (~2.5 GB)
+                                  through MIT-licensed llama.cpp. DubLocal reuses llama.cpp if already installed and stores the
+                                  model in the shared Hugging Face cache. No cloud translation fallback is used.
+                                </div>
+                                """
+                            )
+
+                        with gr.Accordion("Fast legacy translation · OPUS", open=False):
                             translation_route = gr.Dropdown(
-                                label="Translation model set",
+                                label="Legacy translation model set",
                                 choices=TRANSLATION_ROUTE_CHOICES,
                                 value="en-to-many",
                             )
@@ -456,17 +613,16 @@ def build_app() -> gr.Blocks:
                             )
                             with gr.Row():
                                 install_translation_button = gr.Button(
-                                    "Install / verify required model(s)", variant="primary"
+                                    "Install / verify legacy model(s)", variant="secondary"
                                 )
                                 remove_translation_button = gr.Button(
-                                    "Remove DubLocal translation models", variant="secondary"
+                                    "Remove DubLocal legacy translation models", variant="secondary"
                                 )
                             gr.HTML(
                                 """
                                 <div class="dl-note">
-                                  English → another supported language needs the ~310 MiB English-to-many model.
-                                  Another supported language → English needs the ~310 MiB many-to-English model.
-                                  Translation between two non-English languages uses both through English as a local pivot.
+                                  The OPUS path is kept for low-storage/fast use. It is sentence-level and is no longer the
+                                  recommended default because it cannot provide the same dialogue context or translation quality.
                                 </div>
                                 """
                             )
@@ -493,9 +649,8 @@ def build_app() -> gr.Blocks:
                                 """
                                 <div class="dl-note">
                                   DubLocal first looks for a compatible existing Kokoro environment. If found, it runs Kokoro
-                                  there through an isolated worker and does not install a duplicate Python stack. Otherwise it
-                                  can install the optional Kokoro runtime into DubLocal. Official model/voice assets use the
-                                  shared Hugging Face cache; preparing a language may download missing assets once.
+                                  there through an isolated worker and does not install a duplicate Python stack. Official
+                                  model/voice assets use the shared Hugging Face cache.
                                 </div>
                                 """
                             )
@@ -524,8 +679,8 @@ def build_app() -> gr.Blocks:
         gr.HTML(
             """
             <div class="dl-note">
-              Current development version: 0.4.x / M4. M4 adds local Kokoro voice-only tracks. Duration fitting,
-              original-audio ducking and stream-copy media export follow in M5.
+              Current development version: 0.4.1.dev0 / M4 + M3.1. Context-aware local translation is now the default;
+              duration fitting, original-audio ducking and stream-copy media export follow in M5.
             </div>
             """
         )
@@ -536,10 +691,21 @@ def build_app() -> gr.Blocks:
             outputs=[youtube_url, local_file],
             queue=False,
         )
-        scan_button.click(
+        scan_event = scan_button.click(
             fn=scan_source,
             inputs=[source_type, youtube_url, local_file],
             outputs=[status, subtitle_track, source_state, subtitle_preview],
+        )
+        scan_event.then(
+            fn=_translation_status_for_ui,
+            inputs=[
+                translation_mode,
+                translation_source_language,
+                translation_target_language,
+                source_state,
+            ],
+            outputs=[translation_status_main],
+            queue=False,
         )
         extract_button.click(
             fn=extract_selected,
@@ -563,21 +729,32 @@ def build_app() -> gr.Blocks:
                 translation_source_language,
             ],
         )
-        translation_source_language.change(
-            fn=translation_status_ui,
-            inputs=[translation_source_language, translation_target_language],
-            outputs=[translation_status_main],
-            queue=False,
-        )
-        translation_target_language.change(
-            fn=translation_status_ui,
-            inputs=[translation_source_language, translation_target_language],
-            outputs=[translation_status_main],
-            queue=False,
-        )
+
+        for component in (
+            translation_mode,
+            translation_source_language,
+            translation_target_language,
+        ):
+            component.change(
+                fn=_translation_status_for_ui,
+                inputs=[
+                    translation_mode,
+                    translation_source_language,
+                    translation_target_language,
+                    source_state,
+                ],
+                outputs=[translation_status_main],
+                queue=False,
+            )
+
         translate_button.click(
             fn=_translate_with_state,
-            inputs=[subtitle_path_state, translation_source_language, translation_target_language],
+            inputs=[
+                translation_mode,
+                subtitle_path_state,
+                translation_source_language,
+                translation_target_language,
+            ],
             outputs=[translated_output, translated_preview, status, translated_path_state],
         )
 
@@ -641,6 +818,37 @@ def build_app() -> gr.Blocks:
             outputs=[whisper_settings_status, model_status_main, model_action],
         )
 
+        prepare_contextual_button.click(
+            fn=_prepare_contextual_settings,
+            inputs=[
+                translation_mode,
+                translation_source_language,
+                translation_target_language,
+                source_state,
+            ],
+            outputs=[
+                contextual_settings_status,
+                translation_status_main,
+                resource_status,
+                model_action,
+            ],
+        )
+        remove_contextual_button.click(
+            fn=_remove_contextual_settings,
+            inputs=[
+                translation_mode,
+                translation_source_language,
+                translation_target_language,
+                source_state,
+            ],
+            outputs=[
+                contextual_settings_status,
+                translation_status_main,
+                resource_status,
+                model_action,
+            ],
+        )
+
         translation_route.change(
             fn=_translation_route_status,
             inputs=[translation_route],
@@ -649,12 +857,24 @@ def build_app() -> gr.Blocks:
         )
         install_translation_button.click(
             fn=_prepare_translation_settings,
-            inputs=[translation_route, translation_source_language, translation_target_language],
+            inputs=[
+                translation_route,
+                translation_mode,
+                translation_source_language,
+                translation_target_language,
+                source_state,
+            ],
             outputs=[translation_settings_status, translation_status_main, model_action],
         )
         remove_translation_button.click(
             fn=_remove_translation_settings,
-            inputs=[translation_route, translation_source_language, translation_target_language],
+            inputs=[
+                translation_route,
+                translation_mode,
+                translation_source_language,
+                translation_target_language,
+                source_state,
+            ],
             outputs=[translation_settings_status, translation_status_main, model_action],
         )
 
