@@ -41,6 +41,21 @@ _MIN_CONTEXT_TOKENS = 4096
 _MAX_CONTEXT_INPUT_TOKENS = 24576
 _TARGET_CHUNK_SEGMENTS = 12
 _MODEL_REGISTRATION = ".dublocal-contextual-translation.json"
+_JSON_SCHEMA = json.dumps(
+    {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "text": {"type": "string"},
+            },
+            "required": ["id", "text"],
+            "additionalProperties": False,
+        },
+    },
+    separators=(",", ":"),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,9 +107,6 @@ def _llama_command() -> list[str] | None:
         if raw and Path(raw).is_file() and os.access(raw, os.X_OK):
             return [str(raw)]
 
-    # Newer llama.cpp distributions also expose a single `llama` executable
-    # with a `cli` subcommand. Keep that path separate so DubLocal can reuse
-    # either packaging style without duplicating the runtime.
     llama = shutil.which("llama")
     if llama and Path(llama).is_file() and os.access(llama, os.X_OK):
         return [str(llama), "cli"]
@@ -234,22 +246,13 @@ def prepare_contextual_translation() -> str:
 
 
 def estimate_tokens(text: str) -> int:
-    """Cheap conservative token estimate suitable for context planning.
-
-    Qwen tokenization varies by language; using roughly 3.5 UTF-8 characters per
-    token leaves safety room inside the native 32k context window.
-    """
+    """Cheap conservative token estimate suitable for context planning."""
 
     return max(1, int(math.ceil(len(text) / 3.5)))
 
 
 def context_budget_for_duration(duration_ms: int) -> int:
-    """Scale usable source context with programme length.
-
-    A short clip still gets several thousand tokens. Every additional minute
-    increases the budget until the 24,576-token input ceiling, leaving roughly
-    8k native-context tokens for instructions and generated translation.
-    """
+    """Scale usable source context with programme length."""
 
     minutes = max(0.0, float(duration_ms) / 60000.0)
     budget = _MIN_CONTEXT_TOKENS + int(minutes * 128)
@@ -258,8 +261,6 @@ def context_budget_for_duration(duration_ms: int) -> int:
 
 def context_plan(segments: Sequence[Segment]) -> ContextPlan:
     duration_ms = max((segment.end_ms for segment in segments), default=0)
-    # Slightly larger target batches for long-form material reduce repeated
-    # model startup overhead while keeping subtitle alignment easy to validate.
     minutes = duration_ms / 60000.0
     chunk_segments = min(20, _TARGET_CHUNK_SEGMENTS + int(minutes // 60) * 2)
     return ContextPlan(
@@ -302,9 +303,6 @@ def _evenly_sample_context(
     candidates = [segment for segment in segments if segment.index not in excluded and segment.text.strip()]
     if not candidates or token_budget <= 0:
         return []
-    # Sample the full programme rather than only its opening so names/topics
-    # that recur later can influence terminology. The local rolling context
-    # below still carries precise scene chronology.
     sample_count = min(len(candidates), max(8, token_budget // 36))
     if sample_count >= len(candidates):
         sampled = candidates
@@ -375,15 +373,13 @@ def build_translation_prompt(
 
     return (
         "/no_think\n"
-        "You are a professional audiovisual subtitle translator.\n"
         f"Translate the TARGET LINES from {source} to natural, idiomatic {target}.\n"
         "Use all supplied context to resolve pronouns, speaker intent, recurring names, slang, jokes and tone.\n"
         "Do not translate sentence-by-sentence in isolation. Preserve meaning across adjacent lines.\n"
         "Keep profanity and register when they are present; do not sanitize dialogue.\n"
         "Translate bracketed non-dialogue cues naturally for the target language.\n"
         "Do not invent information. Keep each target subtitle concise enough for screen reading.\n"
-        "Return ONLY a JSON array. Each item must be exactly {\"id\": <integer>, \"text\": <translation>}.\n"
-        "Return exactly one item for every TARGET LINE id, in the same order, and no items for context lines.\n\n"
+        "Return exactly one JSON item for every TARGET LINE id, in the same order, and no items for context lines.\n\n"
         f"PROGRAMME DURATION: {plan.duration_ms / 60000.0:.1f} minutes\n"
         f"CONTEXT INPUT BUDGET: {plan.input_budget_tokens} tokens (scales with programme duration)\n\n"
         "GLOBAL PROGRAMME CONTEXT — reference only, do not output:\n"
@@ -400,9 +396,6 @@ def build_translation_prompt(
 
 def _extract_json_array(raw: str) -> list[dict[str, object]]:
     text = raw.strip()
-    # llama.cpp may print prompt/runtime chatter depending on version. The
-    # generated JSON is the last complete array in stdout, so scan candidate
-    # opening brackets from the end rather than assuming stdout is pristine.
     starts = [index for index, char in enumerate(text) if char == "["]
     for start in reversed(starts):
         end = text.rfind("]")
@@ -453,6 +446,14 @@ def _run_llama(prompt: str, *, max_output_tokens: int) -> str:
     args = command + [
         "-m",
         str(model),
+        "--jinja",
+        "--single-turn",
+        "--reasoning",
+        "off",
+        "--no-display-prompt",
+        "--no-show-timings",
+        "-sys",
+        "You are a professional audiovisual subtitle translator. Follow the user's translation instructions exactly and return only the requested JSON.",
         "-p",
         prompt,
         "-c",
@@ -465,6 +466,8 @@ def _run_llama(prompt: str, *, max_output_tokens: int) -> str:
         "0.8",
         "--repeat-penalty",
         "1.05",
+        "--json-schema",
+        _JSON_SCHEMA,
     ]
     if platform.machine().lower() in {"arm64", "aarch64"}:
         args.extend(["-ngl", "99"])
