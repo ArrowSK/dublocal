@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Sequence
@@ -47,6 +49,88 @@ def _validated_chunk(
         )
         for segment, text in zip(target_segments, texts, strict=True)
     ]
+
+
+def _language_detection_sample(segments: Sequence[Segment]) -> str:
+    """Build a compact dialogue-only sample for Auto source-language identification."""
+
+    lines: list[str] = []
+    characters = 0
+    for segment in segments:
+        if is_protected_caption_tag(segment.text):
+            continue
+        text = " ".join(segment.text.split()).strip()
+        if not text:
+            continue
+        lines.append(text)
+        characters += len(text)
+        if len(lines) >= 80 or characters >= 6000:
+            break
+    return "\n".join(lines)
+
+
+def _parse_detected_language(raw: str) -> str:
+    """Accept a terse ISO code, label, or tiny JSON object from the local model."""
+
+    text = (raw or "").strip()
+    if not text:
+        return "auto"
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict):
+        for key in ("language", "lang", "code"):
+            candidate = normalise_language_code(str(payload.get(key) or ""))
+            if candidate in TRANSLATION_LANGUAGES:
+                return candidate
+
+    compact = text.strip("`'\" \t\r\n").casefold()
+    direct = normalise_language_code(compact)
+    if direct in TRANSLATION_LANGUAGES:
+        return direct
+
+    for code, metadata in TRANSLATION_LANGUAGES.items():
+        if compact == str(metadata["label"]).casefold():
+            return code
+
+    code_pattern = "|".join(re.escape(code) for code in TRANSLATION_LANGUAGES)
+    match = re.search(rf"\b({code_pattern})\b", compact[:160])
+    if match:
+        return match.group(1)
+
+    for code, metadata in TRANSLATION_LANGUAGES.items():
+        if str(metadata["label"]).casefold() in compact[:160]:
+            return code
+    return "auto"
+
+
+def _detect_source_language(runtime: ContextualRuntime, segments: Sequence[Segment]) -> str:
+    sample = _language_detection_sample(segments)
+    if not sample:
+        raise DubLocalError(
+            "Auto source-language detection found no dialogue text to identify. "
+            "Choose From manually for this subtitle timeline."
+        )
+
+    allowed = ", ".join(TRANSLATION_LANGUAGES)
+    prompt = (
+        "/no_think\n"
+        "Identify the dominant human language of the subtitle dialogue below.\n"
+        f"Return exactly one ISO code from this list and nothing else: {allowed}.\n"
+        "Ignore names, isolated foreign words, sound-effect tags and punctuation.\n\n"
+        "SUBTITLE SAMPLE:\n"
+        f"{sample}\n"
+    )
+    raw = runtime.generate(prompt, max_output_tokens=24)
+    detected = _parse_detected_language(raw)
+    if detected not in TRANSLATION_LANGUAGES:
+        raise DubLocalError(
+            "Auto source-language detection could not determine a supported language confidently. "
+            "Choose From manually and retry."
+        )
+    return detected
 
 
 def _translate_chunk_with_recovery(
@@ -210,12 +294,13 @@ def translate_srt_contextual_with_progress(
         raise DubLocalError("Contextual translation expects DubLocal's normalized SRT timeline.")
 
     source = normalise_language_code(source_language)
+    source_is_auto = source == "auto"
     target = normalise_language_code(target_language)
-    if source not in TRANSLATION_LANGUAGES:
-        raise DubLocalError("Choose the subtitle source language before contextual translation.")
+    if not source_is_auto and source not in TRANSLATION_LANGUAGES:
+        raise DubLocalError("Choose a supported subtitle source language.")
     if target not in TRANSLATION_LANGUAGES:
         raise DubLocalError("Choose a supported translation target language.")
-    if source == target:
+    if not source_is_auto and source == target:
         raise DubLocalError("Source and target languages are the same; no translation is needed.")
     if not _llama_command() or not contextual_model_valid(selected_model_key):
         raise ContextualTranslationMissingError(
@@ -236,7 +321,7 @@ def translate_srt_contextual_with_progress(
     total_chunks = max(1, len(starts))
     translated: list[TranslatedSegment] = []
     protected_count = sum(1 for segment in segments if is_protected_caption_tag(segment.text))
-    needs_model = protected_count < len(segments)
+    needs_model = protected_count < len(segments) or source_is_auto
     runtime_mode = "not needed"
 
     if progress_callback:
@@ -259,6 +344,21 @@ def translate_srt_contextual_with_progress(
                 context_tokens=runtime_context_tokens,
             ).__enter__()
             runtime_mode = runtime.mode
+
+        if source_is_auto:
+            assert runtime is not None
+            if progress_callback:
+                progress_callback(0.04, "Auto-detecting subtitle source language")
+            source = _detect_source_language(runtime, segments)
+            if source == target:
+                raise DubLocalError(
+                    f"Auto detected {TRANSLATION_LANGUAGES[source]['label']}, which is already the target language; no translation is needed."
+                )
+            if progress_callback:
+                progress_callback(
+                    0.05,
+                    f"Detected {TRANSLATION_LANGUAGES[source]['label']} · starting translation",
+                )
 
         for chunk_number, start in enumerate(starts, start=1):
             end = min(len(segments), start + plan.chunk_segments)

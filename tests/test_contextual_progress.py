@@ -93,6 +93,66 @@ def test_wrong_script_is_recovered_instead_of_written():
     assert result == ["Привет.", "Где моё сердце?"]
 
 
+def test_auto_language_parser_accepts_code_label_and_json():
+    assert contextual_progress._parse_detected_language("en") == "en"
+    assert contextual_progress._parse_detected_language("English") == "en"
+    assert contextual_progress._parse_detected_language('{"language":"es"}') == "es"
+
+
+def test_contextual_translation_auto_detects_source_with_same_runtime(monkeypatch, tmp_path: Path):
+    source = tmp_path / "captions.srt"
+    source.write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\nHello, how are you?\n",
+        encoding="utf-8",
+    )
+
+    class Runtime:
+        mode = "fake-server"
+        instances = 0
+        prompts: list[str] = []
+
+        def __init__(self, model_key: str = "8b", context_tokens: int | None = None):
+            Runtime.instances += 1
+            assert model_key == "8b"
+            assert context_tokens == 20480
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def generate(self, prompt: str, *, max_output_tokens: int) -> str:
+            Runtime.prompts.append(prompt)
+            if "Identify the dominant human language" in prompt:
+                return "English"
+            return "[1] - Hola, ¿cómo estás?"
+
+    monkeypatch.setattr(contextual_progress, "ContextualRuntime", Runtime)
+    monkeypatch.setattr(contextual_progress, "_llama_command", lambda: ["llama-cli"])
+    monkeypatch.setattr(contextual_progress, "contextual_model_valid", lambda key: key == "8b")
+    monkeypatch.setattr(
+        contextual_progress,
+        "active_recommendation",
+        lambda: SimpleNamespace(model_key="8b", review=False, context_cap_tokens=16384),
+    )
+
+    result = contextual_progress.translate_srt_contextual_with_progress(
+        source,
+        "auto",
+        "es",
+        review=False,
+    )
+
+    assert Runtime.instances == 1
+    assert result.source_language == "en"
+    assert result.target_language == "es"
+    assert "English → Spanish" in result.route
+    assert len(Runtime.prompts) == 2
+    assert "Identify the dominant human language" in Runtime.prompts[0]
+    assert "Translate the TARGET LINES from English" in Runtime.prompts[1]
+
+
 def test_contextual_translation_preserves_standalone_tags(monkeypatch, tmp_path: Path):
     source = tmp_path / "captions.srt"
     source.write_text(
