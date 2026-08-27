@@ -4,7 +4,13 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from .contextual_fallback import run_llama_unconstrained
-from .contextual_recovery import build_format_repair_prompt, recover_chunk_output
+from .contextual_recovery import (
+    build_format_repair_prompt,
+    build_single_line_recovery_prompt,
+    clean_single_line_output,
+    recover_chunk_output,
+    recover_partial_output,
+)
 from .contextual_translation import (
     ContextualTranslationMissingError,
     _llama_command,
@@ -48,10 +54,11 @@ def _translate_chunk_with_recovery(
                 f"Recovering structured output for chunk {chunk_number}/{total_chunks}",
             )
 
+        target_label = TRANSLATION_LANGUAGES[target_language]["label"]
         repair_prompt = build_format_repair_prompt(
             raw,
             target_segments,
-            TRANSLATION_LANGUAGES[target_language]["label"],
+            target_label,
         )
         repaired = run_llama_unconstrained(
             repair_prompt,
@@ -59,12 +66,41 @@ def _translate_chunk_with_recovery(
         )
         try:
             return recover_chunk_output(repaired, target_segments)
-        except DubLocalError as second_error:
+        except DubLocalError:
+            pass
+
+        recovered = recover_partial_output(raw, target_segments)
+        recovered.update(recover_partial_output(repaired, target_segments))
+        missing = [segment for segment in target_segments if segment.index not in recovered]
+
+        for position, segment in enumerate(missing, start=1):
+            if progress_callback:
+                base = max(0.02, min(0.95, (chunk_number - 0.25) / max(1, total_chunks) * 0.94 + 0.02))
+                progress_callback(
+                    base,
+                    f"Recovering subtitle {position}/{len(missing)} in chunk {chunk_number}/{total_chunks}",
+                )
+            single_prompt = build_single_line_recovery_prompt(
+                prompt,
+                segment,
+                target_label,
+                repaired,
+            )
+            single_raw = run_llama_unconstrained(
+                single_prompt,
+                max_output_tokens=max(128, min(512, estimate_tokens(segment.text) * 4 + 96)),
+            )
+            recovered[segment.index] = clean_single_line_output(single_raw, segment.index)
+
+        expected = [segment.index for segment in target_segments]
+        if any(index not in recovered for index in expected):
+            still_missing = [index for index in expected if index not in recovered]
             raise DubLocalError(
-                "Contextual translator could not preserve the required subtitle IDs "
-                f"for chunk {chunk_number}/{total_chunks}, even after the plain-text recovery pass. "
+                "Contextual translator could not recover all required subtitle IDs "
+                f"for chunk {chunk_number}/{total_chunks} (missing={still_missing[:5]}). "
                 "DubLocal stopped instead of writing a corrupted SRT."
-            ) from second_error
+            )
+        return [recovered[index] for index in expected]
 
 
 def translate_srt_contextual_with_progress(
