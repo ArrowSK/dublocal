@@ -1,22 +1,16 @@
 # Installing DubLocal on macOS
 
-**Current development build: v0.4.0.dev0 — M4 Local Voice**
+**Current development build: v0.4.1.dev0 — M4 + M3.1 Contextual Translation**
 
-DubLocal currently uses a Git checkout as its application source, but after first setup it behaves like a normal local Mac utility: open **DubLocal.app**, update or repair it from inside the app, and prepare optional AI resources only when needed.
+DubLocal still uses a Git checkout as its application source, but after the first setup it behaves like a normal local Mac utility: open **DubLocal.app**, update/repair from inside the app, and install optional models only when you need them.
 
-There is not yet a packaged GitHub Release/DMG. `v0.4.0.dev0` is the current M4 development build; see [CHANGELOG.md](../CHANGELOG.md).
-
-## What you need
-
-The initial support target is macOS 13 or newer on Apple Silicon or Intel.
-
-The base application needs Python 3.11+ and uses FFmpeg/ffprobe for local media work. `whisper.cpp` is needed only for local transcription. The installer can bootstrap Python and offer FFmpeg/whisper.cpp through Homebrew when available.
-
-You do **not** need PyTorch, Transformers, Kokoro, OPUS or model weights merely to install and launch DubLocal. Optional AI resources are prepared later from **Settings → Model Manager**.
+There is no packaged DMG/GitHub Release yet.
 
 ## First installation
 
-Open Terminal and run:
+DubLocal currently targets macOS 13+ on Apple Silicon and Intel.
+
+Open Terminal once:
 
 ```bash
 git clone https://github.com/ArrowSK/dublocal.git
@@ -24,139 +18,100 @@ cd dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-The installer creates the managed DubLocal environment plus:
+The installer creates:
 
 ```text
 ~/Applications/DubLocal.app
 ~/Applications/Stop DubLocal.app
 ```
 
-If Python 3.11+ is missing and Homebrew is available, the installer can offer to install it. It also checks FFmpeg and `whisper-cli` and can offer their Homebrew packages.
+It can bootstrap Python 3.11+ and offer FFmpeg/whisper.cpp through Homebrew when required. It does **not** silently download AI model weights.
 
-The installer does not silently download Whisper, translation or Kokoro model/voice assets.
+After installation, ordinary use is through **DubLocal.app**.
 
-## Launching
+## What is installed only when requested
 
-Open `~/Applications/DubLocal.app` or drag it to the Dock.
+**Whisper**
 
-DubLocal listens only on:
+Settings → Model Manager → Whisper. Tiny, Base and Small are available; Base (~142 MiB) is a reasonable starting point.
 
-```text
-http://127.0.0.1:7861
-```
+**Contextual translation — recommended**
 
-The launcher offers:
+Settings → Model Manager → **Contextual translation · Qwen3 4B** → **Prepare / verify contextual translation**.
 
-- **Launch / Open** — use the current instance or start one.
-- **Stop All & Launch** — stop DubLocal processes and start a clean instance, useful after an update.
-- **Cancel** — do nothing.
+That action:
 
-`Stop DubLocal.app` stops the service without Terminal.
+1. reuses an existing `llama.cpp` command if one is already available;
+2. otherwise installs `llama.cpp` through Homebrew;
+3. downloads the official Qwen3 4B Q4_K_M GGUF (~2.5 GB) into the shared Hugging Face cache;
+4. verifies the pinned SHA-256 before registering the model with DubLocal.
 
-## Main and Settings
+The model is local and Apache-2.0; `llama.cpp` is a separate local runtime. There is no cloud translation fallback.
 
-Ordinary media work happens on **Main**. Application maintenance lives under **Settings**:
+**Fast legacy translation — optional**
 
-- **Settings → Updates** — update, repair, restart.
-- **Settings → Model Manager** — Whisper, OPUS translation and Kokoro resources.
-- **Settings → Local Resources** — detected FFmpeg, ffprobe, whisper.cpp, Hugging Face cache and reusable external Python runtimes.
+The older OPUS models remain under Settings → Model Manager → **Fast legacy translation · OPUS**. They are smaller (~310 MiB per direction) but translate sentence-by-sentence and are no longer the recommended quality path.
 
-This keeps model installation and maintenance out of the normal processing flow.
+**Kokoro**
+
+Settings → Model Manager → Kokoro. DubLocal first searches for a compatible existing Kokoro environment and runs it through its own Python process. Only when no reusable environment exists does DubLocal install another Kokoro runtime.
 
 ## Reuse first, install second
 
-DubLocal tries not to duplicate resources already present on the Mac.
+DubLocal deliberately avoids duplicate heavyweight resources when safe reuse is possible.
 
-### System executables
+- FFmpeg, ffprobe, whisper.cpp and `llama.cpp` are reused in place.
+- Qwen, OPUS and Kokoro assets use the normal shared Hugging Face cache.
+- Python virtual environments are never merged. Compatible external Python environments are invoked as isolated workers instead of adding their `site-packages` to DubLocal.
 
-FFmpeg, ffprobe and `whisper-cli` are reused in place when found. DubLocal does not make private copies simply because another application installed them first.
+Open **Settings → Local Resources** to see what is being reused.
 
-### Model caches
+## Updating
 
-OPUS translation and Kokoro use the normal Hugging Face cache (`HF_HUB_CACHE`, `HF_HOME`, `XDG_CACHE_HOME`, or the default cache location). Compatible assets already present there can be reused rather than downloaded into another private cache.
-
-Removing a DubLocal OPUS registration leaves the shared Hugging Face snapshot intact because another local application may still rely on it.
-
-### Python environments
-
-Python virtual environments cannot safely be merged. DubLocal never adds another application's `site-packages` to its own interpreter.
-
-A backend that supports reuse instead starts the compatible environment's own Python as a separate worker process and exchanges narrow structured input/output with DubLocal.
-
-M4 also fixes a macOS-specific discovery issue: a venv's `bin/python` is commonly a symlink to a shared framework Python. DubLocal preserves the venv executable path instead of resolving that symlink, so two separate environments remain distinguishable even if their underlying Python binary is the same.
-
-Inspect the current result under **Settings → Local Resources**.
-
-## Whisper models
-
-Open **Settings → Model Manager → Whisper · transcription**. Select Tiny, Base or Small and click **Install / verify model**. Base (~142 MiB) is the recommended starting point.
-
-Whisper model files are outside the Git checkout and survive app updates/repair.
-
-## Translation resources
-
-Open **Settings → Model Manager → OPUS · subtitle translation**.
-
-Choose the model set you need:
-
-- **English → supported languages** — one ~310 MiB model;
-- **Supported languages → English** — the opposite ~310 MiB model;
-- **Non-English ↔ non-English** — both models, because translation pivots locally through English.
-
-Then click **Install / verify required model(s)**.
-
-DubLocal first looks for a compatible existing translation runtime. Only if none is available does it install its optional translation stack. Exact OPUS safetensors weights are pinned and SHA-256 verified before use.
-
-There is no cloud translation fallback.
-
-## Kokoro resources
-
-Open **Settings → Model Manager → Kokoro · voice generation**.
-
-Choose a supported language/voice and click **Prepare / verify Kokoro**.
-
-DubLocal first searches for a compatible existing Kokoro environment. If one is found, DubLocal runs Kokoro through that environment's own Python worker rather than duplicating its packages. If none exists, DubLocal can install the optional Kokoro runtime into its own `.venv`.
-
-Preparation also verifies that the selected Kokoro frontend/voice can load. Missing official model or voice assets may be downloaded into the shared Hugging Face cache at this point.
-
-Official Kokoro language support exposed by M4 is American/British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin Chinese. Translation targets such as Hungarian, Russian and German remain subtitle-only with the current TTS backend.
-
-## Updating inside DubLocal
-
-Open **Settings → Updates**.
-
-For the normal case:
+Open **Settings → Updates** and use:
 
 **Check for updates → Install update → Restart DubLocal**
 
-The updater compares:
-
-- the currently running DubLocal version;
-- the local Git checkout;
-- official `ArrowSK/dublocal` → `main`.
-
-It accepts only a clean fast-forward. Normal updates never overwrite tracked local edits and never rewrite local commits or diverged history.
+Normal updates accept only a clean fast-forward from official `ArrowSK/dublocal` `main`. They do not overwrite tracked local edits or rewrite divergent Git history.
 
 ## Repair installation
 
-The same **Settings → Updates** panel includes **Repair installation**.
+Use **Repair installation** when the checkout or managed Python environment is inconsistent.
 
-Two cases are handled:
-
-1. **The Git checkout is correct but the managed Python core is stale.** Repair refreshes the core and verifies the imported version/path.
-2. **Tracked DubLocal program files were modified locally.** If you explicitly tick the repair confirmation, DubLocal saves the tracked diff as a patch, restores official tracked files from GitHub `main`, refreshes/verifies the core and restarts.
-
-Patch backups are kept under:
+If tracked program files were modified, DubLocal can save the diff as a patch under:
 
 ```text
 ~/.dublocal/repair-backups/
 ```
 
-Repair intentionally preserves optional models, shared caches, generated jobs and untracked user files. It refuses to rewrite local commits or diverged Git history.
+and restore the official files before refreshing the Python core. Models, shared caches, generated jobs and untracked user files are preserved.
 
-## Manual recovery
+## Launcher details
 
-If you are on an older build that does not have the current updater/repair UI:
+DubLocal listens only on the local machine at:
+
+```text
+http://127.0.0.1:7861
+```
+
+The launcher can open the running instance or perform **Stop All & Launch** after an update. `Stop DubLocal.app` stops the local service without Terminal.
+
+## Where files live
+
+```text
+~/dublocal/                         application Git checkout
+~/.dublocal/logs/                   launcher logs
+~/.dublocal/repair-backups/         repair patch backups
+~/Library/.../DubLocal/models/      app-specific model registrations
+~/.cache/huggingface/hub/           default shared Hugging Face cache
+~/Library/Caches/.../DubLocal/jobs/ generated SRT/WAV/intermediate files
+```
+
+Exact data/cache paths use `platformdirs`; Hugging Face cache environment variables are respected.
+
+## Older-build recovery
+
+If you are still on a build too old to use the current updater:
 
 ```bash
 cd ~/dublocal
@@ -164,23 +119,6 @@ git pull
 zsh scripts/macos/install-launcher.sh
 ```
 
-After the current updater is installed, ordinary maintenance should be done from inside DubLocal.
+Once the current updater is installed, normal maintenance should happen inside DubLocal.
 
-## Where DubLocal keeps things
-
-```text
-~/dublocal/                         application Git checkout
-~/.dublocal/logs/                   launcher logs
-~/.dublocal/repair-backups/         repair patch backups
-~/Library/.../DubLocal/models/      app-specific model registrations / legacy copies
-~/.cache/huggingface/hub/           default shared Hugging Face cache
-~/Library/Caches/.../DubLocal/jobs/ generated SRT/WAV/manifest/intermediate files
-```
-
-The exact application-data/cache directories are resolved with `platformdirs`, and Hugging Face cache environment variables are respected.
-
-## Removing the development build
-
-There is not yet a signed `.dmg` uninstaller. Code, launchers, optional models and caches are deliberately separated so they can eventually be managed independently.
-
-If something fails, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) before deleting the entire environment.
+If something fails, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) before deleting models or rebuilding the whole environment.

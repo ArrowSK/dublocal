@@ -50,6 +50,24 @@
       "sha1": "55356645c2b361a969dfd0ef2c5a50d530afd8d5"
     },
     {
+      "id": "qwen3-4b-q4-k-m-contextual-translation",
+      "backend": "llama.cpp",
+      "upstream": "Qwen/Qwen3-4B-GGUF",
+      "revision": "a9a60d009fa7ff9606305047c2bf77ac25dbec49",
+      "file": "Qwen3-4B-Q4_K_M.gguf",
+      "license": "Apache-2.0",
+      "commercial_use": true,
+      "redistribution": true,
+      "bundled": false,
+      "download_on_demand": true,
+      "storage_policy": "shared_huggingface_cache_with_dublocal_registration",
+      "remove_policy": "remove_dublocal_registration_keep_shared_snapshot",
+      "weight_size": "2.5 GB",
+      "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+      "role": "Default context-aware multilingual subtitle translation",
+      "context_policy": "native 32768 tokens; DubLocal input budget scales with programme duration and is capped at 24576"
+    },
+    {
       "id": "opus-mt-mul-en-safetensors",
       "backend": "transformers-marian",
       "upstream": "Helsinki-NLP/opus-mt-mul-en",
@@ -64,7 +82,7 @@
       "remove_policy": "remove_dublocal_registration_keep_shared_snapshot",
       "weight_size": "310 MiB",
       "sha256": "8b8ff7a54cd65dd0015c620755dd62f956796035d2cafd43446e960e13c79c28",
-      "role": "Allowlisted multilingual source languages to English"
+      "role": "Legacy fast translation from allowlisted multilingual source languages to English"
     },
     {
       "id": "opus-mt-en-mul-safetensors",
@@ -81,7 +99,7 @@
       "remove_policy": "remove_dublocal_registration_keep_shared_snapshot",
       "weight_size": "310 MiB",
       "sha256": "dd4c874ecad8853d94415c21937c7e35ea09cc22f178b63821294ed010121436",
-      "role": "English to allowlisted multilingual target languages"
+      "role": "Legacy fast translation from English to allowlisted multilingual target languages"
     },
     {
       "id": "kokoro-82m-official",
