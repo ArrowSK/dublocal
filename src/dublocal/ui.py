@@ -35,6 +35,7 @@ from .progress_operations import (
     generate_voice_track_with_progress,
     install_whisper_model_with_progress,
 )
+from .stage_status import subtitles_ready_status, translation_ready_status, voice_ready_status
 from .transcription import model_manager_status
 from .translation import translated_segments_to_rows, translation_manager_status
 from .tts import (
@@ -114,7 +115,7 @@ input[type="range"], progress {
   margin: 4px 0 8px 0;
 }
 
-.dl-source-status {
+.dl-stage-status {
   margin-top: 8px !important;
   padding: 9px 12px !important;
   border: 1px solid rgba(43, 108, 66, 0.55) !important;
@@ -124,8 +125,8 @@ input[type="range"], progress {
   min-height: 0 !important;
 }
 
-.dl-source-status p { margin: 0 !important; }
-.dl-source-status strong { color: var(--dl-green-soft) !important; }
+.dl-stage-status p { margin: 0 !important; }
+.dl-stage-status strong { color: var(--dl-green-soft) !important; }
 
 .console { min-height: 72px !important; }
 """
@@ -187,7 +188,7 @@ def _duration_compact(source_info: dict | None) -> str:
 def _source_card_status(source_info: dict | None) -> str:
     info = source_info or {}
     if not info:
-        return "**Not loaded** · choose a source and click Load source."
+        return "⚠ **Source not loaded** · see the warning or activity details."
     title = str(info.get("title") or "Media").replace("\n", " ").strip()
     tracks = len(info.get("subtitle_tracks", []) or [])
     kind = "YouTube" if info.get("kind") == "youtube" else "Local file"
@@ -236,9 +237,10 @@ def _extract_ui(
 ):
     update = _progress_callback(progress)
     update(0.08, "Extracting subtitle track")
-    result = extract_selected(info, track_value, rights_confirmed)
+    output, rows, status, path, language = extract_selected(info, track_value, rights_confirmed)
     update(1.0, "Subtitle timeline ready")
-    return result
+    card = subtitles_ready_status(path, rows, language, method="Subtitles ready")
+    return output, rows, status, path, language, card
 
 
 def _transcribe_ui(
@@ -250,9 +252,12 @@ def _transcribe_ui(
 ):
     update = _progress_callback(progress)
     update(0.04, "Preparing local transcription")
-    result = transcribe_selected(info, rights_confirmed, model_id, language)
+    output, rows, status, path, detected = transcribe_selected(
+        info, rights_confirmed, model_id, language
+    )
     update(1.0, "Transcription complete")
-    return result
+    card = subtitles_ready_status(path, rows, detected, method="Transcribed")
+    return output, rows, status, path, detected, card
 
 
 def _install_whisper_settings(
@@ -403,9 +408,10 @@ def _translate_with_state(
     progress: gr.Progress = gr.Progress(track_tqdm=True),
 ):
     if not subtitle_path:
-        return None, [], _error_status(
+        status = _error_status(
             "Extract or transcribe subtitles first. Translation reuses that timed SRT."
-        ), ""
+        )
+        return None, [], status, "", translation_ready_status(None, [], source_language, target_language)
 
     update = _progress_callback(progress)
     if mode == "opus":
@@ -432,12 +438,15 @@ def _translate_with_state(
                 "```"
             )
         except Exception as exc:
-            return None, [], _error_status(str(exc)), ""
+            status = _error_status(str(exc))
+            return None, [], status, "", translation_ready_status(None, [], source_language, target_language)
 
     if output and rows:
         note = _translation_result_note(rows)
         status = status.replace("\n```", f"\n{note}\n```", 1)
-    return output, _translation_preview_rows(rows), status, output or ""
+    preview = _translation_preview_rows(rows)
+    card = translation_ready_status(output, preview, source_language, target_language)
+    return output, preview, status, output or "", card
 
 
 def _generate_voice_ui(
@@ -456,11 +465,10 @@ def _generate_voice_ui(
             if timeline_source == "Source subtitles"
             else "Translate subtitles first, or switch Voice source to Source subtitles."
         )
-        return None, None, [], _error_status(missing)
+        return None, None, [], _error_status(missing), voice_ready_status(None, [], language, voice)
     if not language or not voice:
-        return None, None, [], _error_status(
-            "Official Kokoro does not support the selected subtitle language, or no compatible voice is selected."
-        )
+        message = "Official Kokoro does not support the selected subtitle language, or no compatible voice is selected."
+        return None, None, [], _error_status(message), voice_ready_status(None, [], language, voice)
 
     update = _progress_callback(progress)
     try:
@@ -489,9 +497,9 @@ def _generate_voice_ui(
         )
         rows = voice_segments_to_rows(result.segments)
         path = str(result.wav_path)
-        return path, path, rows, status
+        return path, path, rows, status, voice_ready_status(path, rows, language, voice)
     except Exception as exc:
-        return None, None, [], _error_status(str(exc))
+        return None, None, [], _error_status(str(exc)), voice_ready_status(None, [], language, voice)
 
 
 def _prepare_kokoro_settings(
@@ -564,7 +572,7 @@ def build_app() -> gr.Blocks:
                     scan_button = gr.Button("Load source", variant="primary")
                     source_card_status = gr.Markdown(
                         "**Not loaded** · choose a source and click Load source.",
-                        elem_classes=["dl-source-status"],
+                        elem_classes=["dl-stage-status"],
                     )
 
                 with gr.Accordion("2 · Subtitles", open=False):
@@ -590,6 +598,10 @@ def build_app() -> gr.Blocks:
                         gr.HTML(
                             '<div class="dl-compact-note">Model install/remove lives in Settings → Model Manager.</div>'
                         )
+                    subtitle_stage_status = gr.Markdown(
+                        "**Waiting** · choose existing captions or transcribe locally.",
+                        elem_classes=["dl-stage-status"],
+                    )
 
                 with gr.Accordion("3 · Translate", open=False):
                     translation_mode = gr.Dropdown(
@@ -605,6 +617,10 @@ def build_app() -> gr.Blocks:
                             label="To", choices=TARGET_LANGUAGE_CHOICES, value="en"
                         )
                     translate_button = gr.Button("Translate subtitles", variant="primary")
+                    translation_stage_status = gr.Markdown(
+                        "**Waiting** · prepare a subtitle timeline first.",
+                        elem_classes=["dl-stage-status"],
+                    )
                     with gr.Accordion("Translation engine details", open=False):
                         translation_status_main = gr.Markdown(
                             contextual_translation_status("auto", "en", 0),
@@ -646,6 +662,10 @@ def build_app() -> gr.Blocks:
                             label="Speed",
                         )
                     generate_voice_button = gr.Button("Generate voice track", variant="primary")
+                    voice_stage_status = gr.Markdown(
+                        "**Waiting** · choose a subtitle timeline and voice.",
+                        elem_classes=["dl-stage-status"],
+                    )
                     voice_audio = gr.Audio(
                         label="Voice preview", type="filepath", interactive=False
                     )
@@ -795,15 +815,41 @@ def build_app() -> gr.Blocks:
             outputs=[translation_status_main],
             queue=False,
         )
-        extract_button.click(
+
+        extract_begin = extract_button.click(
+            fn=lambda: "**Using existing subtitles…**",
+            outputs=[subtitle_stage_status],
+            queue=False,
+        )
+        extract_begin.then(
             fn=_extract_ui,
             inputs=[source_state, subtitle_track, rights],
-            outputs=[subtitle_output, subtitle_preview, status, subtitle_path_state, translation_source_language],
+            outputs=[
+                subtitle_output,
+                subtitle_preview,
+                status,
+                subtitle_path_state,
+                translation_source_language,
+                subtitle_stage_status,
+            ],
         )
-        transcribe_button.click(
+
+        transcribe_begin = transcribe_button.click(
+            fn=lambda: "**Transcribing locally…** · progress and ETA are shown while Whisper runs.",
+            outputs=[subtitle_stage_status],
+            queue=False,
+        )
+        transcribe_begin.then(
             fn=_transcribe_ui,
             inputs=[source_state, rights, whisper_model_main, source_language],
-            outputs=[subtitle_output, subtitle_preview, status, subtitle_path_state, translation_source_language],
+            outputs=[
+                subtitle_output,
+                subtitle_preview,
+                status,
+                subtitle_path_state,
+                translation_source_language,
+                subtitle_stage_status,
+            ],
         )
 
         for component in (translation_mode, translation_source_language, translation_target_language):
@@ -814,10 +860,21 @@ def build_app() -> gr.Blocks:
                 queue=False,
             )
 
-        translate_button.click(
+        translate_begin = translate_button.click(
+            fn=lambda: "**Translating…** · contextual chunk progress and ETA are shown while Qwen runs.",
+            outputs=[translation_stage_status],
+            queue=False,
+        )
+        translate_begin.then(
             fn=_translate_with_state,
             inputs=[translation_mode, subtitle_path_state, translation_source_language, translation_target_language],
-            outputs=[translated_output, translated_preview, status, translated_path_state],
+            outputs=[
+                translated_output,
+                translated_preview,
+                status,
+                translated_path_state,
+                translation_stage_status,
+            ],
         )
 
         voice_source.change(
@@ -839,10 +896,16 @@ def build_app() -> gr.Blocks:
             queue=False,
         )
         tts_language.change(fn=_voice_dropdown, inputs=[tts_language], outputs=[tts_voice], queue=False)
-        generate_voice_button.click(
+
+        voice_begin = generate_voice_button.click(
+            fn=lambda: "**Generating voice…** · segment progress and ETA are shown while Kokoro runs.",
+            outputs=[voice_stage_status],
+            queue=False,
+        )
+        voice_begin.then(
             fn=_generate_voice_ui,
             inputs=[voice_source, subtitle_path_state, translated_path_state, tts_language, tts_voice, tts_speed],
-            outputs=[voice_audio, voice_output, voice_preview, status],
+            outputs=[voice_audio, voice_output, voice_preview, status, voice_stage_status],
         )
 
         whisper_model_main.change(
