@@ -115,7 +115,11 @@ def recover_chunk_output(raw: str, target_segments: Sequence[Segment]) -> list[s
     )
 
 
-def build_format_repair_prompt(raw: str, target_segments: Sequence[Segment]) -> str:
+def build_format_repair_prompt(
+    raw: str,
+    target_segments: Sequence[Segment],
+    target_language_label: str,
+) -> str:
     ids = ", ".join(str(segment.index) for segment in target_segments)
     source_lines = "\n".join(f"[{segment.index}] {segment.text}" for segment in target_segments)
     previous = (raw or "").strip()
@@ -128,6 +132,7 @@ def build_format_repair_prompt(raw: str, target_segments: Sequence[Segment]) -> 
         "Return ONLY a JSON array of objects shaped exactly as "
         '[{"id": 1, "text": "translated text"}].\n'
         "Do not add Markdown, commentary, headings, code fences or extra ids.\n"
+        f"Every text value must be natural {target_language_label}.\n"
         "If the previous response omitted a usable translation for an id, translate that source line naturally now.\n\n"
         "SOURCE TARGET LINES:\n"
         f"{source_lines}\n\n"
