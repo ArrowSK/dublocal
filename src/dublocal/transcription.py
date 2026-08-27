@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
@@ -14,9 +15,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from platformdirs import user_cache_dir, user_data_dir
+from tqdm.auto import tqdm
 from yt_dlp import YoutubeDL
 
 from .media import DubLocalError
+from .progress import ProgressEstimator
 from .timeline import Segment, parse_srt
 
 
@@ -43,6 +46,8 @@ WHISPER_MODELS: dict[str, dict[str, str]] = {
         "license": "MIT",
     },
 }
+
+_PROGRESS_RE = re.compile(r"progress\s*=\s*(\d{1,3})%", re.IGNORECASE)
 
 
 class WhisperEngineMissingError(DubLocalError):
@@ -104,7 +109,7 @@ def install_whisper_model(model_id: str) -> Path:
 
     request = Request(
         metadata["url"],
-        headers={"User-Agent": "DubLocal/0.3 (+https://github.com/ArrowSK/dublocal)"},
+        headers={"User-Agent": "DubLocal/0.4 (+https://github.com/ArrowSK/dublocal)"},
     )
     try:
         with urlopen(request, timeout=60) as response, temporary.open("wb") as output:
@@ -290,6 +295,48 @@ def _detected_language(output_prefix: Path, requested_language: str) -> str:
     return requested_language
 
 
+def _run_whisper_with_progress(command: list[str]) -> None:
+    """Run whisper.cpp and expose its own real percentage through tqdm/Gradio."""
+
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=_whisper_environment(),
+        )
+    except OSError as exc:
+        raise DubLocalError(f"Could not start whisper.cpp: {exc}") from exc
+
+    estimator = ProgressEstimator()
+    captured: list[str] = []
+    last = 0
+    with tqdm(total=100, unit="%", desc="Transcribing speech", leave=False) as bar:
+        assert process.stdout is not None
+        for line in process.stdout:
+            captured.append(line)
+            match = _PROGRESS_RE.search(line)
+            if not match:
+                continue
+            current = max(0, min(100, int(match.group(1))))
+            if current > last:
+                bar.update(current - last)
+                last = current
+            bar.set_description(estimator.message(current / 100.0, "Transcribing speech"))
+        return_code = process.wait()
+        if return_code == 0 and last < 100:
+            bar.update(100 - last)
+
+    if return_code != 0:
+        detail = "".join(captured).strip()
+        raise DubLocalError(
+            "Local Whisper transcription failed: "
+            + (detail.splitlines()[-1] if detail else f"exit code {return_code}")
+        )
+
+
 def transcribe_source(
     info: dict[str, Any],
     model_id: str = "base",
@@ -307,7 +354,7 @@ def transcribe_source(
         metadata = WHISPER_MODELS[model_id]
         raise WhisperModelMissingError(
             f"Whisper {model_id} is not installed ({metadata['size']}). "
-            "Install it in Local transcription before starting."
+            "Install it in Settings → Model Manager before starting."
         )
 
     job_dir = _new_job_dir("transcription")
@@ -328,7 +375,7 @@ def transcribe_source(
         str(output_prefix),
         "-l",
         requested_language,
-        "-np",
+        "-pp",
     ]
 
     # CPU mode is slower but is the safest common denominator on Intel Macs.
@@ -336,17 +383,7 @@ def transcribe_source(
     if platform.machine().lower() in {"x86_64", "amd64"}:
         command.append("-ng")
 
-    try:
-        subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-            env=_whisper_environment(),
-        )
-    except subprocess.CalledProcessError as exc:
-        message = (exc.stderr or exc.stdout or str(exc)).strip()
-        raise DubLocalError(f"Local Whisper transcription failed: {message}") from exc
+    _run_whisper_with_progress(command)
 
     srt_path = output_prefix.with_suffix(".srt")
     if not srt_path.is_file() or srt_path.stat().st_size == 0:
