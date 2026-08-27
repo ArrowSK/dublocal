@@ -198,6 +198,10 @@ def translate_srt_contextual_with_progress(
         else max(4096, int(context_cap_tokens))
     )
     spec = contextual_model_spec(selected_model_key)
+    runtime_context_tokens = min(
+        int(spec.metadata["native_context"]),
+        selected_context_cap + 4096,
+    )
 
     path = Path(subtitle_path).expanduser().resolve()
     if not path.is_file():
@@ -250,7 +254,10 @@ def translate_srt_contextual_with_progress(
                     0.03,
                     f"Loading {spec.label}{pass_name} once for this translation",
                 )
-            runtime = ContextualRuntime(model_key=selected_model_key).__enter__()
+            runtime = ContextualRuntime(
+                model_key=selected_model_key,
+                context_tokens=runtime_context_tokens,
+            ).__enter__()
             runtime_mode = runtime.mode
 
         for chunk_number, start in enumerate(starts, start=1):
@@ -355,7 +362,7 @@ def translate_srt_contextual_with_progress(
     route = (
         f"{spec.label} {'+ review' if selected_review else 'single pass'} · "
         f"{TRANSLATION_LANGUAGES[source]['label']} → {TRANSLATION_LANGUAGES[target]['label']} · "
-        f"{plan.input_budget_tokens}-token context · {runtime_mode}"
+        f"{plan.input_budget_tokens}-token input · {runtime_mode}"
     )
     return TranslationResult(
         srt_path=output,
