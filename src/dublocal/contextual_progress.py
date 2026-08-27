@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Sequence
 
+from .adaptive_contextual import active_recommendation, contextual_model_spec, contextual_model_valid
 from .contextual_policy import build_review_prompt, build_translation_prompt, context_plan
-from .contextual_quality_model import quality_registered_model_valid
 from .contextual_recovery import (
     build_format_repair_prompt,
     build_single_line_recovery_prompt,
@@ -173,8 +174,6 @@ def _review_chunk(
         reviewed = recover_chunk_output(raw, target_segments)
         return _validated_chunk(reviewed, target_segments, target_language)
     except DubLocalError:
-        # The draft has already passed strict ID/script/runtime validation. A failed
-        # review must not destroy a usable translation or trigger context-free fallback.
         return list(draft_texts)
 
 
@@ -183,10 +182,22 @@ def translate_srt_contextual_with_progress(
     source_language: str,
     target_language: str,
     *,
-    review: bool = True,
+    review: bool | None = None,
+    model_key: str | None = None,
+    context_cap_tokens: int | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> TranslationResult:
-    """High-quality contextual translation with protected tags and one reused Qwen3 8B session."""
+    """Adaptive contextual translation using the recommended local model/profile for this Mac."""
+
+    recommendation = active_recommendation()
+    selected_model_key = model_key or recommendation.model_key
+    selected_review = recommendation.review if review is None else bool(review)
+    selected_context_cap = (
+        recommendation.context_cap_tokens
+        if context_cap_tokens is None
+        else max(4096, int(context_cap_tokens))
+    )
+    spec = contextual_model_spec(selected_model_key)
 
     path = Path(subtitle_path).expanduser().resolve()
     if not path.is_file():
@@ -202,9 +213,9 @@ def translate_srt_contextual_with_progress(
         raise DubLocalError("Choose a supported translation target language.")
     if source == target:
         raise DubLocalError("Source and target languages are the same; no translation is needed.")
-    if not _llama_command() or not quality_registered_model_valid():
+    if not _llama_command() or not contextual_model_valid(selected_model_key):
         raise ContextualTranslationMissingError(
-            "High-quality contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
+            f"{spec.label} contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
         )
 
     try:
@@ -215,6 +226,8 @@ def translate_srt_contextual_with_progress(
         raise DubLocalError("The subtitle file contains no timed text to translate.")
 
     plan = context_plan(segments)
+    if plan.input_budget_tokens > selected_context_cap:
+        plan = replace(plan, input_budget_tokens=selected_context_cap)
     starts = list(range(0, len(segments), plan.chunk_segments))
     total_chunks = max(1, len(starts))
     translated: list[TranslatedSegment] = []
@@ -232,8 +245,12 @@ def translate_srt_contextual_with_progress(
     try:
         if needs_model:
             if progress_callback:
-                progress_callback(0.03, "Loading Qwen3 8B once for this translation")
-            runtime = ContextualRuntime().__enter__()
+                pass_name = " + review" if selected_review else ""
+                progress_callback(
+                    0.03,
+                    f"Loading {spec.label}{pass_name} once for this translation",
+                )
+            runtime = ContextualRuntime(model_key=selected_model_key).__enter__()
             runtime_mode = runtime.mode
 
         for chunk_number, start in enumerate(starts, start=1):
@@ -279,7 +296,7 @@ def translate_srt_contextual_with_progress(
                         total_chunks=total_chunks,
                         progress_callback=progress_callback,
                     )
-                    if review
+                    if selected_review
                     else draft
                 )
                 translated_map = {
@@ -308,7 +325,7 @@ def translate_srt_contextual_with_progress(
                     min(0.97, chunk_number / total_chunks * 0.92 + 0.04),
                     (
                         f"Translated + reviewed chunk {chunk_number}/{total_chunks}"
-                        if review
+                        if selected_review
                         else f"Translated chunk {chunk_number}/{total_chunks}"
                     ),
                 )
@@ -336,7 +353,7 @@ def translate_srt_contextual_with_progress(
         progress_callback(1.0, "Contextual translation complete")
 
     route = (
-        f"Qwen3 8B {'+ review' if review else 'single pass'} · "
+        f"{spec.label} {'+ review' if selected_review else 'single pass'} · "
         f"{TRANSLATION_LANGUAGES[source]['label']} → {TRANSLATION_LANGUAGES[target]['label']} · "
         f"{plan.input_budget_tokens}-token context · {runtime_mode}"
     )
