@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import gradio as gr
 
@@ -21,14 +21,11 @@ MATRIX_CSS = previous.MATRIX_CSS
 _LAST_SOURCE_INFO: dict[str, Any] = {}
 _LAST_SOURCE_LANGUAGE = "auto"
 
-# app.py resolves both extracted-track languages and Whisper-detected languages through
-# this module-global. Extend it to full language names as well as ISO codes.
-app_module.normalise_language_code = normalize_language_code
-
 _ORIGINAL_SCAN = base._scan_source_ui
 _ORIGINAL_EXTRACT = base._extract_ui
 _ORIGINAL_TRANSCRIBE = base._transcribe_ui
 _ORIGINAL_TRANSLATE = base._translate_with_state
+_ORIGINAL_GENERATE_UI = base._generate_voice_ui
 _ORIGINAL_VOICE_PROGRESS = base.generate_voice_track_with_progress
 
 
@@ -38,10 +35,22 @@ def _remember_source(info: dict[str, Any] | None) -> None:
         _LAST_SOURCE_INFO = dict(info)
 
 
+def _with_language_normalizer(fn: Callable[..., Any], *args, **kwargs):
+    original = app_module.normalise_language_code
+    app_module.normalise_language_code = normalize_language_code
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        app_module.normalise_language_code = original
+
+
 def _scan_source_ui(*args, **kwargs):
+    global _LAST_SOURCE_LANGUAGE
     result = _ORIGINAL_SCAN(*args, **kwargs)
-    if len(result) >= 3 and isinstance(result[2], dict):
+    if len(result) >= 3 and isinstance(result[2], dict) and result[2]:
         _remember_source(result[2])
+        # A newly loaded source must not inherit language metadata from the prior job.
+        _LAST_SOURCE_LANGUAGE = "auto"
     return result
 
 
@@ -66,7 +75,8 @@ def _extract_ui(
 ):
     global _LAST_SOURCE_LANGUAGE
     _remember_source(info)
-    download, rows, status, path, language, card = _ORIGINAL_EXTRACT(
+    download, rows, status, path, language, card = _with_language_normalizer(
+        _ORIGINAL_EXTRACT,
         info,
         track_value,
         rights_confirmed,
@@ -74,14 +84,17 @@ def _extract_ui(
         progress,
     )
     resolved = normalize_language_code(language)
-    _LAST_SOURCE_LANGUAGE = resolved
+    if path and resolved != "auto":
+        _LAST_SOURCE_LANGUAGE = resolved
     if path:
         old_name = Path(path).name
         download, path = _friendly_subtitle_result(path, resolved, output_format)
         status = status.replace(old_name, Path(path).name)
-    # Explicit component update is more reliable than a bare string when a Dropdown
-    # is being updated by a queued event in Gradio 6.
-    language_update = gr.Dropdown(value=resolved)
+    language_update = gr.Dropdown(
+        choices=base.LANGUAGE_CHOICES,
+        value=resolved,
+        interactive=True,
+    )
     return download, rows, status, path, language_update, card
 
 
@@ -95,7 +108,8 @@ def _transcribe_ui(
 ):
     global _LAST_SOURCE_LANGUAGE
     _remember_source(info)
-    download, rows, status, path, detected, card = _ORIGINAL_TRANSCRIBE(
+    download, rows, status, path, detected, card = _with_language_normalizer(
+        _ORIGINAL_TRANSCRIBE,
         info,
         rights_confirmed,
         model_id,
@@ -106,16 +120,25 @@ def _transcribe_ui(
     resolved = normalize_language_code(detected)
     if resolved == "auto" and language != "auto":
         resolved = normalize_language_code(language)
-    _LAST_SOURCE_LANGUAGE = resolved
+    if path and resolved != "auto":
+        _LAST_SOURCE_LANGUAGE = resolved
     if path:
         old_name = Path(path).name
         download, path = _friendly_subtitle_result(path, resolved, output_format)
         status = status.replace(old_name, Path(path).name)
-        card = card.replace(
-            f"**{output_format.upper()} ready to download**",
-            f"**{output_format.upper()} ready to download** · source language **{resolved}**",
-        )
-    return download, rows, status, path, gr.Dropdown(value=resolved), card
+        if resolved != "auto":
+            card = card.replace(
+                f"**{output_format.upper()} ready to download**",
+                f"**{output_format.upper()} ready to download** · detected **{resolved}**",
+            )
+    return (
+        download,
+        rows,
+        status,
+        path,
+        gr.Dropdown(choices=base.LANGUAGE_CHOICES, value=resolved, interactive=True),
+        card,
+    )
 
 
 def _translate_with_state(
@@ -169,6 +192,15 @@ def _voice_progress_without_cues(
         speed=speed,
         progress_callback=progress_callback,
     )
+
+
+def _generate_voice_ui(*args, **kwargs):
+    original = base.generate_voice_track_with_progress
+    base.generate_voice_track_with_progress = _voice_progress_without_cues
+    try:
+        return _ORIGINAL_GENERATE_UI(*args, **kwargs)
+    finally:
+        base.generate_voice_track_with_progress = original
 
 
 def _render_m5_ui(
@@ -228,16 +260,8 @@ def _render_m5_ui(
     return str(result.output_path), card
 
 
-# Install the v0.5 behavior into the stable v0.4 layout before it is built.
-base._scan_source_ui = _scan_source_ui
-base._extract_ui = _extract_ui
-base._transcribe_ui = _transcribe_ui
-base._translate_with_state = _translate_with_state
-base.generate_voice_track_with_progress = _voice_progress_without_cues
-
-
 def build_app() -> gr.Blocks:
-    """Build the stable UI and insert M5 as a fifth progressive-disclosure stage."""
+    """Build the stable UI and insert v0.5 behavior without leaking test/global mutations."""
 
     captured: dict[str, Any] = {}
     m5: dict[str, Any] = {}
@@ -248,6 +272,11 @@ def build_app() -> gr.Blocks:
     original_dropdown = base.gr.Dropdown
     original_html = base.gr.HTML
     original_accordion = base.gr.Accordion
+    original_scan = base._scan_source_ui
+    original_extract = base._extract_ui
+    original_transcribe = base._transcribe_ui
+    original_translate = base._translate_with_state
+    original_generate_ui = base._generate_voice_ui
 
     def state_wrapper(value=None, *args, **kwargs):
         component = original_state(value, *args, **kwargs)
@@ -319,6 +348,11 @@ def build_app() -> gr.Blocks:
     base.gr.Dropdown = dropdown_wrapper
     base.gr.HTML = html_wrapper
     base.gr.Accordion = accordion_wrapper
+    base._scan_source_ui = _scan_source_ui
+    base._extract_ui = _extract_ui
+    base._transcribe_ui = _transcribe_ui
+    base._translate_with_state = _translate_with_state
+    base._generate_voice_ui = _generate_voice_ui
     try:
         demo = previous.build_app()
     finally:
@@ -328,6 +362,11 @@ def build_app() -> gr.Blocks:
         base.gr.Dropdown = original_dropdown
         base.gr.HTML = original_html
         base.gr.Accordion = original_accordion
+        base._scan_source_ui = original_scan
+        base._extract_ui = original_extract
+        base._transcribe_ui = original_transcribe
+        base._translate_with_state = original_translate
+        base._generate_voice_ui = original_generate_ui
 
     required = {"source_state", "voice_output", "rights", "voice_language"}
     if m5 and required.issubset(captured):
