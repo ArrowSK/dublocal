@@ -10,13 +10,13 @@
 </p>
 
 <p align="center">
-  <strong>Current development build: v0.5.0.dev0 · M5 Local Dubbed Media Export</strong><br>
+  <strong>Current development build: v0.5.1.dev0 · Voice Match + Export Refinement</strong><br>
   macOS 13+ · Apple Silicon and Intel · Apache-2.0
 </p>
 
 ---
 
-DubLocal turns a YouTube link or local media file into a timed subtitle timeline. You can stop with subtitles, translate them locally, generate a local voice track, or continue through M5 to a dubbed MKV/MP4 without needlessly re-encoding the video.
+DubLocal turns a YouTube link or local media file into a timed subtitle timeline. You can stop with subtitles, translate them locally, generate a local voice track, or continue through Export to a dubbed MKV/MP4 without needlessly re-encoding the video.
 
 The interface stays intentionally simple:
 
@@ -35,10 +35,11 @@ There is currently no packaged DMG/GitHub Release. Development builds are update
 | Subtitle download | ✅ | SRT default, plus VTT/TXT; translation optional |
 | Contextual translation | ✅ | Hardware-aware Qwen3 4B/8B through `llama.cpp` |
 | Fast legacy translation | ✅ | OPUS sentence-level path remains optional |
-| AI voice | ✅ | Kokoro voice-only track; bracketed caption cues stay silent |
-| Timing fit | ✅ M5 | Borrow silence, then modestly speed overflowing speech |
-| Soundtrack mix | ✅ M5 | Duck original soundtrack under translated speech |
-| Media export | ✅ M5 | Replace primary audio or add dubbed audio as another track; video stream-copy where compatible |
+| AI voice | ✅ | Kokoro voice-only track; caption cues stay silent; automatic original-vocal-range matching |
+| Timing fit | ✅ | Borrow silence, then modestly speed overflowing speech |
+| Soundtrack mix | ✅ | Strong subtitle-window suppression of original dialogue/singing under the dub |
+| Subtitle muxing | ✅ | Original + translated generated subtitles embedded as selectable tracks |
+| Media export | ✅ | Replace/add dubbed audio; YouTube quality selection; local stream-copy by default |
 
 ## The normal workflow
 
@@ -46,8 +47,8 @@ There is currently no packaged DMG/GitHub Release. Development builds are update
 2. **Get subtitles.** Use an existing track or transcribe locally. DubLocal carries the detected subtitle language forward automatically when Whisper/track metadata provides it.
 3. **Stop here if you only need subtitles.** The file is downloadable immediately. Filenames are human-readable, for example `Movie Name.en.srt` or `Track Title.es.vtt`.
 4. **Translate if wanted.** Leave **Recommended for this Mac** selected. Context is used for reference, gender, idioms, phraseology, metaphors and continuity across subtitle fragments.
-5. **Generate voice if wanted.** Kokoro speaks dialogue only. Cues such as `[MUSIC]`, `[LAUGHTER]` and `[APPLAUSE]` remain in subtitle files but are removed from the temporary TTS input.
-6. **Export dubbed media.** M5 timing-fits long lines, ducks the original primary soundtrack under speech, then remuxes the result.
+5. **Generate voice if wanted.** The normal voice choice is **Auto · match original vocal range**. DubLocal performs a lightweight local acoustic pass and can use contrasting lower/higher Kokoro voices segment-by-segment when the original alternates. Manual voice selection remains available. Cues such as `[MUSIC]`, `[LAUGHTER]` and `[APPLAUSE]` remain in subtitle files but are removed from temporary TTS input.
+6. **Export dubbed media.** DubLocal timing-fits long lines, strongly suppresses the original dialogue/singing across the source subtitle windows, mixes the translated voice, embeds generated original/translated subtitles, and remuxes the result.
 
 ## Subtitle filenames
 
@@ -91,6 +92,14 @@ DubLocal also validates IDs, timestamps, runtime leakage and wrong-script contam
 
 Automatic captions are not ground truth. If the Original column is already wrong, use local Whisper—especially **Accurate · Large v3 Turbo Q5** for songs, accents and difficult audio—before judging the translator.
 
+## Automatic voice matching
+
+The automatic voice option is deliberately lightweight. It decodes the original primary audio to a low-rate local analysis stream, estimates the dominant vocal fundamental inside each subtitle window, and maps lower/higher vocal ranges to the available Kokoro voice presets for the selected language.
+
+This does **not** identify a person or infer gender identity. It is an acoustic preset-selection heuristic intended to avoid obvious male/female-style voice mismatches. If a subtitle line contains overlapping speakers, that line still receives one TTS voice. Languages that expose only one Kokoro voice simply use that voice.
+
+The same Kokoro model/pipeline stays loaded while segment voice presets change, so automatic two-voice material does not require a second TTS model in memory.
+
 ## Caption cues are subtitles, not speech
 
 Closed-caption cues remain visible in SRT/VTT because they are useful to viewers:
@@ -103,37 +112,51 @@ Closed-caption cues remain visible in SRT/VTT because they are useful to viewers
 
 They are not sent to the translator as dialogue and are not spoken by Kokoro. Inline cues are also stripped only from the temporary TTS input, so `[LAUGHS] Hello` becomes spoken `Hello` while the subtitle remains unchanged.
 
-## M5: dubbed-media export
+## Dubbed-media export
 
-M5 deliberately separates audio processing from video encoding.
+Export deliberately separates audio processing from video encoding.
+
+### Stronger dialogue suppression
+
+Professional dubbing normally works from a dialogue-free Music & Effects stem. Consumer YouTube/local files normally contain a married mix, so DubLocal cannot remove only the original human voice without source separation.
+
+v0.5.1 therefore uses the source subtitle timeline as the suppression guide. Original audio stays strongly ducked across each complete source dialogue/singing window—even when the translated TTS line is shorter—rather than jumping back to full volume as soon as generated speech stops. Closely spaced windows are merged to reduce pumping.
+
+This remains **ducking + overlay**, not true dialogue/music/effects separation. A future optional separation backend can improve this further without changing the export architecture.
 
 ### Replace primary audio — default
 
-DubLocal creates a new mixed soundtrack. The original primary soundtrack is ducked while generated speech is present, then mixed with the voice track. Additional original audio tracks are preserved where possible. The DubLocal mix becomes the default audio track.
-
-This is **ducking + overlay**, not true dialogue/background source separation. Original dialogue may remain quietly audible under the dub. Source separation is a future feature.
+DubLocal creates a new mixed soundtrack. The DubLocal mix becomes the default audio track. Additional original audio tracks are preserved where possible.
 
 ### Add dubbed audio as second track
 
 All original audio tracks remain untouched and a DubLocal mixed track is appended as another selectable audio stream. It receives language/title metadata and is not forced to default.
 
-### Video is normally copied, not re-encoded
+### Original + translated subtitles are packaged, not burned
 
-M5 uses FFmpeg stream-copy for video (`-c:v copy`) whenever the requested container can carry the original video stream. This is fast and avoids generation loss.
+When generated source and translated SRTs are available, both are embedded as selectable subtitle streams. VLC and similar players can turn them on/off independently. No subtitle is burned into the image.
 
-**MKV is recommended** because it preserves mixed codec/track combinations most reliably. MP4 is available when compatible. If MP4 cannot accept the source streams by remuxing, DubLocal tells you to use MKV rather than silently spending hours re-encoding video.
+MKV can also preserve existing source subtitle streams. MP4 packages the generated SRT tracks as `mov_text`; this changes the subtitle stream format only, not the video.
+
+### Video quality
+
+**Original / best available** is the default.
+
+For YouTube, selecting 2160p / 1440p / 1080p / 720p / 480p chooses the best available source at or below that height before download. The selected video is then stream-copied during remux.
+
+For local files, **Original** keeps the video bit-for-bit with `-c:v copy`. Selecting a lower resolution is an explicit request to re-encode that local video with Apple's H.264 VideoToolbox encoder. DubLocal does not upscale a lower-resolution local source merely because a higher option was selected.
+
+**MKV is recommended** because it preserves mixed codec/track combinations most reliably. MP4 is available when compatible.
 
 ### Timing fitting
 
-M5 never truncates spoken words. For a voice segment that runs past its subtitle window it:
+DubLocal never truncates spoken words. For a voice segment that runs past its subtitle window it:
 
 1. borrows real silence before the next spoken segment when available;
 2. if still needed, applies modest tempo increase up to 1.25×;
 3. reports any line that still cannot fit safely.
 
-This is the first timing engine; semantic shortening/rephrasing can be added later without changing the media-export architecture.
-
-### M5 filenames
+### Filenames
 
 Dubbed media uses predictable names such as:
 
@@ -156,7 +179,7 @@ DubLocal reuses system executables and shared Hugging Face model assets when saf
 
 ## Temporary files
 
-Temporary YouTube media, transcription WAVs, working subtitles, llama-server logs, TTS segments, fitted voice audio, dubbed mixes and remux outputs live under:
+Temporary YouTube media, voice-analysis audio, transcription WAVs, working subtitles, llama-server logs, TTS segments, fitted voice audio, dubbed mixes and remux outputs live under:
 
 ```text
 ~/Library/Caches/DubLocal/jobs/
@@ -197,8 +220,8 @@ M1   Source + existing captions                           ✅
 M2   Local transcription / Whisper                        ✅
 M3   Local subtitle translation                          ✅
 M4   Kokoro local voice generation                       ✅
-M5   Timing + soundtrack mix + stream-copy export         ✅ current
-M6   Rich media preview / advanced timing                 planned
+M5   Timing + soundtrack mix + track-aware export         ✅ current
+M6   Rich media preview / optional source separation      planned
 M7   Signed/notarized Mac packaging                       planned
 ```
 
