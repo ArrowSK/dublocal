@@ -65,6 +65,25 @@
       "role": "Optional higher-accuracy local transcription for songs, accents and noisy audio"
     },
     {
+      "id": "qwen3-8b-q4-k-m-contextual-quality",
+      "backend": "llama.cpp",
+      "upstream": "Qwen/Qwen3-8B-GGUF",
+      "revision": "6a569868d07d3bd59e8b97fb001bf8c0b254bb20",
+      "file": "Qwen3-8B-Q4_K_M.gguf",
+      "license": "Apache-2.0",
+      "commercial_use": true,
+      "redistribution": true,
+      "bundled": false,
+      "download_on_demand": true,
+      "storage_policy": "shared_huggingface_cache_with_dublocal_registration",
+      "remove_policy": "remove_dublocal_registration_keep_shared_snapshot",
+      "weight_size": "5.03 GB",
+      "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+      "role": "Default high-quality context-aware subtitle translation and senior review pass",
+      "context_policy": "native 32768 tokens; DubLocal input budget scales with programme duration and is capped at 24576",
+      "quality_policy": "strict subtitle IDs, protected caption tags, target-script validation, conservative ASR handling and optional second review pass"
+    },
+    {
       "id": "qwen3-4b-q4-k-m-contextual-translation",
       "backend": "llama.cpp",
       "upstream": "Qwen/Qwen3-4B-GGUF",
@@ -74,13 +93,12 @@
       "commercial_use": true,
       "redistribution": true,
       "bundled": false,
-      "download_on_demand": true,
-      "storage_policy": "shared_huggingface_cache_with_dublocal_registration",
-      "remove_policy": "remove_dublocal_registration_keep_shared_snapshot",
+      "download_on_demand": false,
+      "storage_policy": "historical_shared_huggingface_cache_may_remain_after_upgrade",
+      "remove_policy": "v0.4.2 no longer manages or selects this model",
       "weight_size": "2.5 GB",
       "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
-      "role": "Default context-aware multilingual subtitle translation",
-      "context_policy": "native 32768 tokens; DubLocal input budget scales with programme duration and is capped at 24576"
+      "role": "Superseded v0.4.1 development translation model; retained in registry for provenance only"
     },
     {
       "id": "opus-mt-mul-en-safetensors",
