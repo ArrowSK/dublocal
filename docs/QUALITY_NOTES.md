@@ -1,135 +1,121 @@
 # DubLocal quality notes
 
-This document records the quality policy behind `v0.5.2.dev0`. “AI quality” is not one problem: source recognition, timing, context, translation fluency, TTS pronunciation, timing fit and final media handling can fail independently.
+This document records the quality policy behind `v0.5.3.dev0`. DubLocal treats recognition, translation, TTS, timing and mixing as separate quality layers; a later stage must not silently invent a fix for an unknown introduced earlier.
 
-## Quality hierarchy
-
-DubLocal treats the pipeline in this order:
+## Pipeline quality order
 
 ```text
-audio/source media
-  → speech/non-speech detection
-  → source subtitle accuracy
-  → stable timing/IDs
-  → hardware-appropriate contextual translation
-  → optional context-aware review
-  → structural/output validation
+source media
+  → source/ASR subtitle accuracy
+  → stable timing + IDs
+  → contextual translation
+  → output validation
   → speech-only TTS preparation
-  → voice generation / vocal-range preset matching
+  → voice/range selection
   → per-line timing fit
-  → soundtrack mix
-  → track-aware stream-copy/remux export
+  → soundtrack balance
+  → track-aware remux
 ```
 
-A later stage must not pretend it can reliably repair an unknown introduced earlier. Translation context is not permission to invent what an automatic captioner probably misheard; audio mixing is not permission to claim dialogue separation that was never performed.
+## Recognition: conservative first, targeted recovery second
 
-## Source subtitle quality and hallucination control
+YouTube automatic captions are not ground truth. For difficult audio the preferred source is local Whisper, especially Accurate Large-v3-Turbo-Q5 for songs/accents/noise.
 
-Creator/embedded text subtitles are preserved as supplied.
+Whisper can both hallucinate and omit words. v0.5.3 explicitly refuses the simplistic solution of globally lowering confidence/no-speech guards.
 
-YouTube automatic captions are explicitly marked as automatic. When wording is clearly damaged, the recommended path is local Whisper transcription—especially Accurate Large-v3-Turbo-Q5 for songs, accents or noisy material—rather than asking the translator to hallucinate the missing original wording.
+The policy is:
 
-Whisper itself can hallucinate on silence, instrumental music or ambiguous non-speech. v0.5.2 therefore feature-detects whisper.cpp VAD support and, when available, uses the official Silero VAD v6.2.0 auxiliary speech detector. That reduces the amount of non-speech audio passed to Whisper. The auxiliary model is tiny, local, pinned/checksum-verified and not another transcription model.
+1. prevent self-reinforcing long-form loops (including no rolling context on the Accurate music path);
+2. detect pathological near-duplicate storms;
+3. independently re-decode suspicious ranges;
+4. suppress a severe range if it still looks invented;
+5. only then inspect a small number of sparse/gap regions for potentially missed speech;
+6. accept missing-word recovery only if **two isolated no-context passes agree closely**;
+7. reject neighbour echoes and weak/unrelated additions.
 
-Long-form transcription also caps carried text context at 64 tokens and uses a slightly stricter no-speech threshold. This reduces the risk that one mistaken phrase becomes self-reinforcing and repeats through later non-speech regions.
+An uncertain gap is preferable to fabricated dialogue.
 
-VAD does not make singing transcription infallible. It decides where speech/vocals are likely present; the selected Whisper model still decides what was said or sung.
+Low-memory Apple Silicon is capped at 3 extra regions / 24 seconds per transcription. No additional ASR model is loaded.
 
-Whisper Auto detect is propagated into translation only when DubLocal can normalize a concrete returned language. If no usable language is supplied, the app asks for an explicit source language rather than guessing.
+## Hardware-aware translation
 
-## Hardware-aware translation policy
-
-DubLocal does not recommend the same contextual model to every Mac.
-
-Current policy:
-
-| Mac class | Recommended model | Review | Effective input-context cap |
+| Mac class | Model | Review | Input cap |
 | --- | --- | --- | ---: |
-| Apple Silicon below 12 GB | Qwen3 4B Q4_K_M | off | 8,192 |
+| Apple Silicon <12 GB | Qwen3 4B Q4_K_M | off | 8,192 |
 | Apple Silicon 12–23 GB | Qwen3 8B Q4_K_M | off | 16,384 |
 | Apple Silicon 24 GB+ | Qwen3 8B Q4_K_M | on | 24,576 |
-| Intel below 24 GB | Qwen3 4B Q4_K_M | off | 6,144 |
+| Intel <24 GB | Qwen3 4B Q4_K_M | off | 6,144 |
 | Intel 24 GB+ | Qwen3 8B Q4_K_M | off | 12,288 |
 
-These are cautious defaults, not hard compatibility claims. The actual llama.cpp runtime context allocation scales with the profile as well as the prompt budget so low-memory Macs are not forced to reserve a large KV cache unnecessarily.
+The actual llama.cpp context allocation scales too. These are conservative defaults intended to keep an 8 GB M1 usable.
 
-## Context and translation semantics
+## Contextual translation semantics
 
-Context grows with programme duration up to the hardware profile's ceiling. It combines programme-wide samples, nearby source dialogue and recent accepted translations.
+Context combines programme-wide samples, nearby dialogue and recent accepted translations. The prompt/review explicitly handles:
 
-Short media uses larger target chunks so a song or short clip can normally be understood as one coherent local section rather than many disconnected calls.
+- speaker/addressee/reference continuity;
+- grammatical gender only when supported by context;
+- recurring names/terminology;
+- idioms and phraseology by meaning/register;
+- metaphor/image fidelity without invented imagery;
+- slang, profanity and recurring refrains.
 
-The contextual model is explicitly asked to use discourse context for grammatical gender where established, speaker/addressee/pronoun/reference continuity, recurring names/entities, idioms and phraseological expressions by meaning/register, metaphor fidelity, slang/profanity and recurring refrains.
-
-When the source is ambiguous, the prompt tells the model not to fabricate unsupported gender or reference merely to make the target language more specific.
-
-On hardware profiles that enable it, the second review pass checks the same categories again against source + context + first-pass draft.
+`From = Auto` may use the same local Qwen runtime to identify the dominant subtitle language before contextual translation.
 
 ## Protected subtitle cues
 
-Closed-caption cues are useful subtitle information but are not dialogue.
+Standalone cues such as `[MUSIC]`, `[APPLAUSE]` and `[LAUGHTER]` remain unchanged in subtitle output and bypass dialogue translation.
 
-Standalone tags such as `[MUSIC]`, `[APPLAUSE]` and `[LAUGHTER]` bypass translation and remain unchanged in SRT/VTT output.
-
-For TTS, `voice_text.py` creates a temporary speech-only timeline. Bracketed cues are removed only from that temporary input. The user's subtitle file is never rewritten merely to make Kokoro silent on cues.
+TTS uses a temporary speech-only timeline:
 
 ```text
-[MUSIC]            stays in subtitles; not spoken
-[LAUGHS] Hello     stays in subtitles; Kokoro speaks “Hello”
+[MUSIC]            subtitle kept; no speech
+[LAUGHS] Hello     subtitle kept; speaks “Hello”
 ```
 
-## Translation validation policy
+## Translation validation
 
-Automated validation is intentionally conservative. It can prove alignment and reject obvious contamination; it cannot prove that a translation is elegant.
+Before writing the translated SRT, DubLocal verifies alignment/IDs/timestamps, rejects llama.cpp runtime/prompt leakage, rejects unexpected writing-system contamination and preserves protected tags. Validation can reject obvious corruption; it cannot prove literary quality.
 
-Before writing translated SRT, DubLocal verifies subtitle IDs/order/timestamps remain aligned, no llama.cpp runtime/log/prompt content leaked into text, unexpected non-target script contamination is rejected, substantial wrong-script leakage is rejected and protected tags remain untouched.
+## Voice matching boundary
 
-If contextual recovery cannot produce validated output, DubLocal stops instead of creating a plausible-looking corrupt file.
+Automatic voice matching is a lightweight acoustic lower/higher-range preset heuristic. It is not speaker identity, diarization or gender-identity inference. One Kokoro pipeline/model stays loaded; voice presets change per segment.
 
-## TTS and voice-matching quality boundary
+## v0.5.3 timing quality
 
-Kokoro voice generation is separate from translation support. A language can have good subtitles even when the official Kokoro frontend does not support it. DubLocal does not silently choose a mismatched pronunciation frontend merely to produce audio.
+Each generated segment targets its subtitle window. The engine:
 
-Automatic voice matching is intentionally an acoustic lower/higher-range preset heuristic, not speaker recognition or gender-identity inference. It uses the existing source audio and one Kokoro pipeline; it does not add a diarization or second TTS model.
+1. preserves original SRT start/end timestamps;
+2. applies a small onset cushion;
+3. measures the generated WAV;
+4. derives the required tempo;
+5. chains legal FFmpeg `atempo` stages to cover an effective 0.30×–2.50× range;
+6. measures the fitted output;
+7. applies a small second correction when rounding leaves the spoken end >~25 ms from target;
+8. reports pathological stretches rather than forcing them.
 
-## v0.5.2 timing quality
+The goal is synchronized end timing, not unlimited time-stretching.
 
-The current timing engine targets the subtitle window rather than only correcting overflows.
+## v0.5.3 soundtrack balance
 
-For each generated segment it:
+Professional dubbing normally uses a dialogue-free M&E stem. Consumer media usually does not provide one.
 
-1. keeps the original subtitle start/end timestamps unchanged;
-2. adds a small 35–100 ms onset cushion so synthetic speech does not consistently sound early;
-3. treats the rest of the subtitle window as the target spoken duration;
-4. derives the required FFmpeg `atempo` factor from actual generated WAV duration;
-5. slows short lines or accelerates long lines;
-6. constrains tempo to 0.5×–2.0×;
-7. reports residual mismatch instead of forcing extreme, obviously degraded time stretching.
+DubLocal therefore uses transparent terminology: **attenuation/ducking + overlay**, not source separation.
 
-The practical target for normal lines is therefore to finish at approximately the same subtitle end time as the source. Extreme translation-length differences remain a semantic problem best solved later by rephrasing/shortening rather than unlimited audio distortion.
+v0.5.3 keeps the source programme at a stable reduced bed level throughout a dubbed mix, attenuates it more deeply during source subtitle dialogue/singing windows, and applies gentle compression/limiting to prevent large perceived loudness jumps between dubbed and non-dubbed sections.
 
-## Audio quality boundary
+This is intentionally lightweight enough for M1-class hardware and does not add a separation model.
 
-The default dubbed soundtrack uses subtitle-window-guided suppression of the source's primary audio plus an overlay of the generated voice.
+## Subtitle/video integrity
 
-This preserves underlying ambience/music/effects better than replacing the whole soundtrack with dry TTS, but it is **not source separation**. Original dialogue may remain faintly audible because ordinary consumer media usually contains a married mix rather than a dialogue-free Music & Effects stem.
+Normal dubbed export can embed generated source + translated subtitles as selectable tracks. **Package original + subtitles · no dub** embeds only the current source/transcribed subtitle and leaves original audio untouched.
 
-DubLocal therefore avoids claims such as perfect “dialogue replacement” unless true dialogue/background separation is implemented later.
+Subtitles are not burned by default.
 
-## Video and subtitle integrity policy
-
-Audio, subtitle and video processing remain independent.
-
-Where the requested output keeps original/local quality, DubLocal uses FFmpeg stream-copy (`-c:v copy`) whenever compatible. Selecting a lower local resolution is an explicit opt-in to VideoToolbox re-encoding; YouTube quality options select a source resolution before final remux.
-
-Generated original and translated subtitles are packaged as selectable streams when available and are not burned into the picture by default.
-
-The new dubbed soundtrack must be audio-encoded because it is newly mixed. That does not justify re-encoding the video.
+For local Original quality, video uses stream-copy. Explicit local downscaling is the only normal path that invokes VideoToolbox encoding. Audio mixing never justifies an unnecessary video transcode.
 
 ## Human quality boundary
 
-Neither Qwen3 4B/8B nor the current Kokoro/export pipeline is represented as equivalent to professional human translation, voice acting or studio dubbing.
+DubLocal is not presented as equivalent to professional human translation, voice acting, lyric adaptation or studio dubbing. Side-by-side source/translation review remains important for nuance, humour, cultural adaptation, ambiguous lyrics and final mix aesthetics.
 
-The side-by-side Original/Translation preview remains important because semantic nuance, humour, lyric interpretation, cultural adaptation, casting and final mix aesthetics are not fully machine-verifiable.
-
-Quality regressions should be reported with the smallest lawful sample that reproduces the problem and enough neighboring context to establish the intended meaning.
+Quality regressions should be reported with the smallest lawful sample and enough neighbouring context to establish the intended result.
