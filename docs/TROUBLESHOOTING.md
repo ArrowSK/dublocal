@@ -27,7 +27,7 @@ Update DubLocal and restart. Generated outputs must live under DubLocal's own jo
 
 ## Where do temporary media and generated files go?
 
-DubLocal puts transcription WAVs, temporary YouTube audio, generated SRTs, per-job TTS files and other intermediate job artifacts in the macOS cache, not in the repository or your Documents folder:
+DubLocal puts transcription WAVs, temporary YouTube audio, generated SRTs, subtitle-format exports, per-job TTS files and other intermediate job artifacts in the macOS cache, not in the repository or your Documents folder:
 
 ```text
 ~/Library/Caches/DubLocal/jobs/
@@ -59,6 +59,20 @@ DubLocal rejects a model whose checksum does not match the registered upstream h
 
 Tiny prioritizes speed, Base is the normal starting point, and Small trades more time/storage for accuracy. Apple Silicon normally benefits from whisper.cpp's Metal path; Intel uses CPU.
 
+## Song lyrics or noisy speech are transcribed incorrectly
+
+Lyrics are materially harder than ordinary spoken dialogue. Repeated instrumentation, stylized pronunciation, backing vocals and compressed mixes can make Whisper Base produce plausible-looking but wrong words.
+
+Before judging translation quality, inspect the source transcript. If it contains obvious errors, try **Whisper Small** and set the spoken language explicitly when known.
+
+Contextual translation can resolve ambiguity, but it should not confidently invent lyrics that are absent from the source transcript.
+
+## I only need subtitles, not translation
+
+That is a complete workflow. After extraction/transcription, use the **Subtitle download** directly in **2 · Subtitles**.
+
+SRT is the default. WebVTT, TXT and CSV are also available from the **Download format** selector. Changing formats reuses the existing timeline; Whisper does not run again.
+
 # Contextual translation — recommended
 
 ## “Contextual translation is not prepared”
@@ -67,7 +81,7 @@ Open:
 
 **Settings → Model Manager → Contextual translation · Qwen3 4B → Prepare / verify contextual translation**
 
-DubLocal will reuse an existing `llama.cpp` command if possible. Otherwise it can install `llama.cpp` through Homebrew, then download/register the pinned ~2.5 GB Qwen3 model in the shared Hugging Face cache.
+DubLocal will reuse an existing `llama.cpp` installation if possible. Otherwise it can install `llama.cpp` through Homebrew, then download/register the pinned ~2.5 GB Qwen3 model in the shared Hugging Face cache.
 
 ## Model download is large
 
@@ -83,15 +97,15 @@ Do not bypass this check. A repeatable mismatch means the registry/upstream stat
 
 ## `llama.cpp` missing after preparation
 
-Check **Settings → Local Resources**. The panel should show `llama-cli` or `llama ... cli`.
+Check **Settings → Local Resources**. Contextual translation uses `llama-server`; the panel should show that executable. `llama-cli` is also reported because it is part of the same local installation.
 
-If Homebrew reports success but the app still does not see the executable, restart DubLocal and rescan resources. If it remains missing, include the exact Model Manager error when reporting the problem.
+If Homebrew reports success but the app still does not see `llama-server`, restart DubLocal and rescan resources. If it remains missing, include the exact Model Manager error when reporting the problem.
 
 ## Contextual translation is slower than OPUS
 
-Expected. Qwen3 is doing generative translation with context instead of a small sentence-level Marian pass.
+Expected, within reason. Qwen3 is doing generative translation with context instead of a small sentence-level Marian pass.
 
-The quality mode is optimized for dialogue coherence rather than minimum latency. OPUS remains available when speed is the priority.
+DubLocal loads the model once per translation job into a local `llama-server` and reuses that process for every chunk/recovery request. Short material is packed into fewer chunks when safe. This removes the previous repeated-model-load overhead, but a 4B generative model will still be slower than OPUS.
 
 ## Why does a long movie use more memory/context?
 
@@ -107,17 +121,27 @@ The status box shows the active budget before translation starts.
 
 ## Translation output is missing/duplicated/misaligned
 
-Contextual translation uses constrained JSON with subtitle IDs. DubLocal validates that every target ID appears exactly once.
+Contextual translation uses a strict DubLocal marker + subtitle-ID line protocol. The model response must contain every expected subtitle ID exactly once before an SRT is written.
 
-The quality path now tolerates harmless local-model wrappers such as Markdown fences or a `translations` container object. If a chunk still arrives malformed, DubLocal automatically asks the local model once to repair only the structured output, then validates the subtitle IDs again. It does not silently weaken alignment checks.
+If an otherwise clean response omits one or more IDs, DubLocal preserves the valid lines and retries only the missing subtitle(s), still with the full original contextual prompt. It does not silently shift timestamps or substitute another translation engine.
 
-If the second structured-output attempt still fails, the job stops rather than writing a shifted subtitle file. Report the exact visible error.
+If the missing IDs still cannot be recovered, the job stops rather than writing a corrupted subtitle file.
+
+## `Loading model...`, prompt text or terminal garbage appears inside a translation
+
+That is invalid output and should not occur after the current v0.4.1.dev0 reliability update.
+
+Contextual translation now talks to a local `llama-server` HTTP API and reads only the assistant-response field. Server startup logs are discarded separately. The response is then accepted only if it matches the DubLocal marker/ID protocol.
+
+If runtime banners or prompt echoes appear in a newly generated translation after updating and restarting, report that exact output as a bug; do not use the resulting SRT.
 
 ## Translation is still awkward
 
-Context greatly improves the information available to the model, but local machine translation is not guaranteed to equal a professional human translator.
+First compare the translation against the **Original** column. If the original source text is already wrong, improve transcription first.
 
-Review the side-by-side preview before generating speech or publishing subtitles. If a consistent failure occurs, save a small lawful example of the source/translation and report it; it can be used to improve prompting/context planning.
+If the original is correct but Qwen still produces an inaccurate or unnatural translation, that is a translation-model/prompt quality issue. Context substantially improves the information available to the model, but a 4B local model is not guaranteed to equal a professional human translator.
+
+Review the side-by-side preview before generating speech or publishing subtitles. A small lawful source/translation example is particularly useful for improving prompting and context planning.
 
 # Fast legacy OPUS
 

@@ -23,17 +23,28 @@ M3.1 changes the default translation path rather than trying to hide that limita
   - nearby source dialogue before and after the lines being translated;
   - recent translated lines carried forward as terminology/style memory.
 - A context budget that automatically grows with programme duration, from 4,096 tokens for short material up to a 24,576-token input ceiling within the model's native 32k context.
-- Chunked subtitle translation with constrained JSON output so subtitle IDs, segment count and timestamps stay aligned.
 - Explicit instructions to preserve speaker intent, recurring names, slang, jokes, profanity/register and non-dialogue cues.
-- `llama.cpp` reporting under **Settings → Local Resources**.
+- Persistent Source, Subtitles, Translation and Voice stage statuses on Main.
+- Immediate subtitle downloads directly from **2 · Subtitles**. SRT is the default; WebVTT, TXT and CSV are also available. Changing the format reuses the completed timeline and does not rerun Whisper.
+- Separate `llama-cli` and `llama-server` reporting under **Settings → Local Resources**.
+
+### Reliability and performance changes
+
+- Contextual translation now starts one local `llama-server` per translation job, loads Qwen once, reuses it for all chunks/recovery requests, then shuts it down. This avoids repeatedly loading the ~2.5 GB model.
+- Short material is packed into fewer translation chunks when it safely fits the context/output budget; a short song or clip may therefore be translated in one main model call.
+- The fragile CLI/JSON-schema recovery path was replaced by a strict marker + subtitle-ID line protocol over llama.cpp's local OpenAI-compatible HTTP API.
+- `llama.cpp` startup banners, terminal control characters, prompt echoes and shutdown text are no longer eligible subtitle content. DubLocal accepts only the model response payload and then validates the DubLocal protocol.
+- If the model omits an ID, DubLocal preserves clean translations and retries only the missing subtitle with the full original contextual prompt before final alignment validation.
+- Song/lyrics prompts now explicitly preserve lyrical continuity, refrains and register while avoiding confident invention when the source transcription itself is uncertain.
 
 ### Kept deliberately
 
 - **Fast legacy · OPUS** remains available as an explicit low-storage/fast choice.
 - Existing OPUS downloads are not removed during upgrade.
 - There is no silent cloud fallback and no silent downgrade from Contextual quality to OPUS.
+- Contextual translation remains reviewable output: a 4B local model can still make semantic or stylistic mistakes, and translation quality cannot exceed a badly mis-transcribed source timeline.
 
-M3.1 is not declared quality-validated until a real long-form translation is tested on the target Mac. Issue #9 tracks that validation.
+M3.1 is not declared quality-validated until real long-form translation is tested on the target Mac. Issue #9 tracks that validation.
 
 ## v0.4.0.dev0 — M4 Local Voice
 

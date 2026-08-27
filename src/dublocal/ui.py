@@ -36,6 +36,7 @@ from .progress_operations import (
     install_whisper_model_with_progress,
 )
 from .stage_status import subtitles_ready_status, translation_ready_status, voice_ready_status
+from .subtitle_export import SUBTITLE_EXPORT_CHOICES, export_subtitle_timeline
 from .transcription import model_manager_status
 from .translation import translated_segments_to_rows, translation_manager_status
 from .tts import (
@@ -216,6 +217,16 @@ def _translation_status_for_ui(
         return _error_status(str(exc))
 
 
+def _export_subtitle_for_ui(subtitle_path: str | None, output_format: str) -> str | None:
+    if not subtitle_path:
+        return None
+    try:
+        return str(export_subtitle_timeline(subtitle_path, output_format))
+    except Exception as exc:
+        _error_status(str(exc))
+        return None
+
+
 def _scan_source_ui(
     source_type: str,
     youtube_url: str,
@@ -233,14 +244,16 @@ def _extract_ui(
     info: dict,
     track_value: str | None,
     rights_confirmed: bool,
+    output_format: str,
     progress: gr.Progress = gr.Progress(track_tqdm=True),
 ):
     update = _progress_callback(progress)
     update(0.08, "Extracting subtitle track")
-    output, rows, status, path, language = extract_selected(info, track_value, rights_confirmed)
+    _output, rows, status, path, language = extract_selected(info, track_value, rights_confirmed)
     update(1.0, "Subtitle timeline ready")
     card = subtitles_ready_status(path, rows, language, method="Subtitles ready")
-    return output, rows, status, path, language, card
+    download = _export_subtitle_for_ui(path, output_format)
+    return download, rows, status, path, language, card
 
 
 def _transcribe_ui(
@@ -248,16 +261,18 @@ def _transcribe_ui(
     rights_confirmed: bool,
     model_id: str,
     language: str,
+    output_format: str,
     progress: gr.Progress = gr.Progress(track_tqdm=True),
 ):
     update = _progress_callback(progress)
     update(0.04, "Preparing local transcription")
-    output, rows, status, path, detected = transcribe_selected(
+    _output, rows, status, path, detected = transcribe_selected(
         info, rights_confirmed, model_id, language
     )
     update(1.0, "Transcription complete")
     card = subtitles_ready_status(path, rows, detected, method="Transcribed")
-    return output, rows, status, path, detected, card
+    download = _export_subtitle_for_ui(path, output_format)
+    return download, rows, status, path, detected, card
 
 
 def _install_whisper_settings(
@@ -585,6 +600,11 @@ def build_app() -> gr.Blocks:
                         label="I have the right or legal authority to process this media",
                         value=False,
                     )
+                    subtitle_format = gr.Dropdown(
+                        label="Download format",
+                        choices=SUBTITLE_EXPORT_CHOICES,
+                        value="srt",
+                    )
                     extract_button = gr.Button("Use existing subtitles", variant="primary")
                     with gr.Accordion("No usable captions? Transcribe locally with Whisper", open=False):
                         with gr.Row():
@@ -602,6 +622,7 @@ def build_app() -> gr.Blocks:
                         "**Waiting** · choose existing captions or transcribe locally.",
                         elem_classes=["dl-stage-status"],
                     )
+                    subtitle_output = gr.File(label="Subtitle download", interactive=False)
 
                 with gr.Accordion("3 · Translate", open=False):
                     translation_mode = gr.Dropdown(
@@ -684,7 +705,6 @@ def build_app() -> gr.Blocks:
                         "```text\n[ready] choose a source and load it\n```",
                         elem_classes=["console"],
                     )
-                    subtitle_output = gr.File(label="Source subtitle output", interactive=False)
                     subtitle_preview = gr.Dataframe(
                         headers=["Start", "End", "Text"],
                         datatype=["str", "str", "str"],
@@ -823,7 +843,7 @@ def build_app() -> gr.Blocks:
         )
         extract_begin.then(
             fn=_extract_ui,
-            inputs=[source_state, subtitle_track, rights],
+            inputs=[source_state, subtitle_track, rights, subtitle_format],
             outputs=[
                 subtitle_output,
                 subtitle_preview,
@@ -841,7 +861,7 @@ def build_app() -> gr.Blocks:
         )
         transcribe_begin.then(
             fn=_transcribe_ui,
-            inputs=[source_state, rights, whisper_model_main, source_language],
+            inputs=[source_state, rights, whisper_model_main, source_language, subtitle_format],
             outputs=[
                 subtitle_output,
                 subtitle_preview,
@@ -850,6 +870,12 @@ def build_app() -> gr.Blocks:
                 translation_source_language,
                 subtitle_stage_status,
             ],
+        )
+        subtitle_format.change(
+            fn=_export_subtitle_for_ui,
+            inputs=[subtitle_path_state, subtitle_format],
+            outputs=[subtitle_output],
+            queue=False,
         )
 
         for component in (translation_mode, translation_source_language, translation_target_language):
