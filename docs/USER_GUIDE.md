@@ -63,13 +63,31 @@ This is important: translation receives the words present in the subtitle timeli
 
 For obviously damaged source text, prefer local Accurate Whisper transcription before judging translation quality.
 
-### 3. Translate — Best quality is the default
+### 3. Translate — Recommended for this Mac
 
-Choose **From** and **To** languages. The normal quality mode is:
+Choose **From** and **To** languages. The normal contextual option is intentionally simple:
 
-**Best quality · Qwen3 8B + review · recommended**
+**Recommended for this Mac · Lightweight / Balanced / Best quality**
 
-This is deliberately heavier than the previous Qwen3 4B development backend because real-language testing showed that the 4B model could still produce literal grammar, poor word choices and mixed-language output.
+DubLocal detects architecture and physical memory locally and chooses the most sensible contextual profile for the machine instead of assuming every Mac should run the same model.
+
+Current v0.4.2 recommendations:
+
+- **8 GB Apple Silicon** → Qwen3 4B, single pass, 8k input-context cap.
+- **16 GB Apple Silicon** → Qwen3 8B, single pass, 16k input-context cap.
+- **24 GB+ Apple Silicon** → Qwen3 8B with the senior review pass, up to 24k input context.
+- **Intel below 24 GB** → Qwen3 4B with a smaller context allocation.
+- **Intel 24 GB+** → Qwen3 8B single pass with a reduced context cap.
+
+These are conservative defaults, not statements that another profile is technically impossible.
+
+The Main screen does not show a model spreadsheet. If you want the reasoning, open **Translation engine details** or **Settings → Model Manager → Contextual translation**. There DubLocal shows the detected Mac, recommended model, current input-context budget, actual llama.cpp context allocation and whether review is enabled.
+
+#### Why this matters on an M1
+
+A 5.03 GB 8B model can be a poor default on an 8 GB M1 once macOS, the model and llama.cpp KV cache all compete for unified memory.
+
+DubLocal therefore uses the 2.5 GB Qwen3 4B profile on an 8 GB Apple Silicon Mac and also reduces the **actual llama.cpp context allocation**. It does not reserve a 32k KV cache and merely send a shorter prompt. That is the practical difference between a UI label and a real hardware-aware implementation.
 
 #### What “contextual” means
 
@@ -79,15 +97,15 @@ DubLocal does not translate subtitle rows as unrelated sentences. It supplies th
 - sampled source context from across the programme;
 - recent approved translations as terminology/style memory.
 
-The usable context budget grows automatically with programme duration, from roughly **4,096 input tokens** for short material up to **24,576 input tokens** within the model's native 32k context.
+The usable context budget grows with programme duration until it reaches the cap for the current hardware profile.
 
 Short media uses larger chunks. A short song can normally fit into one contextual translation chunk rather than several tiny independent requests.
 
-#### Best quality uses a review pass
+#### Review pass
 
-After the first contextual translation, the same loaded Qwen3 8B model performs a second senior-review pass against the original source lines and context.
+On the Best quality profile, the same loaded Qwen3 8B model performs a second senior-review pass against the original source lines and context.
 
-The review is explicitly asked to correct:
+The review is asked to correct:
 
 - mistranslations;
 - literal English-style syntax;
@@ -100,32 +118,34 @@ The review is explicitly asked to correct:
 
 The review is not allowed to invent missing ASR words or rewrite the material into something more literary.
 
+Because the same model remains loaded, the review mainly adds processing time rather than another model-sized memory allocation. On 8 GB and 16 GB profiles it is not enabled by default.
+
 If the review output itself is structurally broken, DubLocal keeps the already validated first-pass translation rather than replacing it with corrupt data.
 
-#### First use of Best quality
+#### First use of contextual translation
 
 Open:
 
-**Settings → Model Manager → Contextual translation · Qwen3 8B · quality**
+**Settings → Model Manager → Contextual translation**
 
 and click **Prepare / verify contextual translation**.
 
 DubLocal will:
 
-1. reuse an existing compatible `llama.cpp` installation when available;
-2. otherwise install `llama.cpp` through Homebrew;
-3. download the pinned Qwen3 8B Q4_K_M model (about 5.03 GB) to the shared Hugging Face cache;
-4. verify the model SHA-256 before registering it.
+1. detect the current Mac and select its recommendation;
+2. reuse an existing compatible `llama.cpp` installation when available;
+3. otherwise install `llama.cpp` through Homebrew;
+4. download only the recommended Qwen3 model to the shared Hugging Face cache;
+5. verify the pinned model checksum before registering it.
 
-The old Qwen3 4B development model is no longer selected in v0.4.2.
+The two contextual model sizes are approximately:
 
-#### Why translation may take longer now
+- **Qwen3 4B Q4_K_M** — 2.5 GB;
+- **Qwen3 8B Q4_K_M** — 5.03 GB.
 
-Best quality loads a larger local model and normally performs two passes. Quality rather than minimum latency is the point of this mode.
+Both are local Apache-2.0 model releases. DubLocal does not download both merely because both are supported.
 
-DubLocal reduces unnecessary overhead by keeping one loopback-only `llama-server` process alive for the entire job, so the model is loaded once. Short media also uses larger chunks to reduce repeated inference calls.
-
-If speed/storage matters more than quality, choose **Fast legacy · OPUS · sentence-level** explicitly.
+If speed/storage matters more than contextual quality, choose **Fast legacy · OPUS · sentence-level** explicitly.
 
 ### Subtitle tags and integrity
 
@@ -185,13 +205,19 @@ Normal updates are clean fast-forwards from official GitHub `main`. Tracked loca
 
 Install only the transcription models you need. Base remains the default; Accurate Large-v3-Turbo-Q5 is optional.
 
-### Contextual translation · Qwen3 8B · quality
+### Contextual translation
 
-This is the recommended translation backend.
+The accordion title itself includes the current recommendation, for example:
 
-The model is download-on-demand, uses the shared Hugging Face cache and is registered only after checksum verification.
+`Contextual translation · Lightweight · Qwen3 4B Q4_K_M`
 
-Removing the DubLocal contextual model removes DubLocal's registration/link. It does not indiscriminately delete the shared Hugging Face cache or Homebrew `llama.cpp` installation.
+or:
+
+`Contextual translation · Best quality · Qwen3 8B Q4_K_M`
+
+The status explains the hardware decision and shows both the recommended model and whether the alternate contextual model is already registered locally.
+
+**Prepare / verify contextual translation** prepares only the recommended model. **Remove DubLocal contextual model** removes DubLocal's 4B/8B registrations/links while leaving the shared Hugging Face cache intact, so other local applications are not broken.
 
 ### Fast legacy translation · OPUS
 
@@ -233,14 +259,15 @@ If captions remain blocked, local Whisper transcription is the intended fallback
 
 # Translation quality expectations
 
-The goal of Best quality is substantially better local translation, not a claim of perfect human translation.
+The goal is the best practical local translation for the current Mac, not a claim of perfect human translation.
 
-Two facts remain important:
+Three facts remain important:
 
 1. a stronger translator cannot reliably reconstruct speech that was already incorrectly transcribed;
-2. even an 8B local model can make semantic or stylistic mistakes.
+2. even an 8B local model can make semantic or stylistic mistakes;
+3. the best model in isolation is not necessarily the best product default if it causes memory pressure or extreme latency on the machine running it.
 
-That is why DubLocal exposes both Original and Translation in the preview and keeps the original timing/source timeline available for review.
+That is why DubLocal exposes Original/Translation side-by-side and chooses its default translation profile from the hardware rather than from a single universal marketing label.
 
 For troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
