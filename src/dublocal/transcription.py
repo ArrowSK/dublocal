@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -54,6 +55,21 @@ WHISPER_MODELS: dict[str, dict[str, str]] = {
     },
 }
 
+# Official whisper.cpp auxiliary VAD model. It is tiny (~0.9 MiB), MIT licensed,
+# pinned to the upstream conversion commit and checksum-verified before use.
+WHISPER_VAD_MODEL = {
+    "name": "Silero VAD v6.2.0",
+    "filename": "ggml-silero-v6.2.0.bin",
+    "size": "0.9 MiB",
+    "license": "MIT",
+    "revision": "9ffd54a1e1ee413ddf265af9913beaf518d1639b",
+    "sha256": "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
+    "url": (
+        "https://huggingface.co/ggml-org/whisper-vad/resolve/"
+        "9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v6.2.0.bin"
+    ),
+}
+
 _PROGRESS_RE = re.compile(r"progress\s*=\s*(\d{1,3})%", re.IGNORECASE)
 
 
@@ -71,6 +87,7 @@ class TranscriptionResult:
     segments: list[Segment]
     model_id: str
     language: str
+    vad_used: bool = False
 
 
 def whisper_models_dir() -> Path:
@@ -85,12 +102,24 @@ def whisper_model_path(model_id: str) -> Path:
     return whisper_models_dir() / f"ggml-{model_id}.bin"
 
 
+def whisper_vad_model_path() -> Path:
+    return whisper_models_dir() / str(WHISPER_VAD_MODEL["filename"])
+
+
 def installed_whisper_models() -> list[str]:
     return [model_id for model_id in WHISPER_MODELS if whisper_model_path(model_id).is_file()]
 
 
 def _sha1(path: Path) -> str:
     digest = hashlib.sha1()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
@@ -116,7 +145,7 @@ def install_whisper_model(model_id: str) -> Path:
 
     request = Request(
         metadata["url"],
-        headers={"User-Agent": "DubLocal/0.4 (+https://github.com/ArrowSK/dublocal)"},
+        headers={"User-Agent": "DubLocal/0.5 (+https://github.com/ArrowSK/dublocal)"},
     )
     try:
         with urlopen(request, timeout=60) as response, temporary.open("wb") as output:
@@ -141,6 +170,44 @@ def install_whisper_model(model_id: str) -> Path:
     return destination
 
 
+def _ensure_whisper_vad_model() -> Path | None:
+    """Best-effort prepare the tiny speech detector used to prevent music/silence hallucinations.
+
+    Local transcription remains usable offline when the auxiliary model has never been
+    downloaded; in that case DubLocal falls back to stricter Whisper decoder thresholds.
+    """
+
+    destination = whisper_vad_model_path()
+    expected = str(WHISPER_VAD_MODEL["sha256"])
+    if destination.is_file():
+        if _sha256(destination) == expected:
+            return destination
+        destination.unlink(missing_ok=True)
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(".bin.part")
+    temporary.unlink(missing_ok=True)
+    request = Request(
+        str(WHISPER_VAD_MODEL["url"]),
+        headers={"User-Agent": "DubLocal/0.5 (+https://github.com/ArrowSK/dublocal)"},
+    )
+    try:
+        with urlopen(request, timeout=20) as response, temporary.open("wb") as output:
+            while True:
+                chunk = response.read(256 * 1024)
+                if not chunk:
+                    break
+                output.write(chunk)
+        if _sha256(temporary) != expected:
+            temporary.unlink(missing_ok=True)
+            return None
+        temporary.replace(destination)
+        return destination
+    except (HTTPError, URLError, TimeoutError, OSError):
+        temporary.unlink(missing_ok=True)
+        return None
+
+
 def remove_whisper_model(model_id: str) -> bool:
     path = whisper_model_path(model_id)
     existed = path.exists()
@@ -162,6 +229,22 @@ def find_whisper_cli() -> str | None:
     return None
 
 
+@lru_cache(maxsize=4)
+def _whisper_supports_vad(executable: str) -> bool:
+    try:
+        result = subprocess.run(
+            [executable, "--help"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    help_text = f"{result.stdout}\n{result.stderr}"
+    return "--vad-model" in help_text and "--vad" in help_text
+
+
 def whisper_engine_status() -> tuple[bool, str]:
     executable = find_whisper_cli()
     if executable:
@@ -178,6 +261,11 @@ def model_manager_status() -> str:
         lines.append(
             f"[model] {model_id:<5} · {state:<13} · {metadata['size']} · {metadata['license']}"
         )
+    vad_path = whisper_vad_model_path()
+    vad_state = "installed" if vad_path.is_file() and _sha256(vad_path) == WHISPER_VAD_MODEL["sha256"] else "on demand"
+    lines.append(
+        f"[speech detector] Silero VAD 6.2 · {vad_state} · {WHISPER_VAD_MODEL['size']} · MIT"
+    )
     return "```text\n" + "\n".join(lines) + "\n```"
 
 
@@ -383,7 +471,36 @@ def transcribe_source(
         "-l",
         requested_language,
         "-pp",
+        # Conservative long-form decoding: keep only a small recent text context and
+        # make the no-speech gate slightly more willing to discard uncertain audio.
+        "-mc",
+        "64",
+        "-nth",
+        "0.50",
     ]
+
+    vad_used = False
+    if _whisper_supports_vad(executable):
+        vad_model = _ensure_whisper_vad_model()
+        if vad_model is not None:
+            command += [
+                "--vad",
+                "--vad-model",
+                str(vad_model),
+                "--vad-threshold",
+                "0.45",
+                "--vad-min-speech-duration-ms",
+                "200",
+                "--vad-min-silence-duration-ms",
+                "220",
+                "--vad-max-speech-duration-s",
+                "30",
+                "--vad-speech-pad-ms",
+                "50",
+                "--vad-samples-overlap",
+                "0.10",
+            ]
+            vad_used = True
 
     # CPU mode is slower but is the safest common denominator on Intel Macs.
     # Apple Silicon keeps whisper.cpp's Metal acceleration enabled by default.
@@ -410,4 +527,5 @@ def transcribe_source(
         segments=segments,
         model_id=model_id,
         language=_detected_language(output_prefix, requested_language),
+        vad_used=vad_used,
     )

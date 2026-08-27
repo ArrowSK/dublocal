@@ -14,7 +14,19 @@ Nothing here grants rights to third-party video, audio or subtitles. Users remai
 | platformdirs | Application/cache paths | Core Python dependency |
 | Hugging Face Hub | Shared model downloads/cache | Core helper; models still download only on explicit user action |
 | FFmpeg / ffprobe | Media inspection/extraction and later mixing/remuxing | Existing executable reused when available; any future bundled binary requires exact build/licence review |
-| whisper.cpp | Local speech-to-text | Optional external engine; existing `whisper-cli` reused when present |
+| whisper.cpp | Local speech-to-text and optional VAD integration | Optional external engine; existing `whisper-cli` reused when present |
+
+## v0.5.2 Whisper speech detection
+
+v0.5.2 can use the official whisper.cpp VAD model to avoid decoding instrumental/silent regions as speech.
+
+| Component | Purpose | Licence / distribution policy |
+| --- | --- | --- |
+| `ggml-org/whisper-vad` / `ggml-silero-v6.2.0.bin` | Tiny auxiliary speech detector for whisper.cpp VAD | MIT; not bundled; on-demand download; pinned immutable revision and SHA-256; stored with DubLocal Whisper assets |
+
+The registered VAD asset is approximately 0.9 MiB. It is not a transcription/language model and does not replace the selected Whisper model. Exact revision, file URL, size and checksum are recorded in `MODEL_LICENSES.json`.
+
+If the installed `whisper-cli` does not support VAD, or the auxiliary model cannot be obtained while offline, DubLocal falls back to conservative Whisper decoding without silently installing another heavy dependency.
 
 ## v0.4.2 adaptive contextual translation
 
@@ -55,9 +67,11 @@ DubLocal never adds another application's `site-packages` to its own interpreter
 
 ## Whisper models
 
-Whisper weights are downloaded only when requested and retain the whisper.cpp/OpenAI model licensing conditions represented in `MODEL_LICENSES.json`.
+Whisper transcription weights are downloaded only when requested and retain the whisper.cpp/OpenAI model licensing conditions represented in `MODEL_LICENSES.json`.
 
-v0.4.2 additionally exposes the quantized Large-v3-Turbo-Q5 weight as an optional higher-accuracy transcription path for songs, accents and noisy audio. It is not bundled and is checksum-verified before use.
+DubLocal additionally exposes the quantized Large-v3-Turbo-Q5 weight as an optional higher-accuracy transcription path for songs, accents and noisy audio. It is not bundled and is checksum-verified before use.
+
+The Silero VAD auxiliary model described above is independent of the chosen Whisper transcription weight.
 
 ## M4 local voice generation
 

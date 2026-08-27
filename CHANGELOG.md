@@ -2,52 +2,43 @@
 
 DubLocal is still in active development. Versions below describe development builds from `main`.
 
-> **Current development build:** `v0.5.1.dev0` — **Voice Match + Export Refinement**
+> **Current development build:** `v0.5.2.dev0` — **Transcription + Timing Reliability**
 >
 > There is no packaged GitHub Release yet. The first packaged release will be published after Mac distribution/release validation is ready.
 
-## v0.5.1.dev0 — Voice Match + Export Refinement — current
+## v0.5.2.dev0 — Transcription + Timing Reliability — current
 
-v0.5.1 refines the working v0.5 end-to-end export path without redesigning the earlier workflow.
+v0.5.2 focuses on two real-world failures found during music-video testing: Whisper hallucinating speech over non-vocal audio, and dubbed speech starting/ending noticeably differently from the source subtitle timing.
 
-### Automatic voice matching
+### Anti-hallucination local transcription
 
-- **Auto · match original vocal range** is the normal Main voice choice.
-- DubLocal performs a lightweight local F0/range analysis over the source primary audio inside subtitle windows.
-- Lower/higher source vocal ranges map to contrasting Kokoro voice presets when the selected language provides them.
-- Mixed lower/higher material can therefore use two voices segment-by-segment while keeping one Kokoro model/language pipeline loaded.
-- This is acoustic preset matching, not speaker identity or gender-identity inference.
-- Manual Kokoro voice selection remains available.
+- Added the official whisper.cpp **Silero VAD v6.2.0** auxiliary speech detector when the installed `whisper-cli` supports VAD.
+- The VAD model is approximately 0.9 MiB, MIT licensed, pinned to upstream revision `9ffd54a1e1ee413ddf265af9913beaf518d1639b` and verified against SHA-256 `2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987`.
+- The auxiliary model is downloaded on demand; if it cannot be obtained offline, transcription still works with conservative decoder settings.
+- VAD processing limits Whisper to detected speech regions, reducing invented dialogue during instrumental intros/silence and long repetition loops over non-speech material.
+- Long-form text carry-over is capped at 64 tokens and the no-speech threshold is slightly stricter to reduce self-reinforcing decoder repetition.
+- The Model Manager status reports whether the speech detector is installed or will be prepared on demand.
 
-### Stronger original dialogue/singing suppression
+### Variable per-line dub timing
 
-- The source subtitle timeline now guides soundtrack suppression when available.
-- Original audio stays strongly reduced across the complete source dialogue/singing window, including gaps after a shorter translated TTS line ends.
-- Nearby subtitle windows are merged to reduce audible pumping.
-- Sidechain compression remains as secondary protection around generated voice.
-- When no usable source timeline exists, DubLocal uses a stronger voice-driven fallback.
-- This remains ducking/overlay, not professional dialogue-free M&E separation or neural source separation.
+- Replaced the previous “speed up only when overflowing” behavior with per-segment duration matching.
+- Each Kokoro segment is fitted independently to its subtitle time window.
+- Short generated speech can be slowed and long generated speech accelerated through FFmpeg `atempo` so the dub ends approximately with the source subtitle line.
+- A small onset cushion prevents translated speech from consistently jumping in fractionally before the original line.
+- Tempo changes are limited to 0.5×–2.0×; more extreme stretches are reported rather than forced into obviously damaged speech.
+- Timing fitting remains an export-layer operation and does not modify the SRT timestamps.
 
-### Selectable subtitle tracks in exported media
+### Validation
 
-- Generated original/source subtitles and translated subtitles are embedded by default when available.
-- They remain selectable tracks and are never burned into video.
-- MKV preserves source subtitle streams and adds DubLocal tracks.
-- MP4 packages generated SRT tracks as `mov_text`.
-- Subtitle language/title/disposition metadata is set independently.
+- Added regression tests for VAD command wiring, conservative Whisper decoder options, slow/fast line fitting, onset alignment and extreme-stretch reporting.
+- Documentation/version guards updated for v0.5.2.
 
-### Video quality selection
+## v0.5.1.dev0 — Voice Match + Export Refinement
 
-- Added **Original / best available**, 2160p, 1440p, 1080p, 720p and 480p maximum quality choices.
-- YouTube uses the selection as a maximum source height before download, then stream-copies the chosen video during remux.
-- Local files keep **Original** as the no-recode default.
-- Selecting a lower local resolution explicitly opts into H.264 VideoToolbox re-encoding.
-- DubLocal does not silently downscale or upscale local media.
-
-### Documentation and validation
-
-- README, User Guide, Installation, Architecture and Troubleshooting now describe v0.5.1 behavior and limitations.
-- Regression tests cover automatic voice selection/F0 bucketing, timeline-driven suppression, subtitle mux mapping/metadata, YouTube max-height selection and explicit local VideoToolbox downscale.
+- Added **Auto · match original vocal range** using lightweight source-audio F0 analysis and per-segment Kokoro voice presets.
+- Strengthened original dialogue/singing suppression across complete subtitle windows.
+- Embedded generated original + translated subtitles as selectable tracks by default.
+- Added YouTube resolution selection and explicit local VideoToolbox downscaling while keeping local Original as the no-recode default.
 
 ## v0.5.0.dev0 — M5 Local Dubbed Media Export
 

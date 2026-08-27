@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <strong>Current development build: v0.5.1.dev0 · Voice Match + Export Refinement</strong><br>
+  <strong>Current development build: v0.5.2.dev0 · Transcription + Timing Reliability</strong><br>
   macOS 13+ · Apple Silicon and Intel · Apache-2.0
 </p>
 
@@ -31,12 +31,12 @@ There is currently no packaged DMG/GitHub Release. Development builds are update
 | --- | --- | --- |
 | Media input | ✅ | YouTube URL or local video/audio |
 | Existing subtitles | ✅ | Finds/extracts supported caption tracks |
-| Local transcription | ✅ | Timestamped subtitles through `whisper.cpp` |
+| Local transcription | ✅ | Timestamped subtitles through `whisper.cpp` with VAD anti-hallucination filtering when supported |
 | Subtitle download | ✅ | SRT default, plus VTT/TXT; translation optional |
 | Contextual translation | ✅ | Hardware-aware Qwen3 4B/8B through `llama.cpp` |
 | Fast legacy translation | ✅ | OPUS sentence-level path remains optional |
 | AI voice | ✅ | Kokoro voice-only track; caption cues stay silent; automatic original-vocal-range matching |
-| Timing fit | ✅ | Borrow silence, then modestly speed overflowing speech |
+| Timing fit | ✅ | Per-line variable tempo fits translated speech to subtitle windows while preserving natural limits |
 | Soundtrack mix | ✅ | Strong subtitle-window suppression of original dialogue/singing under the dub |
 | Subtitle muxing | ✅ | Original + translated generated subtitles embedded as selectable tracks |
 | Media export | ✅ | Replace/add dubbed audio; YouTube quality selection; local stream-copy by default |
@@ -48,7 +48,15 @@ There is currently no packaged DMG/GitHub Release. Development builds are update
 3. **Stop here if you only need subtitles.** The file is downloadable immediately. Filenames are human-readable, for example `Movie Name.en.srt` or `Track Title.es.vtt`.
 4. **Translate if wanted.** Leave **Recommended for this Mac** selected. Context is used for reference, gender, idioms, phraseology, metaphors and continuity across subtitle fragments.
 5. **Generate voice if wanted.** The normal voice choice is **Auto · match original vocal range**. DubLocal performs a lightweight local acoustic pass and can use contrasting lower/higher Kokoro voices segment-by-segment when the original alternates. Manual voice selection remains available. Cues such as `[MUSIC]`, `[LAUGHTER]` and `[APPLAUSE]` remain in subtitle files but are removed from temporary TTS input.
-6. **Export dubbed media.** DubLocal timing-fits long lines, strongly suppresses the original dialogue/singing across the source subtitle windows, mixes the translated voice, embeds generated original/translated subtitles, and remuxes the result.
+6. **Export dubbed media.** DubLocal fits each generated line to its subtitle window, strongly suppresses the original dialogue/singing across the source subtitle windows, mixes the translated voice, embeds generated original/translated subtitles, and remuxes the result.
+
+## More reliable local transcription
+
+Whisper can hallucinate speech during instrumental intros, long silence or other non-speech material. v0.5.2 adds a small official `whisper.cpp` Silero VAD speech detector when the installed `whisper-cli` supports it. The VAD asset is approximately 0.9 MiB, MIT licensed, checksum-verified and downloaded on demand.
+
+When VAD is available, Whisper processes detected speech regions instead of continuously decoding the complete soundtrack. DubLocal also limits carried text context and uses a slightly stricter no-speech threshold to reduce self-reinforcing repetition loops. This specifically targets failures such as invented dialogue over an instrumental intro or one short phrase repeating through the rest of a track.
+
+If an older `whisper-cli` does not expose VAD, transcription still works with the conservative decoder settings; updating whisper.cpp is recommended for the stronger protection.
 
 ## Subtitle filenames
 
@@ -108,7 +116,7 @@ They are not sent to the translator as dialogue and are not spoken by Kokoro. In
 
 Professional dubbing normally works from a dialogue-free Music & Effects stem. Consumer YouTube/local files normally contain a married mix, so DubLocal cannot remove only the original human voice without source separation.
 
-v0.5.1 therefore uses the source subtitle timeline as the suppression guide. Original audio stays strongly ducked across each complete source dialogue/singing window—even when translated TTS is shorter—rather than jumping back to full volume as soon as generated speech stops. Closely spaced windows are merged to reduce pumping.
+DubLocal uses the source subtitle timeline as the suppression guide. Original audio stays strongly ducked across each complete source dialogue/singing window—even when translated TTS is shorter—rather than jumping back to full volume as soon as generated speech stops. Closely spaced windows are merged to reduce pumping.
 
 This remains **ducking + overlay**, not true dialogue/music/effects separation.
 
@@ -132,9 +140,11 @@ For local files, **Original** keeps the video bit-for-bit with `-c:v copy`. Sele
 
 **MKV is recommended** because it preserves mixed codec/track combinations most reliably. MP4 is available when compatible.
 
-### Timing fitting
+### Variable timing fitting
 
-DubLocal never truncates spoken words. For a voice segment that runs past its subtitle window it borrows real silence before the next spoken segment, applies modest tempo increase up to 1.25× only if needed, and reports any line that still cannot fit safely.
+v0.5.2 no longer uses one fixed speaking speed and adjusts only overflows. Each TTS segment is fitted independently to its subtitle timecode. A short generated line can be slowed and a long line accelerated so, within quality-safe FFmpeg `atempo` limits, the translated speech finishes at approximately the source subtitle end time.
+
+A small onset cushion prevents synthetic speech from consistently jumping in slightly before the original line. Extreme stretches beyond 0.5×–2.0× are not forced because that would sound unnatural; those rare cases remain reported for later semantic rephrasing rather than being silently mangled.
 
 Dubbed media uses predictable names such as:
 
@@ -147,7 +157,7 @@ Track Title.dub.en-US.mp4
 
 **Updates** — Check → Install → Restart. **Repair installation** can restore official tracked files after saving a patch backup while preserving models/caches/jobs.
 
-**Model Manager** — Whisper, hardware-aware contextual translation, legacy OPUS and Kokoro. Heavy models download only on request.
+**Model Manager** — Whisper, hardware-aware contextual translation, legacy OPUS and Kokoro. Heavy models download only on request. The tiny VAD speech detector is an auxiliary Whisper asset and is prepared on demand.
 
 **Local Resources** — reports reusable FFmpeg/ffprobe, whisper.cpp, llama.cpp, shared Hugging Face cache and compatible isolated Python runtimes.
 

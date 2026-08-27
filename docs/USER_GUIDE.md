@@ -1,6 +1,6 @@
 # DubLocal user guide
 
-**Current development build: v0.5.1.dev0 — Voice Match + Export Refinement**
+**Current development build: v0.5.2.dev0 — Transcription + Timing Reliability**
 
 DubLocal is meant to feel like a small Mac utility, not an AI console. The normal workflow stays on **Main**. Updates, models and reusable local resources stay under **Settings**.
 
@@ -36,6 +36,14 @@ DubLocal normalizes both ISO codes such as `en` and labels such as `English`. Lo
 
 If the language genuinely cannot be identified, DubLocal leaves **From** at Auto and asks you to choose it instead of guessing.
 
+### Anti-hallucination speech detection
+
+Whisper can occasionally invent speech over instrumental intros, silence or other non-vocal material. v0.5.2 uses the official whisper.cpp **Silero VAD v6.2.0** auxiliary speech detector when the installed `whisper-cli` supports it.
+
+The VAD asset is tiny (about 0.9 MiB), local, MIT licensed and downloaded on demand. It limits Whisper to detected speech regions instead of continuously decoding the whole soundtrack. DubLocal also limits long-form text carry-over and uses a slightly stricter no-speech threshold, which reduces self-reinforcing repeated phrases.
+
+This is especially relevant to music videos: an instrumental intro should normally stay silent in the transcript instead of producing plausible-sounding invented dialogue. If the local whisper.cpp build is too old for VAD, transcription still works with the conservative decoder settings, but updating whisper.cpp is recommended.
+
 ### Download format and filenames
 
 SRT is the default. VTT and TXT are also available. Changing format reuses the existing timeline; transcription does not run again.
@@ -56,7 +64,7 @@ Translated subtitles use the target language, for example `My Movie.ru.srt`.
 - **Small · 466 MiB** — stronger but slower.
 - **Accurate · Large v3 Turbo Q5 · 547 MiB** — preferred for songs, accents, noisy material and obviously damaged automatic captions.
 
-Install optional Whisper models under **Settings → Model Manager → Whisper**.
+Install optional Whisper models under **Settings → Model Manager → Whisper**. The small VAD speech-detector asset is prepared automatically on demand and appears in the Whisper status block.
 
 YouTube automatic captions are not ground truth. If the Original column already contains nonsense, improve the source transcript first rather than expecting the translator to reconstruct missing words.
 
@@ -139,7 +147,7 @@ All original audio tracks remain untouched and the DubLocal mix is appended as a
 
 Professional dubbing normally uses a dialogue-free Music & Effects stem. Ordinary YouTube/local files usually contain a married mix, so DubLocal cannot perfectly remove only the original human voice without source separation.
 
-v0.5.1 improves the practical fallback: the **source subtitle timeline** guides suppression. Original audio stays strongly reduced across each complete source dialogue/singing window, including gaps where the translated TTS line has already finished. Nearby windows are merged to reduce pumping.
+The **source subtitle timeline** guides suppression. Original audio stays strongly reduced across each complete source dialogue/singing window, including gaps where the translated TTS line has already finished. Nearby windows are merged to reduce pumping.
 
 This is stronger ducking/overlay, not a claim of professional M&E separation. The original dialogue may still be faintly audible in difficult mixes.
 
@@ -166,14 +174,13 @@ For local files, **Original** keeps the video bit-for-bit with stream-copy. Sele
 
 MP4 is available when the requested streams can be packaged compatibly. DubLocal does not silently start a long video transcode merely to satisfy MP4.
 
-### Timing fitting
+### Variable timing fitting
 
-For a voice line that is too long, DubLocal:
+v0.5.2 fits each generated voice segment independently to its subtitle window instead of using one fixed TTS speed and only correcting overflows.
 
-1. borrows real silence before the next spoken line when available;
-2. applies modest tempo increase only if needed, capped at 1.25×;
-3. never truncates spoken words;
-4. reports any line that still cannot fit safely.
+For a normal line DubLocal calculates the required FFmpeg `atempo` factor from the generated WAV duration and the subtitle timecode. Short translated speech can be slowed; long speech can be accelerated. A small onset cushion prevents the synthetic line from consistently sounding slightly early, while the target remains the subtitle end time.
+
+Tempo changes are limited to 0.5×–2.0×. More extreme stretching is reported instead of forced because it would usually sound worse than leaving a residual timing mismatch. Subtitle timestamps themselves are not changed.
 
 ### Output filename
 
@@ -194,7 +201,7 @@ Normal updates require a clean fast-forward from official `ArrowSK/dublocal` `ma
 
 ## Model Manager
 
-**Whisper** — install only the transcription models you need.
+**Whisper** — install only the transcription models you need. The Whisper block also reports the auxiliary Silero VAD speech detector.
 
 **Contextual translation** — prepares the hardware-appropriate local Qwen model and llama.cpp runtime.
 
