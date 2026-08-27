@@ -1,6 +1,6 @@
 """DubLocal package."""
 
-__version__ = "0.5.2.dev1"
+__version__ = "0.5.2.dev0"
 
 # Install small runtime safety guards before UI modules import transcription symbols.
 # This keeps the fix global for the launcher, CLI and tests without redesigning the
