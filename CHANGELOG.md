@@ -2,11 +2,45 @@
 
 DubLocal is still in active development. Versions below describe development builds from `main`.
 
-> **Current development build:** `v0.5.0.dev0` — **M5 Local Dubbed Media Export**
+> **Current development build:** `v0.5.1.dev0` — **Voice Match + Dub Mix + Subtitle/Quality Export Refinement**
 >
 > There is no packaged GitHub Release yet. The first packaged release will be published after Mac distribution/release validation is ready.
 
-## v0.5.0.dev0 — M5 Local Dubbed Media Export — current
+## v0.5.1.dev0 — Voice Match + Dub Mix + Subtitle/Quality Export Refinement — current
+
+This refinement keeps the v0.5 workflow intact and changes only the affected Voice-over and Export behavior.
+
+### Automatic voice matching
+
+- **Auto · match original vocal range** is now the normal Main voice choice.
+- DubLocal performs a lightweight local acoustic pass over the original audio and chooses lower/higher Kokoro voice presets per subtitle segment.
+- If the source alternates between clearly lower and higher vocal ranges, Kokoro can switch between two voices segment-by-segment without loading a second TTS model.
+- The analysis is a practical acoustic preset selector, not speaker identity or gender-identity detection. A subtitle line containing overlapping speakers still receives one TTS voice.
+- Languages with only one available Kokoro voice gracefully fall back to that voice.
+
+### Stronger source-dialogue suppression
+
+- Export no longer relies only on the generated voice waveform to trigger ducking.
+- The source subtitle timeline now acts as the dialogue/singing guide, so the original vocal stays suppressed for the whole spoken/sung source window even if the translated TTS line is shorter.
+- Closely spaced dialogue windows are merged and use fast attack / controlled release to avoid obvious level pumping.
+- The fallback sidechain path is also stronger when no usable timed dialogue guide exists.
+- This remains a consumer-source compromise. Professional dubbing ideally uses dialogue-free Music & Effects stems; DubLocal still does not claim true dialogue/source separation.
+
+### Selectable subtitle tracks inside the exported media
+
+- Generated original and translated SRTs are embedded by default when available.
+- They remain selectable subtitle streams for players such as VLC; they are not burned into the picture.
+- MKV also preserves existing source subtitle streams. MP4 packages generated DubLocal subtitle tracks as `mov_text` without video re-encoding.
+- Original and translated tracks receive language/title metadata; the translated DubLocal track is marked default when present.
+
+### Video quality selection
+
+- Export now offers **Original / best available**, 2160p, 1440p, 1080p, 720p and 480p maximum options.
+- YouTube quality selection chooses an appropriate source format before download; DubLocal still stream-copies that selected video during remux.
+- Local files remain **Original / no re-encode** by default.
+- Choosing a lower quality for a local video is an explicit opt-in to H.264 VideoToolbox re-encoding; DubLocal never downscales a local file silently.
+
+## v0.5.0.dev0 — M5 Local Dubbed Media Export
 
 v0.5 connects the existing subtitle, translation and voice stages into the first practical end-to-end dubbed-media workflow while keeping the normal UI progressive and local-first.
 
