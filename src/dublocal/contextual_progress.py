@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
+from .contextual_recovery import build_format_repair_prompt, recover_chunk_output
 from .contextual_translation import (
     ContextualTranslationMissingError,
     _llama_command,
     _new_job_dir,
-    _parse_chunk_output,
     _registered_model_valid,
     _run_llama,
     build_translation_prompt,
@@ -25,6 +25,45 @@ from .translation import (
 
 
 ProgressCallback = Callable[[float, str], None]
+
+
+def _translate_chunk_with_recovery(
+    prompt: str,
+    target_segments: Sequence[Segment],
+    target_language: str,
+    *,
+    max_output_tokens: int,
+    chunk_number: int,
+    total_chunks: int,
+    progress_callback: ProgressCallback | None,
+) -> list[str]:
+    raw = _run_llama(prompt, max_output_tokens=max_output_tokens)
+    try:
+        return recover_chunk_output(raw, target_segments)
+    except DubLocalError as first_error:
+        if progress_callback:
+            progress_callback(
+                max(0.02, min(0.95, (chunk_number - 0.4) / max(1, total_chunks) * 0.94 + 0.02)),
+                f"Repairing structured output for chunk {chunk_number}/{total_chunks}",
+            )
+
+        repair_prompt = build_format_repair_prompt(
+            raw,
+            target_segments,
+            TRANSLATION_LANGUAGES[target_language]["label"],
+        )
+        repaired = _run_llama(
+            repair_prompt,
+            max_output_tokens=max(512, max_output_tokens),
+        )
+        try:
+            return recover_chunk_output(repaired, target_segments)
+        except DubLocalError as second_error:
+            raise DubLocalError(
+                "Contextual translator returned malformed structured output twice "
+                f"for chunk {chunk_number}/{total_chunks}. DubLocal kept subtitle alignment strict and stopped "
+                "instead of writing a corrupted SRT. Retry once; if it repeats, report this exact message."
+            ) from second_error
 
 
 def translate_srt_contextual_with_progress(
@@ -83,11 +122,16 @@ def translate_srt_contextual_with_progress(
             plan,
         )
         target_text = "\n".join(segment.text for segment in target_segments)
-        raw = _run_llama(
+        max_output_tokens = max(512, estimate_tokens(target_text) * 2 + 256)
+        chunk = _translate_chunk_with_recovery(
             prompt,
-            max_output_tokens=max(512, estimate_tokens(target_text) * 2 + 256),
+            target_segments,
+            target,
+            max_output_tokens=max_output_tokens,
+            chunk_number=chunk_number,
+            total_chunks=total_chunks,
+            progress_callback=progress_callback,
         )
-        chunk = _parse_chunk_output(raw, target_segments)
         translated.extend(
             TranslatedSegment(
                 index=segment.index,

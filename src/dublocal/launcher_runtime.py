@@ -5,6 +5,7 @@ from pathlib import Path
 
 from platformdirs import user_cache_dir
 
+from .job_cache import prune_job_cache
 from .ui import MATRIX_CSS, build_app
 
 
@@ -26,6 +27,10 @@ def _gradio_allowed_paths() -> list[str]:
 def main() -> None:
     port = int(os.getenv("DUBLOCAL_PORT", "7861"))
     inbrowser = _env_bool("DUBLOCAL_INBROWSER", True)
+
+    # Generated SRT/WAV/intermediate media live in the macOS cache, not the repo or
+    # user documents. Prune stale/oversized jobs before a new session starts.
+    prune_job_cache()
 
     demo = build_app()
     demo.queue(default_concurrency_limit=1).launch(
