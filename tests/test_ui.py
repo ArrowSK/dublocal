@@ -4,6 +4,7 @@ import dublocal
 from dublocal.ui import (
     MATRIX_CSS,
     _settings_version_html,
+    _source_card_status,
     _suggest_voice_controls,
     _translation_preview_rows,
     _translation_result_note,
@@ -53,6 +54,22 @@ def test_source_english_suggests_american_kokoro():
     assert voice_update.value == "af_heart"
 
 
+def test_source_card_status_is_persistent_and_human_readable():
+    assert "Not loaded" in _source_card_status({})
+    loaded = _source_card_status(
+        {
+            "kind": "youtube",
+            "title": "Example video",
+            "duration": 125,
+            "subtitle_tracks": [{"value": "en"}, {"value": "ru"}],
+        }
+    )
+    assert "Loaded · OK" in loaded
+    assert "Example video" in loaded
+    assert "2:05" in loaded
+    assert "2 caption tracks" in loaded
+
+
 def test_settings_version_is_visible_and_uses_running_package_version():
     html = _settings_version_html()
     assert "Running local development build" in html
@@ -63,6 +80,7 @@ def test_primary_framework_accent_is_overridden_to_dublocal_green():
     assert "--primary-500: #42ef83" in MATRIX_CSS
     assert "button[role=\"tab\"][aria-selected=\"true\"]" in MATRIX_CSS
     assert "accent-color: #42ef83" in MATRIX_CSS
+    assert ".dl-source-status" in MATRIX_CSS
 
 
 def test_tabbed_ui_builds():
