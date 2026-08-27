@@ -14,19 +14,20 @@ from urllib.request import Request, urlopen
 
 from platformdirs import user_cache_dir
 
-from .contextual_translation import (
-    ContextualTranslationMissingError,
-    QWEN_CONTEXT_MODEL,
-    _llama_command,
-    _registered_model_valid,
-    contextual_model_path,
+from .contextual_quality_model import (
+    QUALITY_CONTEXT_MODEL,
+    quality_contextual_model_path,
+    quality_registered_model_valid,
 )
+from .contextual_translation import ContextualTranslationMissingError, _llama_command
 from .media import DubLocalError
 
 
 _SYSTEM_PROMPT = (
-    "You are a professional audiovisual subtitle translator. Translate faithfully, naturally and "
-    "conservatively. Never invent dialogue. Follow the requested subtitle IDs and output format exactly."
+    "You are a senior professional audiovisual translator and subtitle editor. Translate faithfully, "
+    "idiomatically and conservatively. Prefer natural target-language grammar over literal calques, but "
+    "never invent dialogue or repair uncertain source text by guessing. Preserve requested subtitle IDs "
+    "and output format exactly."
 )
 
 
@@ -62,11 +63,7 @@ def _free_local_port() -> int:
 
 
 def _clean_cli_text(raw: str) -> str:
-    """Remove terminal control characters and known llama-cli UI noise.
-
-    This is only for the compatibility fallback. The preferred llama-server path returns
-    generated content through JSON and therefore never mixes runtime logs with subtitles.
-    """
+    """Remove terminal control characters and known llama-cli UI noise."""
 
     text = (raw or "").replace("\b", "")
     text = "".join(char for char in text if char in "\n\t" or ord(char) >= 32)
@@ -95,10 +92,10 @@ def _clean_cli_text(raw: str) -> str:
 
 def _run_cli_compat(prompt: str, *, max_output_tokens: int) -> str:
     command = _llama_command()
-    model = contextual_model_path()
-    if not command or not _registered_model_valid():
+    model = quality_contextual_model_path()
+    if not command or not quality_registered_model_valid():
         raise ContextualTranslationMissingError(
-            "Contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
+            "High-quality contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
         )
 
     args = command + [
@@ -123,7 +120,7 @@ def _run_cli_compat(prompt: str, *, max_output_tokens: int) -> str:
         "-p",
         prompt,
         "-c",
-        str(QWEN_CONTEXT_MODEL["native_context"]),
+        str(QUALITY_CONTEXT_MODEL["native_context"]),
         "-n",
         str(max(128, min(4096, max_output_tokens))),
         "--temp",
@@ -162,7 +159,7 @@ def _run_cli_compat(prompt: str, *, max_output_tokens: int) -> str:
 
 
 class ContextualRuntime:
-    """One local llama.cpp model session reused across every chunk/recovery in one job."""
+    """One local Qwen3 8B llama.cpp session reused for an entire translation job."""
 
     def __init__(self) -> None:
         self._server_command = _llama_server_command()
@@ -170,12 +167,12 @@ class ContextualRuntime:
         self._log_handle = None
         self._log_path: Path | None = None
         self._base_url: str | None = None
-        self.mode = "llama-server" if self._server_command else "llama-cli compatibility"
+        self.mode = "Qwen3 8B · llama-server" if self._server_command else "Qwen3 8B · llama-cli compatibility"
 
     def __enter__(self) -> "ContextualRuntime":
-        if not _registered_model_valid():
+        if not quality_registered_model_valid():
             raise ContextualTranslationMissingError(
-                "Contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
+                "High-quality contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
             )
         if not self._server_command:
             if not _llama_command():
@@ -194,13 +191,13 @@ class ContextualRuntime:
 
         args = self._server_command + [
             "-m",
-            str(contextual_model_path()),
+            str(quality_contextual_model_path()),
             "--host",
             "127.0.0.1",
             "--port",
             str(port),
             "-c",
-            str(QWEN_CONTEXT_MODEL["native_context"]),
+            str(QUALITY_CONTEXT_MODEL["native_context"]),
             "--jinja",
             "--log-colors",
             "off",
@@ -225,11 +222,11 @@ class ContextualRuntime:
             raise DubLocalError(f"Could not start the local llama.cpp translation server: {exc}") from exc
 
         try:
-            deadline = time.monotonic() + 180.0
+            deadline = time.monotonic() + 240.0
             while time.monotonic() < deadline:
                 if self._process.poll() is not None:
                     raise DubLocalError(
-                        "The local llama.cpp translation server exited while loading the model. "
+                        "The local Qwen3 8B translation server exited while loading the model. "
                         f"See temporary log: {self._log_path}"
                     )
                 try:
@@ -241,7 +238,7 @@ class ContextualRuntime:
                 time.sleep(0.25)
 
             raise DubLocalError(
-                "The local llama.cpp translation server did not become ready within 3 minutes. "
+                "The local Qwen3 8B translation server did not become ready within 4 minutes. "
                 f"See temporary log: {self._log_path}"
             )
         except Exception:
