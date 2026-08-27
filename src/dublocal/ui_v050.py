@@ -370,22 +370,26 @@ def build_app() -> gr.Blocks:
 
     required = {"source_state", "voice_output", "rights", "voice_language"}
     if m5 and required.issubset(captured):
-        begin = m5["button"].click(
-            fn=lambda: "**Rendering dubbed media…** · timing, audio mix and remux progress/ETA are shown above.",
-            outputs=[m5["status"]],
-            queue=False,
-        )
-        begin.then(
-            fn=_render_m5_ui,
-            inputs=[
-                captured["source_state"],
-                captured["voice_output"],
-                captured["rights"],
-                captured["voice_language"],
-                m5["mode"],
-                m5["container"],
-            ],
-            outputs=[m5["output"], m5["status"]],
-        )
+        # previous.build_app() has exited its Blocks context by the time it returns.
+        # Re-enter the same demo only while registering the M5 callbacks; this keeps
+        # the existing v0.4 layout intact and satisfies Gradio 6 event scoping.
+        with demo:
+            begin = m5["button"].click(
+                fn=lambda: "**Rendering dubbed media…** · timing, audio mix and remux progress/ETA are shown above.",
+                outputs=[m5["status"]],
+                queue=False,
+            )
+            begin.then(
+                fn=_render_m5_ui,
+                inputs=[
+                    captured["source_state"],
+                    captured["voice_output"],
+                    captured["rights"],
+                    captured["voice_language"],
+                    m5["mode"],
+                    m5["container"],
+                ],
+                outputs=[m5["output"], m5["status"]],
+            )
 
     return demo
