@@ -88,8 +88,10 @@ def prepare_recommended_contextual_translation() -> str:
     return f"{' '.join(command)} · {model.name} · {recommendation.label}"
 
 
-def remove_recommended_contextual_model() -> bool:
-    return remove_contextual_model_for(active_recommendation().model_key)
+def remove_all_contextual_model_registrations() -> bool:
+    removed_4b = remove_contextual_model_for("4b")
+    removed_8b = remove_contextual_model_for("8b")
+    return removed_4b or removed_8b
 
 
 def adaptive_contextual_translation_status(
@@ -100,8 +102,12 @@ def adaptive_contextual_translation_status(
     recommendation = active_recommendation()
     spec = contextual_model_spec(recommendation.model_key)
     state = "installed" if contextual_model_valid(recommendation.model_key) else "not installed"
+    alternate_key = "8b" if recommendation.model_key == "4b" else "4b"
+    alternate_spec = contextual_model_spec(alternate_key)
+    alternate_state = "installed" if contextual_model_valid(alternate_key) else "not installed"
     requested_budget = 4096 + max(0, int(duration_ms or 0)) // 60_000 * 128
     budget = min(24576, max(4096, requested_budget), recommendation.context_cap_tokens)
+    runtime_context = min(int(spec.metadata["native_context"]), recommendation.context_cap_tokens + 4096)
     review = "on" if recommendation.review else "off"
     return (
         "```text\n"
@@ -110,8 +116,9 @@ def adaptive_contextual_translation_status(
         f"[why] {recommendation.explanation}\n"
         f"[engine] llama.cpp · {llama_cpp_status()}\n"
         f"[model] {spec.label} · {state} · {spec.metadata['size']} · {spec.metadata['license']}\n"
+        f"[alternate model] {alternate_spec.label} · {alternate_state}\n"
         f"[route] {source_language} → {target_language}\n"
-        f"[context] up to {recommendation.context_cap_tokens} input tokens · current job budget {budget}\n"
+        f"[context] current input budget {budget} · runtime allocation {runtime_context} tokens\n"
         f"[review] {review}\n"
         f"[shared cache] {shared_huggingface_cache()}\n"
         "[policy] local-only; no cloud fallback\n"
