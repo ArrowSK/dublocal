@@ -49,13 +49,14 @@ def target_language_guidance(target_language: str) -> str:
 
     if target_language == "ru":
         return (
-            "Write idiomatic contemporary Russian in Cyrillic. Reconstruct natural Russian syntax rather than mirroring English word order. "
-            "Use correct case, agreement, gender, number, tense and verbal aspect. Resolve grammatical gender from supplied discourse context; "
-            "when context does not establish gender, avoid inventing it and prefer a natural gender-neutral/rephrased construction where possible. "
-            "Translate idioms and phraseological expressions by their Russian meaning/register, not word-for-word. Preserve metaphors as metaphors, "
-            "using a natural Russian equivalent image where a literal calque would sound absurd, without adding new imagery. Do not leave ordinary "
-            "English words untranslated and do not create pseudo-Russian transliterations of English words. Render proper names naturally in Russian "
-            "when appropriate. Preserve profanity at the source register rather than sanitising or intensifying it."
+            "Write idiomatic contemporary Russian in Cyrillic. Do not calque English syntax. Reconstruct natural Russian syntax rather than "
+            "mirroring English word order. Use correct case, agreement, gender, number, tense and verbal aspect. Resolve grammatical gender from "
+            "supplied discourse context; when context does not establish gender, avoid inventing it and prefer a natural gender-neutral/rephrased "
+            "construction where possible. Translate idioms and phraseological expressions by their Russian meaning/register, not word-for-word. "
+            "Preserve metaphors as metaphors, using a natural Russian equivalent image where a literal calque would sound absurd, without adding "
+            "new imagery. Do not leave ordinary English words untranslated and do not create pseudo-Russian transliterations of English words. "
+            "Render proper names naturally in Russian when appropriate. Preserve profanity at the source register rather than sanitising or "
+            "intensifying it."
         )
     if target_language == "uk":
         return (
