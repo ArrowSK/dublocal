@@ -69,7 +69,7 @@ def test_prompt_contains_global_nearby_and_translation_memory_context():
     assert "TARGET LINES" in prompt
     assert "[11]" in prompt
     assert "[22]" in prompt
-    assert "[10]" in prompt  # nearby context, not a target id
+    assert "[10]" in prompt
     assert str(plan.input_budget_tokens) in prompt
     assert "Do not translate sentence-by-sentence in isolation" in prompt
 
@@ -82,6 +82,8 @@ def test_chunk_parser_preserves_requested_segment_order():
 
 def test_context_model_is_permissive_and_checksum_pinned():
     assert QWEN_CONTEXT_MODEL["repo_id"] == "Qwen/Qwen3-4B-GGUF"
+    assert QWEN_CONTEXT_MODEL["revision"] == "a9a60d009fa7ff9606305047c2bf77ac25dbec49"
     assert QWEN_CONTEXT_MODEL["license"] == "Apache-2.0"
-    assert len(str(QWEN_CONTEXT_MODEL["revision"])) == 40
-    assert len(str(QWEN_CONTEXT_MODEL["sha256"])) == 64
+    assert QWEN_CONTEXT_MODEL["sha256"] == (
+        "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
+    )
