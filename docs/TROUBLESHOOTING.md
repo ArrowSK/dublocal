@@ -1,6 +1,6 @@
 # DubLocal troubleshooting
 
-**Applies to v0.4.1.dev0 / M4 + M3.1 Contextual Translation.**
+**Applies to v0.4.2.dev0 — Subtitle Export + Translation Quality Pass.**
 
 Most DubLocal failures belong to one layer. Fix that layer rather than reinstalling everything.
 
@@ -21,59 +21,76 @@ cd ~/dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-## Generated SRT/WAV shows a Gradio file-access error
+## Generated subtitle/WAV shows a Gradio file-access error
 
 Update DubLocal and restart. Generated outputs must live under DubLocal's own jobs cache, which is explicitly allowed by the local Gradio runtime.
 
-## Where do temporary media and generated files go?
+## Where do temporary files go?
 
-DubLocal puts transcription WAVs, temporary YouTube audio, generated SRTs, per-job TTS files and other intermediate job artifacts in the macOS cache, not in the repository or your Documents folder:
+Temporary YouTube audio, 16 kHz Whisper WAVs, generated/intermediate subtitles, per-job TTS files and llama-server logs live under:
 
 ```text
 ~/Library/Caches/DubLocal/jobs/
 ```
 
-They are temporary working files. On each normal DubLocal launch, stale job folders older than 24 hours are removed. The jobs cache is also capped at 4 GiB; if it is larger, the oldest remaining jobs are removed first. Files from the current session are not deleted while the app is running.
+On normal startup, jobs older than 24 hours are removed. The job cache is capped at 4 GiB and prunes oldest jobs first when necessary.
 
-Models are different: Whisper models, registered contextual models and the shared Hugging Face cache are intentionally persistent and are not touched by job-cache cleanup.
+Persistent models and the shared Hugging Face cache are intentionally outside this cleanup policy.
 
 ## YouTube HTTP 429
 
-YouTube is temporarily rate-limiting caption/media delivery. DubLocal retries caption retrieval but does not evade the restriction.
+YouTube is temporarily rate-limiting caption/media delivery. DubLocal retries ordinary caption retrieval but does not evade the restriction.
 
 Use **Transcribe locally** if captions remain blocked. If YouTube also refuses audio, wait or use a local copy you have the right to process.
 
-# Transcription
+# Subtitles / transcription
+
+## I transcribed successfully but only want subtitles
+
+That is supported directly in v0.4.2. The completed subtitle file appears in **2 · Subtitles**. Translation is optional.
+
+Use the **Download format** selector for SRT (default), WebVTT or TXT. Changing format converts the current timeline; it does not run Whisper again.
 
 ## FFmpeg / ffprobe / whisper.cpp missing
 
 Check **Settings → Local Resources** first.
 
-The macOS installer can offer Homebrew packages for missing media/transcription tools. Whisper models are separate from the `whisper-cli` executable and live under **Settings → Model Manager → Whisper**.
+The macOS installer can offer Homebrew packages for missing media/transcription tools. Whisper model weights are separate and live under **Settings → Model Manager → Whisper**.
+
+## Which Whisper model should I use?
+
+- Tiny: fastest, lowest accuracy.
+- Base: normal default.
+- Small: stronger but slower.
+- Accurate Large-v3-Turbo-Q5: optional 547 MiB model intended for difficult audio, songs, accents or noisy material.
+
+If a YouTube automatic caption track contains obvious nonsense, a stronger translation model is not the first fix. Re-transcribe the audio with Accurate Whisper so the translator receives a better source timeline.
 
 ## Whisper checksum failure
 
 DubLocal rejects a model whose checksum does not match the registered upstream hash. Retry the install; do not force an unknown/partial file into place.
 
-## Transcription is slow
+# Best-quality contextual translation
 
-Tiny prioritizes speed, Base is the normal starting point, and Small trades more time/storage for accuracy. Apple Silicon normally benefits from whisper.cpp's Metal path; Intel uses CPU.
-
-# Contextual translation — recommended
-
-## “Contextual translation is not prepared”
+## “High-quality contextual translation is not prepared”
 
 Open:
 
-**Settings → Model Manager → Contextual translation · Qwen3 4B → Prepare / verify contextual translation**
+**Settings → Model Manager → Contextual translation · Qwen3 8B · quality → Prepare / verify contextual translation**
 
-DubLocal will reuse an existing `llama.cpp` command if possible. Otherwise it can install `llama.cpp` through Homebrew, then download/register the pinned ~2.5 GB Qwen3 model in the shared Hugging Face cache.
+DubLocal reuses an existing `llama.cpp` installation when available. Otherwise it can install it through Homebrew, then download/register the pinned Qwen3 8B Q4_K_M model in the shared Hugging Face cache.
 
-## Model download is large
+## Why is the model about 5 GB?
 
-That is expected for Contextual quality. The Q4_K_M GGUF is about 2.5 GB and is downloaded only once when explicitly prepared. The shared Hugging Face cache is used so another compatible local application can reuse the same snapshot.
+The v0.4.1 Qwen3 4B development backend proved too weak for the intended quality target in real-language tests. v0.4.2 uses Qwen3 8B Q4_K_M, about 5.03 GB, as the recommended Best-quality model.
 
-If storage matters more than quality, choose **Fast legacy · OPUS** explicitly instead.
+If storage or latency matters more than quality, **Fast legacy · OPUS** remains an explicit option. DubLocal does not silently switch engines.
+
+## What happened to the old Qwen3 4B model?
+
+v0.4.2 no longer selects or downloads it. The model remains in `MODEL_LICENSES.json` for provenance only.
+
+If a 4B snapshot was previously downloaded into the shared Hugging Face cache, DubLocal does not automatically delete that shared asset because another local application may be using it.
 
 ## Qwen checksum failure
 
@@ -83,49 +100,83 @@ Do not bypass this check. A repeatable mismatch means the registry/upstream stat
 
 ## `llama.cpp` missing after preparation
 
-Check **Settings → Local Resources**. The panel should show `llama-cli` or `llama ... cli`.
+Check **Settings → Local Resources**. `llama-cli` should be visible; modern Homebrew llama.cpp installations commonly also expose `llama-server`.
 
-If Homebrew reports success but the app still does not see the executable, restart DubLocal and rescan resources. If it remains missing, include the exact Model Manager error when reporting the problem.
+Restart DubLocal and rescan Local Resources if Homebrew just installed the package.
 
-## Contextual translation is slower than OPUS
+## Translation takes longer than OPUS
 
-Expected. Qwen3 is doing generative translation with context instead of a small sentence-level Marian pass.
+Expected. Best quality uses a much larger generative model, context and normally a second senior-review pass.
 
-The quality mode is optimized for dialogue coherence rather than minimum latency. OPUS remains available when speed is the priority.
+DubLocal avoids needless startup overhead by preferring one local loopback `llama-server` session for the whole job. The model is loaded once and reused for translation, recovery and review.
 
-## Why does a long movie use more memory/context?
+Short media also uses larger chunks, so a short song normally needs far fewer model calls than the old implementation.
 
-This is intentional. In v0.4.1.dev0 the input context budget grows with programme duration from roughly 4,096 tokens toward a 24,576-token cap.
+## Why does a long movie use more context?
 
-The model does not receive the entire movie repeatedly. DubLocal combines:
+This is intentional. The input context budget grows from roughly 4,096 tokens for short media toward a 24,576-token ceiling.
+
+DubLocal combines:
 
 - nearby source dialogue;
 - sampled programme-wide dialogue;
-- recent translated lines as rolling memory.
+- recent approved translations as rolling terminology/style memory.
 
-The status box shows the active budget before translation starts.
+The entire movie is not blindly appended to every request.
+
+## `[MUSIC]` became “музыка” / another translated word
+
+That indicates an old build or a regression. In v0.4.2 standalone bracketed cues are structural tags and bypass translation entirely.
+
+`[MUSIC]`, `[APPLAUSE]`, `[LAUGHTER]` and similar standalone cues should remain byte-for-byte unchanged.
+
+## Russian output contains Chinese characters such as `我的心` or `呕`
+
+v0.4.2 rejects that output before writing the translated SRT. CJK/Hangul characters are not valid contamination for the current European translation targets.
+
+If you still see such characters after updating/restarting, report the running version shown at the top of Settings and the exact subtitle line.
+
+## Russian output contains untranslated English words such as “steak” or whole English fragments
+
+v0.4.2 adds target-script validation. A proper name can legitimately remain Latin, but substantial ordinary Latin-script leakage into Russian/Ukrainian is rejected and sent through contextual recovery.
+
+Small isolated errors can still be linguistic rather than structural. Best quality therefore also uses Qwen3 8B plus the senior review pass.
+
+## Translation is grammatical but semantically wrong
+
+First inspect the **Original** column.
+
+If the source subtitle itself is wrong — common with automatic song captions — DubLocal cannot safely infer the real sung/spoken words from translation context alone. Re-transcribe from audio with Accurate Whisper.
+
+If the English/source line is clear and the translation is still wrong, that is a translation-quality defect. Save a small lawful source/translation example when reporting it. The distinction matters because the fix is different.
+
+## Translation sounds too literal or like translated English
+
+Best quality explicitly asks for idiomatic target-language grammar and then reviews the draft a second time for calques, agreement errors, bad word choice and untranslated ordinary words.
+
+For Russian, the quality rules specifically require natural case/gender/number/aspect and prohibit pseudo-Russian transliterations of English words.
 
 ## Translation output is missing/duplicated/misaligned
 
-Contextual translation uses constrained JSON with subtitle IDs. DubLocal validates that every target ID appears exactly once.
+DubLocal uses strict subtitle IDs. The normal pass, recovery pass and single-line recovery all retain the original context.
 
-The quality path now tolerates harmless local-model wrappers such as Markdown fences or a `translations` container object. If a chunk still arrives malformed, DubLocal automatically asks the local model once to repair only the structured output, then validates the subtitle IDs again. It does not silently weaken alignment checks.
+Every expected ID must be present exactly once before output is written. Timestamps/order are never shifted to accommodate a model mistake.
 
-If the second structured-output attempt still fails, the job stops rather than writing a shifted subtitle file. Report the exact visible error.
+If alignment still cannot be proved, the job stops instead of writing a corrupt SRT.
 
-## Translation is still awkward
+## llama.cpp text appears inside a subtitle
 
-Context greatly improves the information available to the model, but local machine translation is not guaranteed to equal a professional human translator.
+Strings such as `Loading model`, `.gguf`, model paths, prompts or runtime banners are never valid subtitle translations. v0.4.2 rejects them before writing output.
 
-Review the side-by-side preview before generating speech or publishing subtitles. If a consistent failure occurs, save a small lawful example of the source/translation and report it; it can be used to improve prompting/context planning.
+The preferred llama-server path also separates generated content from server logs by design. Server logs remain temporary files in DubLocal's job cache.
 
 # Fast legacy OPUS
 
 ## Why does OPUS produce literal or strange dialogue?
 
-The legacy engine translates subtitle texts sentence-by-sentence. That is the reason it is no longer the default quality mode.
+The legacy engine translates subtitle texts sentence-by-sentence. It remains only as the explicit smaller/faster option.
 
-Use **Contextual quality** for normal dialogue work. Keep OPUS for quick/low-storage jobs.
+Use **Best quality · Qwen3 8B + review** for normal quality work.
 
 ## OPUS model missing
 
@@ -137,13 +188,13 @@ Use **Settings → Model Manager → Fast legacy translation · OPUS** and insta
 
 Use **Settings → Local Resources → Rescan local resources** after updating. A reusable environment must expose `kokoro`, NumPy, PyTorch and Hugging Face Hub.
 
-DubLocal does not import another application's `site-packages`; it invokes that environment's Python as an isolated worker.
+DubLocal invokes that environment's Python as an isolated worker; it does not import another environment's `site-packages` directly.
 
 ## Kokoro language unsupported
 
 Official Kokoro coverage exposed by DubLocal includes American/British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin Chinese.
 
-Hungarian, Russian and German can be translated but are not official Kokoro voice languages. This is a TTS limitation, not a translation failure.
+Hungarian, Russian and German can be translation targets but are not official Kokoro voice languages. This is a TTS limitation, not a translation failure.
 
 ## Voice lines overlap
 
@@ -163,18 +214,22 @@ Backups:
 
 ## Branch is ahead/diverged
 
-Automatic update/repair will not rewrite local Git history. This needs manual Git review.
+Automatic update/repair will not rewrite local Git history. This requires manual Git review.
 
 ## Update installed but UI is old
 
 Click **Restart DubLocal**. If necessary reopen the launcher and choose **Stop All & Launch**.
 
+Check the explicit running version at the top of Settings when reporting a discrepancy.
+
 ## Still stuck?
 
 Provide:
 
+- the running version shown in Settings;
 - exact text from the nearest DubLocal status box;
 - source type (YouTube/local);
+- whether the source subtitle was creator/embedded, YouTube automatic, or local Whisper;
 - action clicked immediately before the error;
 - launcher log tail only for startup/launcher failures.
 
