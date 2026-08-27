@@ -1,6 +1,6 @@
 # Installing DubLocal on macOS
 
-**Current development build: v0.5.1.dev0 — Voice Match + Export Refinement**
+**Current development build: v0.5.2.dev0 — Transcription + Timing Reliability**
 
 DubLocal currently uses a Git checkout as its application source, but after first setup it behaves like a normal local Mac utility: launch **DubLocal.app**, update/repair inside the app, and install optional models only when you need them.
 
@@ -25,7 +25,7 @@ The installer creates:
 ~/Applications/Stop DubLocal.app
 ```
 
-It can bootstrap Python 3.11+ and offer FFmpeg/whisper.cpp through Homebrew when required. It does not silently download optional AI model weights.
+It can bootstrap Python 3.11+ and offer FFmpeg/whisper.cpp through Homebrew when required. It does not silently download optional heavy AI model weights.
 
 After installation, ordinary use is through **DubLocal.app**.
 
@@ -50,6 +50,8 @@ Open **Settings → Local Resources** to see what is being reused.
 Open **Settings → Model Manager → Whisper**.
 
 Tiny, Base, Small and optional Accurate Large-v3-Turbo-Q5 are available. Base remains the normal starting point; Accurate is intended for songs, accents and difficult/noisy speech.
+
+v0.5.2 also uses the official whisper.cpp **Silero VAD v6.2.0** auxiliary speech detector when the installed `whisper-cli` supports VAD. This is a tiny ~0.9 MiB MIT-licensed supporting model, not another ASR model. DubLocal downloads it on demand, pins it to the upstream conversion revision and verifies its SHA-256 before use. If it cannot be downloaded while offline, transcription still works with conservative decoder settings.
 
 ### Contextual translation
 
@@ -82,15 +84,15 @@ OPUS remains an explicit smaller/faster sentence-level option under **Fast legac
 
 Open **Settings → Model Manager → Kokoro**. DubLocal reuses a compatible external Kokoro environment first. Only if no reusable environment exists does it prepare another local runtime.
 
-The v0.5.1 automatic voice matcher does not install or load a second TTS model. It performs a lightweight local acoustic analysis and can switch Kokoro voice presets per subtitle segment while the same Kokoro language pipeline remains loaded.
+The automatic voice matcher does not install or load a second TTS model. It performs a lightweight local acoustic analysis and can switch Kokoro voice presets per subtitle segment while the same Kokoro language pipeline remains loaded.
 
 ## Export has no new heavy AI model dependency
 
-The v0.5/v0.5.1 export path uses FFmpeg/ffprobe plus the existing voice output. Automatic original-vocal-range matching also uses FFmpeg + NumPy only; no diarization or source-separation model is downloaded.
+The export path uses FFmpeg/ffprobe plus the existing voice output. Automatic original-vocal-range matching also uses FFmpeg + NumPy only; no diarization or source-separation model is downloaded.
 
 Export can:
 
-- timing-fit generated voice segments;
+- fit each generated voice segment to its subtitle time window with variable local tempo;
 - strongly suppress the original soundtrack across timed dialogue/singing windows;
 - replace the primary audio or append a second dubbed track;
 - embed generated original and translated subtitles as selectable streams;
@@ -140,7 +142,7 @@ Contextual translation may also create a temporary loopback-only llama-server on
 ~/dublocal/                         application Git checkout
 ~/.dublocal/logs/                   launcher logs
 ~/.dublocal/repair-backups/         repair patch backups
-~/Library/.../DubLocal/models/      app-specific model registrations
+~/Library/.../DubLocal/models/      app-specific model registrations, including Whisper/VAD assets
 ~/.cache/huggingface/hub/           default shared Hugging Face cache
 ~/Library/Caches/.../DubLocal/jobs/ generated/intermediate job files
 ```
