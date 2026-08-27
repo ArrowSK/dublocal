@@ -10,6 +10,8 @@ _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _CJK_OR_HANGUL_RE = re.compile(
     r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]"
 )
+_CYRILLIC_RE = re.compile(r"[\u0400-\u052f]")
+_LATIN_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿĀ-ž]")
 _RUNTIME_MARKERS = (
     "Loading model",
     "available commands",
@@ -24,6 +26,8 @@ _RUNTIME_MARKERS = (
     "Exiting...",
     ".gguf",
 )
+_CYRILLIC_TARGETS = {"ru", "uk"}
+_LATIN_TARGETS = {"en", "hu", "de", "fr", "es", "it", "pt", "pl", "sr", "hr"}
 
 
 def is_protected_caption_tag(text: str) -> bool:
@@ -40,13 +44,40 @@ def clean_generated_text(text: str) -> str:
     return cleaned.strip()
 
 
+def target_language_guidance(target_language: str) -> str:
+    """Return concise target-language quality rules for the local LLM."""
+
+    if target_language == "ru":
+        return (
+            "Write idiomatic contemporary Russian in Cyrillic. Use correct case, gender, number and verbal aspect. "
+            "Do not calque English syntax. Do not leave ordinary English words untranslated and do not create pseudo-Russian "
+            "transliterations of English words. Render proper names naturally in Russian when appropriate. Preserve profanity "
+            "at the source register rather than sanitising or intensifying it."
+        )
+    if target_language == "uk":
+        return (
+            "Write idiomatic contemporary Ukrainian in Cyrillic with natural grammar and word order. Do not leave ordinary "
+            "English words untranslated or create pseudo-Ukrainian transliterations. Preserve names and profanity naturally."
+        )
+    if target_language in _LATIN_TARGETS:
+        return (
+            "Write entirely in the requested target language using natural target-language grammar and idiom. Avoid literal "
+            "English calques and untranslated source-language fragments except unavoidable proper names."
+        )
+    return "Write entirely in the requested target language using natural grammar and idiom."
+
+
+def _script_counts(text: str) -> tuple[int, int]:
+    return len(_CYRILLIC_RE.findall(text)), len(_LATIN_RE.findall(text))
+
+
 def validate_translation_text(
     text: str,
     *,
     target_language: str,
     segment_id: int,
 ) -> str:
-    """Reject obvious runtime leakage or wrong-script contamination before writing subtitles."""
+    """Reject runtime leakage, unrelated scripts and substantial wrong-language leakage."""
 
     cleaned = clean_generated_text(text)
     if not cleaned:
@@ -58,12 +89,27 @@ def validate_translation_text(
             f"Contextual translator leaked local runtime text into subtitle id {segment_id} ({marker})."
         )
 
-    # DubLocal's current translation targets are European-language sets. CJK/Hangul
-    # characters therefore indicate model contamination rather than legitimate target text.
     if _CJK_OR_HANGUL_RE.search(cleaned):
         raise DubLocalError(
-            f"Contextual translator produced unexpected non-target script in subtitle id {segment_id} "
+            f"Contextual translator produced unexpected CJK/Hangul text in subtitle id {segment_id} "
             f"while translating to {target_language}."
         )
+
+    cyrillic, latin = _script_counts(cleaned)
+    alphabetic = cyrillic + latin
+    if target_language in _CYRILLIC_TARGETS and alphabetic >= 8:
+        # A proper name can remain Latin, but a Russian/Ukrainian subtitle must not contain
+        # substantial untranslated English such as 'steak', 'oh real' or whole clauses.
+        if latin >= 5 and latin / alphabetic > 0.18:
+            raise DubLocalError(
+                f"Contextual translator left too much Latin-script text in subtitle id {segment_id} "
+                f"while translating to {target_language}."
+            )
+    elif target_language in _LATIN_TARGETS and alphabetic >= 8:
+        if cyrillic >= 5 and cyrillic / alphabetic > 0.18:
+            raise DubLocalError(
+                f"Contextual translator left too much Cyrillic text in subtitle id {segment_id} "
+                f"while translating to {target_language}."
+            )
 
     return cleaned
