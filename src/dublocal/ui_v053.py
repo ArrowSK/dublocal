@@ -5,12 +5,68 @@ from typing import Any
 import gradio as gr
 
 from . import ui_v050 as previous
+from .caption_ux import caption_inventory_text, curate_caption_info
 from .m53 import package_subtitled_media
 from .progress import ProgressEstimator
 
 
 base = previous.base
 MATRIX_CSS = previous.MATRIX_CSS
+
+_ORIGINAL_SCAN_UI = previous._scan_source_ui
+_ORIGINAL_SOURCE_CARD_STATUS = base._source_card_status
+_ORIGINAL_CAPTION_QUALITY_NOTE = base._caption_quality_note
+
+
+def _scan_source_ui_human(*args, **kwargs):
+    """Curate the raw subtitle inventory before it reaches the normal workflow."""
+
+    result = list(_ORIGINAL_SCAN_UI(*args, **kwargs))
+    if len(result) < 3 or not isinstance(result[2], dict) or not result[2]:
+        return tuple(result)
+
+    info = curate_caption_info(result[2])
+    tracks = info.get("subtitle_tracks", []) or []
+    choices = [(str(item.get("label") or "Subtitle track"), item.get("value")) for item in tracks]
+    value = choices[0][1] if choices else None
+    result[1] = gr.Dropdown(
+        label="Available subtitles",
+        choices=choices,
+        value=value,
+        interactive=bool(choices),
+    )
+    result[2] = info
+    return tuple(result)
+
+
+def _source_card_status_human(source_info: dict | None) -> str:
+    info = source_info or {}
+    if not info:
+        return _ORIGINAL_SOURCE_CARD_STATUS(source_info)
+
+    title = str(info.get("title") or "Media").replace("\n", " ").strip()
+    kind = "YouTube" if info.get("kind") == "youtube" else "Local file"
+    duration = base._duration_compact(info)
+    visible = len(info.get("subtitle_tracks", []) or [])
+    hidden = int(info.get("caption_hidden_count") or 0)
+
+    if visible:
+        subtitle_note = f"{visible} source subtitle track{'s' if visible != 1 else ''}"
+    else:
+        subtitle_note = "no usable existing subtitles"
+    if hidden:
+        subtitle_note += f" · {hidden} YouTube auto-translation{'s' if hidden != 1 else ''} hidden"
+    return f"✓ **Loaded · OK** · {kind} · {title} · {duration} · {subtitle_note}"
+
+
+def _caption_quality_note_human(info: dict | None, track_value: str | None) -> str:
+    inventory = caption_inventory_text(info)
+    selected_note = _ORIGINAL_CAPTION_QUALITY_NOTE(info, track_value)
+    if inventory and selected_note:
+        return f"**Available:** {inventory}\n\n{selected_note}"
+    if inventory:
+        return f"**Available:** {inventory}"
+    return selected_note
 
 
 def _package_subtitles_ui(
@@ -62,7 +118,7 @@ def _package_subtitles_ui(
 
 
 def build_app() -> gr.Blocks:
-    """Layer M5.3's subtitle-only package action onto the stable v0.5 workflow."""
+    """Layer M5.3 stabilization and subtitle-inventory UX onto v0.5."""
 
     captured: dict[str, Any] = {}
     blanks: list[Any] = []
@@ -72,6 +128,9 @@ def build_app() -> gr.Blocks:
     original_checkbox = base.gr.Checkbox
     original_dropdown = base.gr.Dropdown
     original_button = base.gr.Button
+    original_previous_scan = previous._scan_source_ui
+    original_source_card_status = base._source_card_status
+    original_caption_quality_note = base._caption_quality_note
 
     def state_wrapper(value=None, *args, **kwargs):
         component = original_state(value, *args, **kwargs)
@@ -91,8 +150,11 @@ def build_app() -> gr.Blocks:
         return component
 
     def dropdown_wrapper(*args, **kwargs):
-        component = original_dropdown(*args, **kwargs)
         label = kwargs.get("label") or ""
+        if label == "Existing subtitle / caption track":
+            kwargs["label"] = "Available subtitles"
+            label = "Available subtitles"
+        component = original_dropdown(*args, **kwargs)
         if label == "From":
             captured["source_language"] = component
         elif label == "Container":
@@ -123,6 +185,9 @@ def build_app() -> gr.Blocks:
     base.gr.Checkbox = checkbox_wrapper
     base.gr.Dropdown = dropdown_wrapper
     base.gr.Button = button_wrapper
+    previous._scan_source_ui = _scan_source_ui_human
+    base._source_card_status = _source_card_status_human
+    base._caption_quality_note = _caption_quality_note_human
     try:
         demo = previous.build_app()
     finally:
@@ -130,6 +195,9 @@ def build_app() -> gr.Blocks:
         base.gr.Checkbox = original_checkbox
         base.gr.Dropdown = original_dropdown
         base.gr.Button = original_button
+        previous._scan_source_ui = original_previous_scan
+        base._source_card_status = original_source_card_status
+        base._caption_quality_note = original_caption_quality_note
 
     required = {
         "source_state",
