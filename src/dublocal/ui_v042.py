@@ -24,7 +24,7 @@ base.TRANSLATION_MODE_CHOICES = [
 ]
 
 
-async def _prepare_contextual_settings(
+def _prepare_contextual_settings(
     main_mode: str,
     main_source_language: str,
     main_target_language: str,
