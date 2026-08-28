@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import dublocal.contextual_progress as contextual_progress
 from dublocal.timeline import Segment, parse_srt
+from dublocal.translation import TranslatedSegment
+from dublocal.translation_cache import CachedTranslation
 
 
 def _targets() -> list[Segment]:
@@ -129,6 +131,8 @@ def test_contextual_translation_auto_detects_source_with_same_runtime(monkeypatc
             return "[1] - Hola, ¿cómo estás?"
 
     monkeypatch.setattr(contextual_progress, "ContextualRuntime", Runtime)
+    monkeypatch.setattr(contextual_progress, "load_translation_cache", lambda *args, **kwargs: None)
+    monkeypatch.setattr(contextual_progress, "save_translation_cache", lambda *args, **kwargs: None)
     monkeypatch.setattr(contextual_progress, "_llama_command", lambda: ["llama-cli"])
     monkeypatch.setattr(contextual_progress, "contextual_model_valid", lambda key: key == "8b")
     monkeypatch.setattr(
@@ -179,6 +183,8 @@ def test_contextual_translation_preserves_standalone_tags(monkeypatch, tmp_path:
             return "[2] - Я чувствую себя таким."
 
     monkeypatch.setattr(contextual_progress, "ContextualRuntime", Runtime)
+    monkeypatch.setattr(contextual_progress, "load_translation_cache", lambda *args, **kwargs: None)
+    monkeypatch.setattr(contextual_progress, "save_translation_cache", lambda *args, **kwargs: None)
     monkeypatch.setattr(contextual_progress, "_llama_command", lambda: ["llama-cli"])
     monkeypatch.setattr(contextual_progress, "contextual_model_valid", lambda key: key == "8b")
     monkeypatch.setattr(
@@ -196,3 +202,88 @@ def test_contextual_translation_preserves_standalone_tags(monkeypatch, tmp_path:
     segments = parse_srt(result.srt_path.read_text(encoding="utf-8"))
     assert segments[0].text == "[MUSIC]"
     assert segments[1].text == "Я чувствую себя таким."
+
+
+def test_contextual_translation_cache_hit_skips_runtime_and_model_readiness(monkeypatch, tmp_path: Path):
+    source = tmp_path / "captions.srt"
+    source.write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\nHello there.\n",
+        encoding="utf-8",
+    )
+    cached = CachedTranslation(
+        segments=[TranslatedSegment(1, 0, 2000, "Hello there.", "Привет.")],
+        source_language="en",
+        target_language="ru",
+        route="Qwen3 8B + review · English → Russian",
+    )
+
+    class RuntimeMustNotStart:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("cache hit must not load the translation runtime")
+
+    monkeypatch.setattr(contextual_progress, "ContextualRuntime", RuntimeMustNotStart)
+    monkeypatch.setattr(contextual_progress, "load_translation_cache", lambda *args, **kwargs: cached)
+    monkeypatch.setattr(contextual_progress, "_llama_command", lambda: None)
+    monkeypatch.setattr(contextual_progress, "contextual_model_valid", lambda key: False)
+    monkeypatch.setattr(
+        contextual_progress,
+        "active_recommendation",
+        lambda: SimpleNamespace(model_key="8b", review=True, context_cap_tokens=24576),
+    )
+
+    result = contextual_progress.translate_srt_contextual_with_progress(source, "en", "ru")
+    assert result.srt_path.is_file()
+    assert result.source_language == "en"
+    assert [item.translated_text for item in result.segments] == ["Привет."]
+    assert "cache hit" in result.route
+
+
+def test_successful_contextual_translation_is_saved_after_validation(monkeypatch, tmp_path: Path):
+    source = tmp_path / "captions.srt"
+    source.write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\nHello there.\n",
+        encoding="utf-8",
+    )
+    saved: dict[str, object] = {}
+
+    class Runtime:
+        mode = "fake-server"
+
+        def __init__(self, model_key: str = "8b", context_tokens: int | None = None):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def generate(self, prompt: str, *, max_output_tokens: int) -> str:
+            return "[1] - Привет."
+
+    def remember(key, translated, **kwargs):
+        saved["key"] = key
+        saved["translated"] = list(translated)
+        saved.update(kwargs)
+
+    monkeypatch.setattr(contextual_progress, "ContextualRuntime", Runtime)
+    monkeypatch.setattr(contextual_progress, "load_translation_cache", lambda *args, **kwargs: None)
+    monkeypatch.setattr(contextual_progress, "save_translation_cache", remember)
+    monkeypatch.setattr(contextual_progress, "_llama_command", lambda: ["llama-cli"])
+    monkeypatch.setattr(contextual_progress, "contextual_model_valid", lambda key: True)
+    monkeypatch.setattr(
+        contextual_progress,
+        "active_recommendation",
+        lambda: SimpleNamespace(model_key="8b", review=False, context_cap_tokens=16384),
+    )
+
+    result = contextual_progress.translate_srt_contextual_with_progress(
+        source,
+        "en",
+        "ru",
+        review=False,
+    )
+    assert result.segments[0].translated_text == "Привет."
+    assert saved["source_language"] == "en"
+    assert saved["target_language"] == "ru"
+    assert saved["translated"][0].translated_text == "Привет."
