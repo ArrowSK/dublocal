@@ -2,17 +2,20 @@
 
 **Current development build: v0.6.0.dev0 — Magic Flow UX**
 
-DubLocal has three practical levels of control:
+DubLocal keeps the normal experience and the full manual toolset separate.
 
-1. **Magic Flow** — the normal consumer workflow.
-2. **More options** — medium complexity without exposing the full pipeline.
-3. **Detailed workflow** — stage-by-stage control for difficult jobs and debugging.
+Under **Main** there are two modes:
+
+1. **Simple** — the default for normal use. It contains Magic Flow only.
+2. **Advanced** — the complete stage-by-stage workflow for difficult jobs, overrides and debugging.
 
 Settings remains separate for updates, model management and local resources.
 
-# Magic Flow — recommended
+# Simple — recommended
 
-Magic Flow sits at the top of Main.
+Open **Main → Simple**. This is the normal consumer workflow.
+
+Magic Flow asks only for the source, rights confirmation, output language and desired result. DubLocal chooses the local processing route itself. Additional controls remain under the collapsed **More options** section.
 
 ## Step 1 · Source
 
@@ -52,7 +55,9 @@ You do not have to understand pipeline dependencies. For example, if Voice-over 
 
 Click **Run Magic Flow**.
 
-The persistent status shows the route DubLocal selected, progress/ETA where measurable, and the detected source language. Finished files appear in the Results section.
+The persistent status shows the route DubLocal selected, progress/ETA where measurable, and the detected source language.
+
+The **Results** section stays collapsed while processing so there is one clear progress surface instead of several output widgets showing duplicate loading states. Open Results when you want the finished files.
 
 # How Magic Flow chooses subtitles
 
@@ -69,7 +74,7 @@ Magic Flow never silently downloads a large model. If no safe route is ready, it
 
 # More options — medium complexity
 
-Open the collapsed **More options** section when you want more control without using the detailed pipeline.
+Open the collapsed **More options** section inside Simple when you want more control without switching to Advanced.
 
 ## Subtitle source
 
@@ -101,13 +106,15 @@ For a local file, Original means video stream-copy: no recoding merely because s
 
 For YouTube, a lower quality acts as a source-resolution ceiling before download.
 
-# Detailed workflow — advanced control
+# Advanced — manual control
 
-The complete workflow remains below Magic Flow:
+Open **Main → Advanced** when you need to inspect or override individual stages.
+
+The complete workflow is:
 
 **1 Source → 2 Subtitles → 3 Translate → 4 Voice-over → 5 Export**
 
-Use it when you need to inspect or override decisions. The individual stages remain collapsible.
+The individual stages remain collapsible. Advanced preserves the same controls and behavior as the previous detailed workflow; moving it into its own tab is a presentation change, not a feature reduction.
 
 ## 1 · Source
 
@@ -199,6 +206,14 @@ The actual subtitle file remains intact, but the temporary TTS timeline removes 
 [LAUGHS] Hello   → speaks “Hello”
 ```
 
+### Timing
+
+DubLocal fits speech timing during Kokoro generation rather than broadly stretching the finished waveform afterward.
+
+For each spoken subtitle line, DubLocal generates a natural pilot, measures its real duration against the subtitle window, then regenerates materially mismatched lines with Kokoro's native speed control. A limited correction pass can be used when needed. The same Kokoro worker/pipeline remains loaded, so this improves timing without adding another model-sized memory cost.
+
+Extreme mismatch is reported rather than forcing severely robotic speech. Subtitle timestamps themselves are not rewritten.
+
 ## 5 · Export
 
 ### Replace primary audio
@@ -216,12 +231,6 @@ Use this when you want the original media with source/transcribed subtitles but 
 ### Subtitle tracks
 
 Normal dubbed export includes generated original + translated subtitles as selectable tracks when both are available. Nothing is burned into the video.
-
-### Timing
-
-Each generated speech segment targets its own subtitle timing window. DubLocal measures the generated WAV and can chain FFmpeg `atempo` stages over an effective 0.30×–2.50× range, followed by a small correction pass when necessary.
-
-The subtitle timestamps themselves are not rewritten.
 
 ### Soundtrack level
 
