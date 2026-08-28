@@ -1,8 +1,10 @@
 # DubLocal troubleshooting
 
-**Applies to v0.5.3.dev0 — M5 Stabilization.**
+**Applies to v0.6.0.dev0 — Magic Flow UX.**
 
 Most failures belong to one stage. Fix that stage rather than deleting models/caches or reinstalling everything.
+
+# Launcher / installation
 
 ## DubLocal.app opens nothing
 
@@ -29,7 +31,60 @@ Working data lives under:
 ~/Library/Caches/DubLocal/jobs/
 ```
 
-Normal launch removes jobs older than 24 hours and caps the cache at 4 GiB. Persistent AI models/shared Hugging Face assets are not deleted.
+Normal launch removes stale jobs and caps temporary job data. Persistent AI models/shared Hugging Face assets are not deleted by job cleanup.
+
+# Magic Flow
+
+## Magic Flow says no subtitle route is ready
+
+Magic Flow never silently downloads a large model.
+
+If no creator/embedded track, suitable automatic caption or installed Whisper model is available, open:
+
+**Settings → Model Manager → Whisper**
+
+Install **Base** for normal use or **Accurate · Large v3 Turbo Q5** for songs/accents/difficult audio, then run Magic Flow again.
+
+## Magic Flow chose a route I do not want
+
+Open **More options → Subtitle source** and choose:
+
+- Prefer an existing subtitle track; or
+- Force local transcription.
+
+For complete manual control, use the Detailed workflow below Magic Flow.
+
+## I only want subtitles
+
+In Magic Flow leave **Subtitles** checked and uncheck Translate, Voice-over and Output media file.
+
+The detailed Subtitles stage also remains available and produces standalone SRT/VTT/TXT.
+
+## I want translated subtitles inside the movie but no dub audio
+
+Select:
+
+- Subtitles
+- Translate
+- Output media file
+
+and leave Voice-over unchecked.
+
+Magic Flow packages the original audio with selectable source/translated subtitle tracks. Nothing is burned into the picture.
+
+## I want the original audio kept too
+
+Leave **More options → Keep original audio as a separate selectable track** checked. MKV is the recommended container for this kind of multi-track output.
+
+## Voice-over is unavailable for the selected language
+
+Translation and subtitles can support languages that the current Kokoro backend cannot speak.
+
+Magic Flow will stop the voice stage with a clear message. Either:
+
+- choose a Kokoro-supported output language;
+- uncheck Voice-over/Output media and keep the subtitles/translation; or
+- use the Detailed workflow when another TTS backend becomes available.
 
 # Source / YouTube
 
@@ -49,7 +104,7 @@ Check **Settings → Local Resources**. The installer/repair flow can restore FF
 
 Do not translate/dub a hallucinated SRT.
 
-v0.5.3 keeps several protections:
+Current protections include:
 
 - supported ordinary-speech paths may use Silero VAD;
 - Accurate music transcription disables rolling text context that can self-seed repetition;
@@ -58,23 +113,37 @@ v0.5.3 keeps several protections:
 
 For songs/difficult vocals prefer **Accurate · Large v3 Turbo Q5**.
 
-If a severe loop survives after v0.5.3, provide the affected SRT time range. The raw decoder output is temporary diagnostic data; the cleaned result is what downstream stages receive.
+If a severe loop survives, preserve the affected SRT time range. Raw decoder output remains temporary diagnostic data; the cleaned result is what downstream stages receive.
 
 ## Some real words were missed
 
-v0.5.3 does **not** globally lower Whisper thresholds because that would reintroduce ghost speech.
+DubLocal does **not** globally lower Whisper thresholds because that would reintroduce ghost speech.
 
-Instead, it selectively examines suspicious sparse lines and, for Accurate music mode, short internal holes. A candidate is accepted only if two isolated no-context decoding passes agree closely and the text does not simply echo a neighbouring subtitle.
+Instead, it selectively examines suspicious sparse lines and short internal holes. A candidate is accepted only if two isolated no-context decoding passes agree closely and the text does not simply echo a neighbouring subtitle.
 
-On Apple Silicon below 12 GiB this extra analysis is capped at 3 regions / 24 seconds.
+Low-memory Apple Silicon has stricter limits on this extra analysis. A remaining gap is preferable to invented dialogue.
 
-A remaining gap is preferable to invented dialogue. If a specific word is still missing, keep the shortest time range around that omission for a regression example.
+# Auto language / translation
 
-## Auto language / Translate From=Auto
+## Transcribe locally detected a language but Translate still says Auto
 
-After local Auto transcription, the status should normally contain a concrete detected language. Contextual translation also supports **From = Auto** directly: when no reliable language state exists, the already-loaded local Qwen runtime identifies the dominant subtitle language before translating.
+That is normal UI state: **From = Auto** means “consume the detected language automatically.”
 
-If Auto still cannot determine a supported language, select From manually and report the exact status message.
+The translation engine should resolve it as follows:
+
+1. use the concrete language detected by local transcription when available;
+2. otherwise, for Contextual quality, identify the dominant subtitle language with the already-loaded local Qwen runtime;
+3. proceed with translation using the resolved language.
+
+It should not tell you to “choose Auto” when Auto is already selected.
+
+## Auto still cannot identify the source language
+
+Use the Detailed workflow and choose **From** manually. Preserve the translation status/error plus a short SRT sample when reporting the failure.
+
+## Legacy OPUS asks for a manual source language
+
+Expected. OPUS has no contextual language-identification pass. Use Contextual quality for a true `From = Auto` workflow.
 
 # Translation
 
@@ -96,109 +165,56 @@ This protects unified memory on M1-class Macs.
 
 First verify the source transcript. Contextual translation cannot recover evidence that ASR removed.
 
-If the English/source text is correct, preserve the shortest failing example with nearby context. The prompt/review explicitly handles discourse reference/gender where supported, idioms/phraseology by meaning/register and metaphor fidelity.
-
-## Wrong-script characters, prompt/runtime text or shifted IDs
-
-Those should be rejected before a translated SRT is written. If any survive, report the smallest source/translation sample plus the running version.
+If the source text is correct, preserve the shortest failing example plus nearby context. The prompt/review explicitly handles discourse reference/gender where supported, idioms/phraseology by meaning/register and metaphor fidelity.
 
 # Voice-over
 
-## Kokoro exists elsewhere but is not detected
+## Voice reads `[MUSIC]` or another bracketed cue
 
-Use **Settings → Local Resources → Rescan**. DubLocal reuses a compatible external Kokoro environment through a separate process; it never injects another environment into its interpreter.
+That is a bug. The SRT should preserve the cue, but the temporary speech timeline must remove standalone/non-dialogue bracket cues before Kokoro.
 
-## It reads `[MUSIC]`
+## Auto voice seems wrong
 
-It should not. Tag-only cues produce no speech and inline cues are removed only from the temporary TTS input:
+Automatic matching is based on acoustic lower/higher vocal range, not speaker identity. Switch to a manual voice in the Detailed workflow for a particular title if preferred.
 
-```text
-[MUSIC]            subtitle kept; silence
-[LAUGHS] Hello     subtitle kept; speaks “Hello”
-```
+# Timing
 
-## Auto voice picked the wrong range
+## Dub ends too early or too late
 
-Auto voice matching is a lightweight F0/range heuristic, not diarization. Music/noise, overlap and weak pitch evidence can make it fall back or choose imperfectly. Use a manual Kokoro voice for deterministic casting.
+DubLocal measures each generated segment and targets its subtitle window. Current timing can chain FFmpeg `atempo` stages over an effective 0.30×–2.50× range.
 
-It does not load two TTS models; one pipeline remains loaded while presets change.
+A line requiring more extreme manipulation may remain imperfect rather than being stretched into obviously damaged speech. Preserve the exact subtitle start/end, text and voice-segment duration for a useful report.
+
+# Soundtrack / loudness
+
+## Original soundtrack becomes much louder between dub lines
+
+Current builds keep the original soundtrack at a stable reduced bed and attenuate it further during source dialogue/singing windows. Large jumps should not be normal.
+
+Remember that DubLocal is working from a married soundtrack, not a professional dialogue-free M&E stem. It uses attenuation/compression, not true source separation.
 
 # Export
 
-## The soundtrack becomes much louder between dubbed lines
+## I do not want video re-encoding
 
-This was a specific pre-v0.5.3 failure. v0.5.3 keeps the original programme at a stable reduced bed level and attenuates it further during source dialogue/singing windows. Gentle compression/limiting controls the final mix.
+Choose **Original / best available**.
 
-If the level still pumps strongly, report a short time range plus whether source subtitle windows cover that region. DubLocal is still working from a married mix, not a dialogue-free M&E stem.
+For local media, this uses video stream-copy. Audio/subtitle changes alone do not imply video recoding.
 
-## Original dialogue/singing remains audible
+## MP4 failed but MKV works
 
-DubLocal suppresses the original mix across the full source subtitle window, but it cannot perfectly remove a vocal from a married soundtrack without source separation. This remains ducking/attenuation + overlay by design.
+Expected for some codec/track combinations. MKV is the recommended multi-track container because it accepts a wider range of source streams without transcoding.
 
-## Dub finishes too early or too late
+## I want subtitles selectable in VLC, not burned in
 
-v0.5.3 measures every generated WAV against its subtitle window and can chain FFmpeg `atempo` stages for an effective 0.30×–2.50× range. A small correction pass handles rounding if the end is still more than roughly 25 ms off.
-
-Subtitle timestamps are not moved. If a line would need an even more extreme stretch, DubLocal reports it rather than forcing unusable audio.
-
-When reporting timing, provide one subtitle start/end and the corresponding translated text. That is more useful than shifting the whole SRT.
-
-## I only want the original media with subtitles
-
-Choose:
-
-**Package original + subtitles · no dub**
-
-This keeps original audio, embeds only the current source/transcribed subtitle, and adds neither translated subtitles nor a DubLocal audio track.
-
-## Both subtitles are not visible in VLC
-
-Normal dubbed export embeds generated source + translated subtitles when both exist. MKV presents them as selectable streams; MP4 converts generated SRT to `mov_text` when compatible.
-
-The subtitle-only export intentionally embeds only the source/transcribed subtitle.
-
-## Is video re-encoded?
-
-### Local
-
-**Original / best available** uses video stream-copy. Selecting a lower resolution explicitly enables H.264 VideoToolbox encoding. DubLocal does not upscale a lower-resolution source.
-
-### YouTube
-
-The selected resolution is a maximum source height. yt-dlp acquires an appropriate source, then the final remux stream-copies the video.
-
-## MP4 says to use MKV
-
-The requested stream combination is not safely packageable in MP4 without a hidden transcode. Choose **MKV · recommended**.
+Use normal export/Magic Flow media output. Generated subtitles are muxed as tracks rather than burned into the picture.
 
 # Updates / repair
 
-## Modified tracked files
+## DubLocal says it is up to date but I expected another build
 
-Normal update refuses to overwrite them. **Repair installation** can save a patch under:
+The updater compares Git revisions. Run **Check for updates** again after the relevant change has been merged to official `main`.
 
-```text
-~/.dublocal/repair-backups/
-```
+## Local changes block an update
 
-then restore official tracked files while preserving models/caches/jobs.
-
-## Update installed but UI is old
-
-Use **Restart DubLocal** or relaunch and choose **Stop All & Launch**.
-
-# Still stuck?
-
-Provide:
-
-- nearest persistent status message;
-- running version from Settings;
-- source type;
-- action clicked;
-- relevant time range;
-- transcription model/language when ASR is involved;
-- translation From/To when translation is involved;
-- voice mode/language for TTS;
-- export mode/container/video quality for remux/mixing issues.
-
-Do not post account cookies, authentication tokens or private media you cannot share.
+Use **Settings → Updates → Repair installation**. The repair flow is the supported way to reconcile local checkout drift without manually resetting unrelated work.
