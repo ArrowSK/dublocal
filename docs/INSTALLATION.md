@@ -1,8 +1,8 @@
 # Installing DubLocal on macOS
 
-**Current development build: v0.5.3.dev0 — M5 Stabilization**
+**Current development build: v0.6.0.dev0 — Magic Flow UX**
 
-DubLocal currently runs from a Git checkout, but after the first setup ordinary use is through the native **DubLocal.app** launcher. Updates, repair and optional models are managed inside the app.
+DubLocal currently runs from a Git checkout, but after first setup ordinary use is through the native **DubLocal.app** launcher. Updates, repair and optional models are managed inside the app.
 
 There is no packaged DMG/GitHub Release yet.
 
@@ -10,9 +10,11 @@ There is no packaged DMG/GitHub Release yet.
 
 - macOS 13+
 - Apple Silicon or Intel
-- Python 3.11+ (the installer can bootstrap it)
+- Python 3.11+; the installer can bootstrap a compatible Python
 - FFmpeg/ffprobe
 - optional whisper.cpp, llama.cpp and AI model weights depending on the features you use
+
+DubLocal is designed to remain usable on M1-class Macs. Model recommendations and contextual allocations scale to memory rather than assuming a recent high-RAM machine.
 
 ## First installation
 
@@ -29,7 +31,22 @@ The installer creates:
 ~/Applications/Stop DubLocal.app
 ```
 
-It can offer Homebrew installation for required native tools. Heavy optional AI models are not silently bundled or downloaded.
+The installer can offer Homebrew installation for required native tools. Heavy optional AI models are not silently bundled or downloaded.
+
+## First launch
+
+Open **DubLocal.app**. The top of Main is **Magic Flow**, which is the recommended starting point:
+
+1. choose YouTube or Local file;
+2. provide the link/file;
+3. confirm rights/legal authority;
+4. choose output language;
+5. choose the outputs you want;
+6. run Magic Flow.
+
+Magic Flow uses resources that are already installed. If it needs a local model that is not ready, it stops with a clear Model Manager instruction rather than downloading hundreds of megabytes without asking.
+
+The detailed Source → Subtitles → Translate → Voice-over → Export workflow remains below Magic Flow.
 
 ## Reuse-first policy
 
@@ -47,9 +64,11 @@ DubLocal never merges virtual environments or injects another application's `sit
 
 ### Whisper
 
-Base is the normal starting model. **Accurate · Large v3 Turbo Q5 · 547 MiB** is the stronger option for songs, accents and difficult/noisy audio.
+**Base · 142 MiB** is the practical normal starting model.
 
-The tiny whisper.cpp Silero VAD asset may be prepared on demand for supported speech-oriented paths. v0.5.3 does not rely on VAD alone: the Accurate music profile has separate no-context/repetition protection and targeted two-pass recovery for suspicious sparse/gap regions.
+**Accurate · Large v3 Turbo Q5 · 547 MiB** is the stronger option for songs, accents and difficult/noisy audio. When it is already installed, Magic Flow can prefer it over automatic YouTube captions.
+
+The tiny whisper.cpp Silero VAD asset may be prepared on demand for supported speech-oriented paths. The Accurate music profile has separate no-context/repetition protection and targeted two-pass recovery for suspicious sparse/gap regions.
 
 ### Contextual translation
 
@@ -69,85 +88,36 @@ The runtime KV/context allocation scales too; this is important for 8 GB M1 syst
 
 DubLocal first reuses a compatible isolated Kokoro runtime if one is already available. Automatic lower/higher vocal-range matching changes voice presets per segment without loading a second TTS model.
 
-## v0.5.3 has no new heavy model dependency
+Kokoro does not support every translation language. Magic Flow will still produce subtitles/translation when possible and will clearly explain when the requested voice stage needs a supported language/backend.
 
-The new stabilization work is intentionally M1-friendly:
-
-- stable soundtrack loudness and timing fit use FFmpeg DSP;
-- subtitle-only packaging is remuxing;
-- smarter missing-word recovery reuses the selected Whisper model only for short suspicious ranges;
-- on Apple Silicon below 12 GiB, extra ASR recovery is capped at 3 regions / 24 seconds per job.
-
-There is no hidden second full-media transcription pass.
-
-## Export and recoding policy
-
-**Original / best available** remains the default.
-
-For local files, Original uses video stream-copy. Selecting a lower resolution explicitly opts into Apple VideoToolbox H.264 encoding. Audio/subtitle changes alone never imply a video transcode.
-
-For YouTube, a selected maximum resolution constrains source acquisition before final stream-copy.
-
-Export modes include:
-
-- Replace primary audio;
-- Add dubbed audio as another track;
-- **Package original + subtitles · no dub**.
-
-MKV is recommended for multi-track output. MP4 is available for compatible combinations.
-
-## Updating
+## In-app updates
 
 Use:
 
 **Settings → Updates → Check for updates → Install update → Restart DubLocal**
 
-Normal updates accept only a clean fast-forward from official `ArrowSK/dublocal` `main` and do not overwrite tracked local edits.
+The updater compares the current checkout/running revision to official `main`, not just the displayed development version.
 
-## Repair installation
+If local files have drifted, use **Repair installation** rather than deleting the repository or virtual environment manually.
 
-**Repair installation** can save a patch backup of tracked changes and restore the official application core without deleting models, shared caches, generated jobs or untracked user files.
+## Temporary files
 
-Patch backups live under:
-
-```text
-~/.dublocal/repair-backups/
-```
-
-## Local services and paths
-
-DubLocal listens only on:
+Working job data lives under:
 
 ```text
-http://127.0.0.1:7861
+~/Library/Caches/DubLocal/jobs/
 ```
 
-Contextual translation may temporarily start a loopback-only llama-server on an ephemeral port.
+Normal launch removes jobs older than 24 hours and caps temporary job data at 4 GiB. Persistent AI models and shared Hugging Face assets are not deleted by this cleanup.
 
-Typical paths:
+## M1-class compatibility
 
-```text
-~/dublocal/                         Git checkout
-~/.dublocal/logs/                   launcher logs
-~/.dublocal/repair-backups/         repair patches
-~/.cache/huggingface/hub/           shared HF cache
-~/Library/Caches/DubLocal/jobs/     generated/intermediate jobs
-```
+Current reliability and UX work does not add another heavy mandatory model:
 
-Exact app/model locations may use `platformdirs`.
+- timing and soundtrack balance are FFmpeg DSP;
+- subtitle packaging is remuxing;
+- targeted ASR recovery reuses the selected Whisper model only for short suspicious ranges;
+- low-memory Macs have stricter recovery/context caps;
+- Magic Flow never silently prepares every optional model.
 
-The jobs cache is disposable: normal startup removes jobs older than 24 hours and caps it at 4 GiB. Persistent model assets and shared Hugging Face files are not part of this cleanup.
-
-## Older-build recovery
-
-Only if the in-app updater is too old to function:
-
-```bash
-cd ~/dublocal
-git pull
-zsh scripts/macos/install-launcher.sh
-```
-
-For normal maintenance use the in-app updater/repair flow.
-
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) before deleting models or rebuilding the installation.
+An M1 may take longer than newer hardware, but the workflow is intentionally designed to degrade by speed/profile rather than becoming unsupported.
