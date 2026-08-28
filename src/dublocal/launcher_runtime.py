@@ -7,6 +7,7 @@ from platformdirs import user_cache_dir
 
 from .adaptive_audio import install_adaptive_audio_refinement
 from .job_cache import prune_job_cache
+from .job_control import install_shutdown_hooks, shutdown_all
 from .m53 import install_runtime_refinements
 from .transcription_v053 import install_transcription_refinements
 from . import tts_provider_refinement
@@ -28,7 +29,12 @@ install_transcription_refinements()
 install_native_timing_refinement()
 install_adaptive_audio_refinement()
 
-from .product_ui import MATRIX_CSS, build_app
+from . import product_ui
+from .cancellation_ui import install_cancellation_ui
+
+install_cancellation_ui(product_ui)
+MATRIX_CSS = product_ui.MATRIX_CSS
+build_app = product_ui.build_app
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -49,6 +55,7 @@ def _gradio_allowed_paths() -> list[str]:
 def main() -> None:
     port = int(os.getenv("DUBLOCAL_PORT", "7861"))
     inbrowser = _env_bool("DUBLOCAL_INBROWSER", True)
+    install_shutdown_hooks()
 
     # Generated SRT/WAV/intermediate media live in the macOS cache, not the repo or
     # user documents. Prune stale/oversized jobs before a new session starts.
@@ -61,14 +68,19 @@ def main() -> None:
     install_runtime_refinements()
 
     demo = build_app()
-    demo.queue(default_concurrency_limit=1).launch(
-        inbrowser=inbrowser,
-        server_name="127.0.0.1",
-        server_port=port,
-        show_error=False,
-        css=MATRIX_CSS,
-        allowed_paths=_gradio_allowed_paths(),
-    )
+    try:
+        demo.queue(default_concurrency_limit=1).launch(
+            inbrowser=inbrowser,
+            server_name="127.0.0.1",
+            server_port=port,
+            show_error=False,
+            css=MATRIX_CSS,
+            allowed_paths=_gradio_allowed_paths(),
+        )
+    finally:
+        # Launcher stop/restart and normal interpreter shutdown must never leave
+        # llama.cpp, Kokoro/Russian TTS, whisper.cpp, Demucs or ffmpeg children alive.
+        shutdown_all()
 
 
 if __name__ == "__main__":

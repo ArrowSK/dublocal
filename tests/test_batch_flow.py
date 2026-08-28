@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import dublocal.batch_flow as batch
+from dublocal.job_control import begin_job, end_job, request_cancel
 from dublocal.magic_flow import MagicFlowResult
 
 
@@ -141,3 +142,50 @@ def test_queue_is_sequential_and_continues_after_failure(monkeypatch, tmp_path: 
     assert calls == ["one.mp4", "two.mp4", "three.mp4"]
     assert [item.state for item in result.items] == ["done", "failed", "done"]
     assert result.items[1].error == "broken input"
+
+
+def test_stop_keeps_completed_output_and_never_starts_remaining_items(monkeypatch, tmp_path: Path) -> None:
+    files = []
+    for name in ("one.mp4", "two.mp4", "three.mp4"):
+        path = tmp_path / name
+        path.write_bytes(b"media")
+        files.append(str(path))
+
+    calls: list[str] = []
+
+    def fake_run_magic_flow(**kwargs):
+        name = Path(kwargs["local_file"]).name
+        calls.append(name)
+        if name == "two.mp4":
+            request_cancel()
+            raise RuntimeError("helper process was terminated")
+        work = tmp_path / f"work-{name}"
+        work.mkdir()
+        return _magic_result(work, Path(name).stem)
+
+    monkeypatch.setattr(batch, "run_magic_flow", fake_run_magic_flow)
+    monkeypatch.setattr(
+        batch,
+        "publish_magic_result",
+        lambda item, result: (("Media", Path(item.locator).with_suffix(".done")),),
+    )
+
+    begin_job()
+    try:
+        result = batch.run_magic_queue(
+            source_type="Local file",
+            youtube_url="",
+            local_files=files,
+            rights_confirmed=True,
+            target_language="ru",
+            tasks=["subtitles"],
+        )
+    finally:
+        end_job()
+
+    assert calls == ["one.mp4", "two.mp4"]
+    assert [item.state for item in result.items] == ["done", "cancelled", "cancelled"]
+    assert len(result.succeeded) == 1
+    assert len(result.cancelled) == 2
+    assert not result.failed
+    assert result.items[2].error == "Not started because the queue was stopped."

@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 
 from yt_dlp import YoutubeDL
 
+from .job_control import JobCancelled, cancel_requested, check_cancelled
 from .magic_flow import MagicFlowResult, run_magic_flow
 from .media import DubLocalError
 from .output_naming import safe_language_suffix
@@ -44,6 +45,10 @@ class BatchFlowResult:
     @property
     def failed(self) -> tuple[QueueItemResult, ...]:
         return tuple(item for item in self.items if item.state == "failed")
+
+    @property
+    def cancelled(self) -> tuple[QueueItemResult, ...]:
+        return tuple(item for item in self.items if item.state == "cancelled")
 
 
 def _notify(callback: ProgressCallback | None, fraction: float, label: str) -> None:
@@ -163,6 +168,7 @@ def _flatten_youtube_entries(info: dict[str, Any]) -> list[QueueItem]:
 
 
 def expand_youtube_queue(url: str) -> tuple[QueueItem, ...]:
+    check_cancelled()
     clean = (url or "").strip()
     if not clean:
         raise DubLocalError("Paste a YouTube video, playlist, or channel URL first.")
@@ -189,9 +195,14 @@ def expand_youtube_queue(url: str) -> tuple[QueueItem, ...]:
     try:
         with YoutubeDL(options) as ydl:
             info = ydl.extract_info(collection_url, download=False)
+    except JobCancelled:
+        raise
     except Exception as exc:
+        if cancel_requested():
+            raise JobCancelled("Stopped by user.") from exc
         raise DubLocalError(f"Could not enumerate the YouTube source: {exc}") from exc
 
+    check_cancelled()
     if not isinstance(info, dict):
         raise DubLocalError("YouTube did not return a usable video or collection.")
     entries = _flatten_youtube_entries(info)
@@ -285,6 +296,18 @@ def publish_magic_result(item: QueueItem, result: MagicFlowResult) -> tuple[tupl
     return tuple(published)
 
 
+def _mark_cancelled_tail(
+    completed: list[QueueItemResult],
+    queue: tuple[QueueItem, ...],
+    start_index: int,
+    *,
+    current_error: str = "Stopped by user.",
+) -> None:
+    for position in range(start_index, len(queue)):
+        message = current_error if position == start_index else "Not started because the queue was stopped."
+        completed.append(QueueItemResult(queue[position], "cancelled", None, (), error=message))
+
+
 def run_magic_queue(
     *,
     source_type: str,
@@ -299,6 +322,7 @@ def run_magic_queue(
     video_quality: str = "source",
     progress_callback: ProgressCallback | None = None,
 ) -> BatchFlowResult:
+    check_cancelled()
     if not rights_confirmed:
         raise DubLocalError("Confirm that you have the right or legal authority to process this media.")
 
@@ -314,9 +338,14 @@ def run_magic_queue(
 
     completed: list[QueueItemResult] = []
     for index, item in enumerate(queue):
+        if cancel_requested():
+            _mark_cancelled_tail(completed, queue, index)
+            break
+
         prefix = f"{index + 1}/{total} · {item.label}"
 
         def item_progress(fraction: float, label: str) -> None:
+            check_cancelled()
             overall = (index + max(0.0, min(1.0, float(fraction)))) / total
             _notify(progress_callback, overall, f"{prefix} · {label}")
 
@@ -335,10 +364,19 @@ def run_magic_queue(
                 video_quality=video_quality,
                 progress_callback=item_progress,
             )
+            check_cancelled()
             published = publish_magic_result(item, result)
             completed.append(QueueItemResult(item, "done", result, published))
             _notify(progress_callback, (index + 1) / total, f"{prefix} · complete")
+        except JobCancelled as exc:
+            _mark_cancelled_tail(completed, queue, index, current_error=str(exc) or "Stopped by user.")
+            _notify(progress_callback, index / total, f"{prefix} · stopped")
+            break
         except Exception as exc:
+            if cancel_requested():
+                _mark_cancelled_tail(completed, queue, index)
+                _notify(progress_callback, index / total, f"{prefix} · stopped")
+                break
             message = str(exc)
             completed.append(QueueItemResult(item, "failed", None, (), error=message))
             _notify(
