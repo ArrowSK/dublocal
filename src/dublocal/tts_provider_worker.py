@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import unicodedata
 import wave
 from pathlib import Path
 
@@ -78,6 +79,17 @@ def _phoneme_chunks(phonemes: str, maximum: int = 500) -> list[str]:
     return [chunk for chunk in chunks if chunk]
 
 
+def _visible_oov(oov: set[str]) -> str:
+    labels: list[str] = []
+    for char in sorted(oov):
+        category = unicodedata.category(char)
+        if category.startswith("C") or char.isspace():
+            labels.append(f"U+{ord(char):04X}")
+        else:
+            labels.append(f"{char} (U+{ord(char):04X})")
+    return " ".join(labels)
+
+
 def _russian_phonemes(provider_root: Path, manifest: dict, text: str) -> list[str]:
     from russian_frontend import RussianFrontend
 
@@ -88,8 +100,9 @@ def _russian_phonemes(provider_root: Path, manifest: dict, text: str) -> list[st
     )
     phonemes, oov = frontend.phonemize(text)
     if oov:
-        visible = " ".join(sorted(oov))
-        raise RuntimeError(f"Russian frontend produced unsupported Kokoro symbols: {visible}")
+        raise RuntimeError(
+            f"Russian frontend produced unsupported Kokoro symbols: {_visible_oov(oov)}"
+        )
     return _phoneme_chunks(phonemes)
 
 
@@ -119,8 +132,9 @@ def _prepare_frontend(provider_root: Path, manifest: dict):
         def phonemize(text: str) -> list[str]:
             value, oov = frontend.phonemize(text)
             if oov:
-                visible = " ".join(sorted(oov))
-                raise RuntimeError(f"Russian frontend produced unsupported Kokoro symbols: {visible}")
+                raise RuntimeError(
+                    f"Russian frontend produced unsupported Kokoro symbols: {_visible_oov(oov)}"
+                )
             return _phoneme_chunks(value)
 
         return phonemize
@@ -137,6 +151,13 @@ def _prepare_frontend(provider_root: Path, manifest: dict):
         return chunks
 
     return phonemize
+
+
+def _segment_excerpt(text: str, maximum: int = 96) -> str:
+    value = " ".join(str(text).split())
+    if len(value) <= maximum:
+        return value
+    return value[: max(1, maximum - 1)].rstrip() + "…"
 
 
 def _run(request: dict) -> dict:
@@ -232,30 +253,37 @@ def _run(request: dict) -> dict:
             )
             continue
 
-        audio = synthesize(text, voice_id, speed)
-        pilot_ms = _duration_ms(int(audio.size))
-        final_speed = speed
-        final_ms = pilot_ms
-        passes = 1
+        try:
+            audio = synthesize(text, voice_id, speed)
+            pilot_ms = _duration_ms(int(audio.size))
+            final_speed = speed
+            final_ms = pilot_ms
+            passes = 1
 
-        if adaptive_timing and target_ms > 0 and pilot_ms > target_ms + _tolerance_ms(target_ms):
-            desired = _fit_speed(speed, pilot_ms, target_ms)
-            if desired > speed + 0.024:
-                audio = synthesize(text, voice_id, desired)
-                final_speed = desired
-                final_ms = _duration_ms(int(audio.size))
-                passes = 2
-            if final_ms > target_ms + _tolerance_ms(target_ms):
-                corrected = _fit_speed(final_speed, final_ms, target_ms)
-                if corrected > final_speed + 0.024 and corrected <= _MAX_SPEED:
-                    audio = synthesize(text, voice_id, corrected)
-                    final_speed = corrected
+            if adaptive_timing and target_ms > 0 and pilot_ms > target_ms + _tolerance_ms(target_ms):
+                desired = _fit_speed(speed, pilot_ms, target_ms)
+                if desired > speed + 0.024:
+                    audio = synthesize(text, voice_id, desired)
+                    final_speed = desired
                     final_ms = _duration_ms(int(audio.size))
-                    passes = 3
+                    passes = 2
+                if final_ms > target_ms + _tolerance_ms(target_ms):
+                    corrected = _fit_speed(final_speed, final_ms, target_ms)
+                    if corrected > final_speed + 0.024 and corrected <= _MAX_SPEED:
+                        audio = synthesize(text, voice_id, corrected)
+                        final_speed = corrected
+                        final_ms = _duration_ms(int(audio.size))
+                        passes = 3
 
-        path = output_dir / f"segment-{index:06d}.wav"
-        samples = _write_pcm16(path, audio)
-        final_ms = _duration_ms(samples)
+            path = output_dir / f"segment-{index:06d}.wav"
+            samples = _write_pcm16(path, audio)
+            final_ms = _duration_ms(samples)
+        except Exception as exc:
+            excerpt = _segment_excerpt(text)
+            raise RuntimeError(
+                f"TTS segment {index} failed for {excerpt!r}: {exc}"
+            ) from exc
+
         generated.append(
             {
                 "index": index,

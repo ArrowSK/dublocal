@@ -13,6 +13,11 @@ from .translation import TRANSLATION_LANGUAGES, TranslatedSegment
 from .translation_quality import is_protected_caption_tag, target_language_guidance
 
 
+# Bump whenever the translation/review instructions or context semantics change in a
+# way that could alter output. The persistent translation cache includes this value.
+CONTEXTUAL_PROMPT_VERSION = "2026-08-28.2"
+
+
 def context_plan(segments: Sequence[Segment]) -> ContextPlan:
     """Plan fewer model calls for short media while keeping long-form context bounded."""
 
@@ -104,18 +109,27 @@ def build_review_prompt(
     draft_texts: Sequence[str],
     target_language: str,
 ) -> str:
-    """Ask the same loaded model to act as a conservative senior translation reviewer."""
+    """Ask the loaded model for a conservative senior review.
+
+    Normal translation prompts already contain the source TARGET LINES, so do not send
+    them twice. Keep a source-lines fallback for direct/library callers that provide a
+    different original prompt.
+    """
 
     target = TRANSLATION_LANGUAGES[target_language]["label"]
-    source_lines = "\n".join(_segment_line(segment) for segment in target_segments)
+    source_lines = [_segment_line(segment) for segment in target_segments]
+    source_fallback = ""
+    if not all(line in original_prompt for line in source_lines):
+        source_fallback = "\n\nSOURCE TARGET LINES:\n" + "\n".join(source_lines)
     draft_lines = "\n".join(
         f"[{segment.index}] {text}"
         for segment, text in zip(target_segments, draft_texts, strict=True)
     )
     return (
         original_prompt.rstrip()
+        + source_fallback
         + "\n\nSENIOR REVIEW PASS — improve the DRAFT TRANSLATIONS below before final output.\n"
-        + f"Review against the source TARGET LINES and ALL programme/nearby context above. Output polished natural {target}.\n"
+        + f"Review against the source TARGET LINES and ALL programme/nearby context already supplied above. Output polished natural {target}.\n"
         + "Review connected subtitle fragments as continuous discourse, not independent sentences.\n"
         + "CHECK 1 — meaning: correct mistranslations and wrong lexical choices without inventing information.\n"
         + "CHECK 2 — gender/reference: verify grammatical gender, pronouns and speaker/addressee/referent relationships against context; keep them consistent, and avoid unsupported gender when context is ambiguous.\n"
@@ -127,9 +141,7 @@ def build_review_prompt(
         + "Do NOT make the text more literary than the source. Do NOT guess missing ASR words. Do NOT change subtitle IDs.\n"
         + f"TARGET-LANGUAGE RULES: {target_language_guidance(target_language)}\n"
         + "Return EXACTLY one line per ID: [ID] - final translated text. No commentary.\n\n"
-        + "SOURCE TARGET LINES:\n"
-        + source_lines
-        + "\n\nDRAFT TRANSLATIONS TO REVIEW:\n"
+        + "DRAFT TRANSLATIONS TO REVIEW:\n"
         + draft_lines
         + "\n"
     )

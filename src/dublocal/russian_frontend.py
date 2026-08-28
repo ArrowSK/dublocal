@@ -12,9 +12,33 @@ from pathlib import Path
 _ACUTE = "\u0301"
 _VOWELS_CYR = "аеёиоуыэюяАЕЁИОУЫЭЮЯ"
 _WORD_RE = re.compile(r"[а-яёА-ЯЁ\u0301]+")
+_NUMBER_RE = re.compile(r"(?<![\w\u0301])([+-]?\d+(?:[.,]\d+)?)(?![\w\u0301])")
 _STRESS = {"ˈ", "ˌ"}
 _VOWELS_IPA = set("aɑoeiuyʌəɪɐɛɨ")
 _REDUCIBLE = set("aɑoʌə")
+
+_ONES_MASC = ("", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять")
+_ONES_FEM = ("", "одна", "две", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять")
+_TEENS = (
+    "десять",
+    "одиннадцать",
+    "двенадцать",
+    "тринадцать",
+    "четырнадцать",
+    "пятнадцать",
+    "шестнадцать",
+    "семнадцать",
+    "восемнадцать",
+    "девятнадцать",
+)
+_TENS = ("", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто")
+_HUNDREDS = ("", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот", "восемьсот", "девятьсот")
+_DIGIT_WORDS = ("ноль", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять")
+_SCALES = (
+    (1_000_000_000, ("миллиард", "миллиарда", "миллиардов"), False),
+    (1_000_000, ("миллион", "миллиона", "миллионов"), False),
+    (1_000, ("тысяча", "тысячи", "тысяч"), True),
+)
 
 # eSpeak symbols that are not present in the Russian Kokoro v2 vocabulary but
 # have a stable equivalent there. This is deliberately a small compatibility
@@ -60,6 +84,107 @@ _OGO_EXCEPTIONS = {
     "диего",
     "ого",
 }
+
+
+def _plural_form(value: int, forms: tuple[str, str, str]) -> str:
+    tail100 = value % 100
+    if 11 <= tail100 <= 14:
+        return forms[2]
+    tail10 = value % 10
+    if tail10 == 1:
+        return forms[0]
+    if 2 <= tail10 <= 4:
+        return forms[1]
+    return forms[2]
+
+
+def _triplet_to_words(value: int, *, feminine: bool = False) -> list[str]:
+    value = max(0, min(999, int(value)))
+    words: list[str] = []
+    hundreds = value // 100
+    if hundreds:
+        words.append(_HUNDREDS[hundreds])
+    remainder = value % 100
+    if 10 <= remainder <= 19:
+        words.append(_TEENS[remainder - 10])
+        return words
+    tens = remainder // 10
+    ones = remainder % 10
+    if tens:
+        words.append(_TENS[tens])
+    if ones:
+        words.append((_ONES_FEM if feminine else _ONES_MASC)[ones])
+    return words
+
+
+def _integer_to_russian(value: int) -> str:
+    if value == 0:
+        return "ноль"
+    if abs(value) >= 1_000_000_000_000:
+        digits = " ".join(_DIGIT_WORDS[int(char)] for char in str(abs(value)))
+        return f"минус {digits}" if value < 0 else digits
+
+    negative = value < 0
+    remainder = abs(value)
+    words: list[str] = []
+    for scale, forms, feminine in _SCALES:
+        group = remainder // scale
+        if not group:
+            continue
+        words.extend(_triplet_to_words(group, feminine=feminine))
+        words.append(_plural_form(group, forms))
+        remainder %= scale
+    words.extend(_triplet_to_words(remainder))
+    result = " ".join(words).strip()
+    return f"минус {result}" if negative else result
+
+
+def _number_to_russian(raw: str) -> str:
+    value = raw.strip()
+    sign = ""
+    if value[:1] in {"+", "-"}:
+        sign, value = value[0], value[1:]
+    separator = "," if "," in value else "." if "." in value else None
+    if separator is None:
+        integer = int(value or "0")
+        if sign == "-":
+            integer = -integer
+        return _integer_to_russian(integer)
+
+    whole, fraction = value.split(separator, 1)
+    integer = int(whole or "0")
+    if sign == "-":
+        integer = -integer
+    fractional = " ".join(_DIGIT_WORDS[int(char)] for char in fraction if char.isdigit())
+    if not fractional:
+        return _integer_to_russian(integer)
+    return f"{_integer_to_russian(integer)} запятая {fractional}"
+
+
+def _normalize_input_text(text: str) -> str:
+    """Make subtitle text safe and pronounceable before RUAccent/eSpeak.
+
+    Web captions can contain invisible Unicode format controls such as ZWJ/ZWNJ,
+    BOM and bidi marks. They have no spoken value and previously could leak through
+    the Russian frontend into Kokoro's phoneme vocabulary. Numeric tokens are also
+    expanded before G2P so raw digits never become provider OOV symbols.
+    """
+
+    value = unicodedata.normalize("NFKC", str(text or ""))
+    value = _NUMBER_RE.sub(lambda match: _number_to_russian(match.group(1)), value)
+    cleaned: list[str] = []
+    for char in value:
+        category = unicodedata.category(char)
+        if category == "Cf":
+            cleaned.append(" ")
+        elif category == "Zs":
+            cleaned.append(" ")
+        else:
+            cleaned.append(char)
+    value = "".join(cleaned)
+    value = re.sub(r"[ \t]+", " ", value)
+    value = re.sub(r" *\n *", "\n", value)
+    return value.strip()
 
 
 def _plus_to_acute(text: str) -> str:
@@ -246,7 +371,8 @@ class RussianFrontend:
         return text.translate(str.maketrans({"[": "(", "]": ")", "{": "(", "}": ")"}))
 
     def accentuate(self, text: str) -> str:
-        processed = self.accent.process_all(self._brackets(text))
+        safe_text = _normalize_input_text(text)
+        processed = self.accent.process_all(self._brackets(safe_text))
         return _plus_to_acute(str(processed))
 
     def _espeak_ipa(self, marked: str) -> str:
