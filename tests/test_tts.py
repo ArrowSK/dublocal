@@ -16,6 +16,7 @@ from dublocal.tts import (
     kokoro_voice_choices,
     suggested_kokoro_language,
 )
+from dublocal.tts_provider_refinement import _apply_provider_metadata
 
 
 def _write_tone(path: Path, *, frames: int, value: int = 4000, rate: int = 24000) -> None:
@@ -28,11 +29,12 @@ def _write_tone(path: Path, *, frames: int, value: int = 4000, rate: int = 24000
 
 
 def test_translation_language_suggestions_are_explicit():
+    _apply_provider_metadata()
     assert suggested_kokoro_language("en") == "en-US"
     assert suggested_kokoro_language("fr") == "fr"
     assert suggested_kokoro_language("pt") == "pt-BR"
     assert suggested_kokoro_language("hu") is None
-    assert suggested_kokoro_language("ru") is None
+    assert suggested_kokoro_language("ru") == "ru"
 
 
 def test_voice_inventory_follows_language_frontend():
