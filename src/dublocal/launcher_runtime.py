@@ -5,17 +5,19 @@ from pathlib import Path
 
 from platformdirs import user_cache_dir
 
+from .adaptive_audio import install_adaptive_audio_refinement
 from .job_cache import prune_job_cache
 from .m53 import install_runtime_refinements
 from .native_tts_timing import install_native_timing_refinement
 from .transcription_v053 import install_transcription_refinements
 from .v060_refinements import install_audio_balance_refinement
 
-# Install wrappers before UI modules import app/progress-operation symbols.
+# Install wrappers before UI modules import app/progress-operation/render symbols.
 install_transcription_refinements()
 install_native_timing_refinement()
+install_adaptive_audio_refinement()
 
-from .ui_v060_refined import MATRIX_CSS, build_app
+from .ui_v061 import MATRIX_CSS, build_app
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -41,8 +43,9 @@ def main() -> None:
     # user documents. Prune stale/oversized jobs before a new session starts.
     prune_job_cache()
 
-    # Audio balance/mixing remains lightweight. Voice timing is already resolved at
-    # Kokoro generation time; export must not stretch generated speech afterward.
+    # Keep the established lightweight mixer as the universal fallback. The adaptive
+    # renderer swaps in vocal separation only for the current render when requested or
+    # when Simple/Auto strongly identifies music and the optional runtime is prepared.
     install_audio_balance_refinement()
     install_runtime_refinements()
 
