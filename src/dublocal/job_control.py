@@ -67,12 +67,7 @@ def tracked_process_count() -> int:
 
 
 def start_process(command: Sequence[str] | str, **kwargs: Any) -> subprocess.Popen[Any]:
-    """Start a subprocess owned by the current DubLocal job.
-
-    Every owned process gets its own process group/session. That lets Stop and app
-    shutdown terminate helper children as well as the direct executable (important
-    for ffmpeg, llama.cpp, Python TTS workers and Demucs).
-    """
+    """Start a subprocess explicitly owned by the current DubLocal job."""
 
     check_cancelled()
     kwargs.setdefault("start_new_session", True)
@@ -101,33 +96,107 @@ def _signal_process(process: subprocess.Popen[Any], sig: int) -> None:
             pass
 
 
+def _descendant_pids(root_pid: int | None = None) -> set[int]:
+    """Return current descendant PIDs without relying on optional psutil.
+
+    Much of DubLocal predates central process tracking and starts ffmpeg, whisper.cpp,
+    llama.cpp, Demucs and TTS workers directly. Discovering descendants lets the Stop
+    button protect those established paths immediately, without killing unrelated
+    model processes owned by other applications.
+    """
+
+    if os.name != "posix":
+        return set()
+    parent = int(root_pid or os.getpid())
+    try:
+        result = subprocess.run(
+            ["/bin/ps", "-axo", "pid=,ppid="],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    if result.returncode != 0:
+        return set()
+
+    children: dict[int, set[int]] = {}
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            continue
+        try:
+            pid, ppid = int(fields[0]), int(fields[1])
+        except ValueError:
+            continue
+        children.setdefault(ppid, set()).add(pid)
+
+    descendants: set[int] = set()
+    frontier = list(children.get(parent, ()))
+    while frontier:
+        pid = frontier.pop()
+        if pid in descendants or pid == parent:
+            continue
+        descendants.add(pid)
+        frontier.extend(children.get(pid, ()))
+    return descendants
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError, OSError):
+        return False
+
+
 def terminate_all_processes(*, grace_seconds: float = 1.5) -> int:
-    """Terminate all tracked helpers, escalating to kill after a short grace period."""
+    """Terminate active DubLocal helper descendants and explicitly tracked processes.
+
+    Only descendants of this DubLocal backend are discovered, so an unrelated
+    llama-server/ffmpeg process started by the user or another app is never targeted.
+    """
 
     with _LOCK:
-        processes = [process for process in _PROCESSES.values() if process.poll() is None]
-    if not processes:
+        tracked = [process for process in _PROCESSES.values() if process.poll() is None]
+    descendants = _descendant_pids()
+    targeted = set(descendants)
+    targeted.update(process.pid for process in tracked)
+    if not targeted:
         return 0
 
-    for process in processes:
+    tracked_pids = {process.pid for process in tracked}
+    for process in tracked:
         _signal_process(process, signal.SIGTERM)
+    for pid in descendants - tracked_pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
 
     deadline = time.monotonic() + max(0.0, float(grace_seconds))
     while time.monotonic() < deadline:
-        if all(process.poll() is not None for process in processes):
+        if not any(_pid_alive(pid) for pid in targeted):
             break
         time.sleep(0.05)
 
-    for process in processes:
+    for process in tracked:
         if process.poll() is None:
             _signal_process(process, signal.SIGKILL)
-    for process in processes:
+    for pid in descendants - tracked_pids:
+        if _pid_alive(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+    for process in tracked:
         try:
             process.wait(timeout=0.5)
         except (subprocess.TimeoutExpired, OSError):
             pass
         unregister_process(process)
-    return len(processes)
+    return len(targeted)
 
 
 def request_cancel() -> int:
