@@ -7,8 +7,10 @@ import gradio as gr
 from . import ui_v060 as simple
 from . import ui_v062 as previous
 from .batch_flow import download_groups, queue_rows, run_magic_queue
+from .magic_flow import MAGIC_LOCAL_TRANSCRIPTION_CHOICES
 from .normal_update import update_dublocal_ui, updater_idle_status
 from .progress import ProgressEstimator
+from .transcription import whisper_model_path
 
 
 MATRIX_CSS = previous.MATRIX_CSS + r"""
@@ -57,6 +59,19 @@ def _local_queue_status(files: Any) -> tuple[str, Any]:
     )
 
 
+def _default_local_transcription_policy() -> str:
+    try:
+        if whisper_model_path("large-v3-turbo-q5_0").is_file():
+            return "local-best"
+    except Exception:
+        pass
+    return "local-fast"
+
+
+def _toggle_local_transcription_quality(subtitle_policy: str):
+    return gr.Dropdown(visible=subtitle_policy == "local")
+
+
 def _run_batch_magic_ui(
     source_type: str,
     youtube_url: str,
@@ -65,6 +80,7 @@ def _run_batch_magic_ui(
     target_language: str,
     tasks: list[str] | None,
     subtitle_policy: str,
+    local_transcription_policy: str,
     keep_original_audio_track: bool,
     container: str,
     video_quality: str,
@@ -75,6 +91,12 @@ def _run_batch_magic_ui(
     def update(fraction: float, label: str) -> None:
         progress(fraction, desc=estimator.message(fraction, label))
 
+    effective_subtitle_policy = (
+        local_transcription_policy
+        if subtitle_policy == "local" and local_transcription_policy in {"local-fast", "local-best"}
+        else subtitle_policy
+    )
+
     try:
         result = run_magic_queue(
             source_type=source_type,
@@ -83,7 +105,7 @@ def _run_batch_magic_ui(
             rights_confirmed=rights_confirmed,
             target_language=target_language,
             tasks=tasks,
-            subtitle_policy=subtitle_policy,
+            subtitle_policy=effective_subtitle_policy,
             keep_original_audio_track=keep_original_audio_track,
             container=container,
             video_quality=video_quality,
@@ -178,6 +200,19 @@ def _build_batch_magic_panel(original_html) -> None:
                 choices=simple.MAGIC_SUBTITLE_POLICY_CHOICES,
                 value="auto",
             )
+            local_transcription_policy = gr.Dropdown(
+                label="Local transcription quality",
+                choices=MAGIC_LOCAL_TRANSCRIPTION_CHOICES,
+                value=_default_local_transcription_policy(),
+                visible=False,
+                info="FAST uses Base for speed. BEST uses Accurate Large v3 Turbo Q5 for maximum transcription quality.",
+            )
+            subtitle_policy.change(
+                fn=_toggle_local_transcription_quality,
+                inputs=[subtitle_policy],
+                outputs=[local_transcription_policy],
+                queue=False,
+            )
             keep_original_audio = gr.Checkbox(
                 label="Keep original audio as a separate selectable track",
                 value=True,
@@ -254,6 +289,7 @@ def _build_batch_magic_panel(original_html) -> None:
                 target_language,
                 tasks,
                 subtitle_policy,
+                local_transcription_policy,
                 keep_original_audio,
                 container,
                 quality,
