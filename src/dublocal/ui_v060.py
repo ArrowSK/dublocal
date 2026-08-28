@@ -39,6 +39,15 @@ MATRIX_CSS = previous.MATRIX_CSS + r"""
   font-size: 12px !important;
   margin-bottom: 8px !important;
 }
+.dl-main-mode-note {
+  color: var(--dl-muted) !important;
+  font-size: 12px !important;
+  margin: 2px 0 12px 0 !important;
+}
+.dl-magic-shell progress,
+.dl-magic-shell [role="progressbar"] {
+  accent-color: var(--dl-green) !important;
+}
 """
 
 
@@ -143,7 +152,7 @@ def _build_magic_panel(original_html) -> None:
     with gr.Group(elem_classes=["dl-magic-shell"]):
         original_html('<div class="dl-magic-title">Magic Flow</div>')
         original_html(
-            '<div class="dl-magic-subtitle">Choose the source and desired result. DubLocal chooses the safest local route and keeps the detailed workflow below for manual control.</div>'
+            '<div class="dl-magic-subtitle">Choose the source and desired result. DubLocal chooses the safest local route automatically. Most users only need this tab.</div>'
         )
 
         source_type = gr.Radio(
@@ -216,11 +225,13 @@ def _build_magic_panel(original_html) -> None:
 
         run = gr.Button("Run Magic Flow", variant="primary")
         status = gr.Markdown(
-            "**Ready** · Magic Flow will explain the subtitle route it selected.",
+            "**Ready** · Magic Flow will explain the route it selected.",
             elem_classes=["dl-stage-status"],
         )
 
-        with gr.Accordion("Results", open=True):
+        # Keep four output components out of sight while processing. The status card
+        # above is the single source of progress; users open Results once outputs exist.
+        with gr.Accordion("Results", open=False):
             with gr.Row():
                 source_output = gr.File(label="Source subtitles", interactive=False)
                 translated_output = gr.File(label="Translated subtitles", interactive=False)
@@ -229,7 +240,7 @@ def _build_magic_panel(original_html) -> None:
                 media_output = gr.File(label="Output media", interactive=False)
 
         begin = run.click(
-            fn=lambda: "**Running Magic Flow…** · source analysis, route selection and ETA will appear above.",
+            fn=lambda: "**Running Magic Flow…** · source analysis, route selection and ETA are shown here.",
             outputs=[status],
             queue=False,
         )
@@ -257,31 +268,91 @@ def _build_magic_panel(original_html) -> None:
         )
 
 
+class _MainTabContext:
+    """Turn the existing Main tab into Simple/Advanced without rebuilding Advanced.
+
+    The stable UI already creates the entire manual workflow inside `with gr.Tab("Main")`.
+    This context wrapper opens a nested Tabs container, renders Magic Flow in the first
+    tab, then leaves Advanced open while the existing builder creates its components.
+    That preserves the established event wiring and avoids duplicating the manual UI.
+    """
+
+    def __init__(self, original_tab, original_tabs, original_html, args, kwargs):
+        self._original_tab = original_tab
+        self._original_tabs = original_tabs
+        self._original_html = original_html
+        self._args = args
+        self._kwargs = kwargs
+        self._main = None
+        self._inner_tabs = None
+        self._advanced = None
+
+    def __enter__(self):
+        self._main = self._original_tab(*self._args, **self._kwargs)
+        result = self._main.__enter__()
+
+        self._inner_tabs = self._original_tabs()
+        self._inner_tabs.__enter__()
+
+        simple = self._original_tab("Simple")
+        simple.__enter__()
+        try:
+            self._original_html(
+                '<div class="dl-main-mode-note">Simple is the default for normal use. Switch to Advanced only when you need manual control of individual stages.</div>'
+            )
+            _build_magic_panel(self._original_html)
+        finally:
+            simple.__exit__(None, None, None)
+
+        self._advanced = self._original_tab("Advanced")
+        self._advanced.__enter__()
+        return result
+
+    def __exit__(self, exc_type, exc, tb):
+        suppress = False
+        if self._advanced is not None:
+            suppress = bool(self._advanced.__exit__(exc_type, exc, tb)) or suppress
+        if self._inner_tabs is not None:
+            suppress = bool(self._inner_tabs.__exit__(exc_type, exc, tb)) or suppress
+        if self._main is not None:
+            suppress = bool(self._main.__exit__(exc_type, exc, tb)) or suppress
+        return suppress
+
+
 def build_app() -> gr.Blocks:
-    """Add a commercial-friendly Magic Flow while preserving the existing detailed workflow."""
+    """Expose Simple and Advanced as true subtabs under Main."""
 
     original_html = base.gr.HTML
+    original_tab = base.gr.Tab
+    original_tabs = base.gr.Tabs
     original_translate = detailed._translate_with_state
-    inserted = {"magic": False}
+
+    def tab_wrapper(*args, **kwargs):
+        label = args[0] if args else kwargs.get("label")
+        if label == "Main":
+            return _MainTabContext(
+                original_tab,
+                original_tabs,
+                original_html,
+                args,
+                kwargs,
+            )
+        return original_tab(*args, **kwargs)
 
     def html_wrapper(value=None, *args, **kwargs):
-        if (
-            not inserted["magic"]
-            and isinstance(value, str)
-            and "1 Source</strong>" in value
-        ):
-            inserted["magic"] = True
-            _build_magic_panel(original_html)
+        if isinstance(value, str) and "1 Source</strong>" in value:
             value = (
-                '<div class="dl-flow"><strong>Detailed workflow</strong> · '
-                'Use the stages below when you want manual control over source subtitles, models, translation, voice and export.</div>'
+                '<div class="dl-flow"><strong>Advanced workflow</strong> · '
+                'Use these stages when you want manual control over source subtitles, models, translation, voice and export.</div>'
             )
         return original_html(value, *args, **kwargs)
 
+    base.gr.Tab = tab_wrapper
     base.gr.HTML = html_wrapper
     detailed._translate_with_state = _translate_with_state_auto_safe
     try:
         return previous.build_app()
     finally:
+        base.gr.Tab = original_tab
         base.gr.HTML = original_html
         detailed._translate_with_state = original_translate
