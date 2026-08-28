@@ -10,6 +10,21 @@ DubLocal is still in active development. Versions below describe development bui
 
 v0.6 turns the mature local pipeline into a simpler product-facing workflow while keeping detailed controls available.
 
+### Authenticated course / website import
+
+- Added **Course / Website** as a third source in Simple Magic Flow rather than a parallel processing workflow.
+- Added a normalized `SourceProvider` / local `AcquiredMedia` boundary so authenticated acquisition ends before transcription, translation, TTS, mixing or export begins.
+- Added a dedicated local Chromium profile for website sign-in; credentials are entered directly on the website rather than into DubLocal.
+- Added a Domestika adapter plus a generic authenticated-video fallback for ordinary non-DRM media pages.
+- Added course/lesson discovery, multiselect, sequential processing, per-lesson failure isolation and persistent resume state.
+- Completed lessons are not reprocessed on resume; failed/cancelled lessons remain selectable.
+- Course outputs are organized under `~/Movies/DubLocal/<Provider>/<Course>/` while acquired source media remains temporary job-cache data by default.
+- Added explicit DRM/encrypted-stream detection/refusal. The importer contains no Widevine/FairPlay/PlayReady circumvention path.
+- Added an **Authenticated Websites** Settings section for explicit browser preparation and local session clearing.
+- Added direct single-lesson Course / Website input to Advanced while keeping full-course selection in Simple.
+- The existing Stop/cleanup lifecycle now covers authenticated acquisition and course queues as well.
+- Added safety policy so an explicit empty lesson selection never expands to all lessons and persisted/rendered import errors redact reusable signed-URL credentials.
+
 ### Magic Flow
 
 - Added a new default **Magic Flow** at the top of Main.
