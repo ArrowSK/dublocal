@@ -12,7 +12,7 @@ from .transcription_v053 import install_transcription_refinements
 # Install the transcription wrapper before the UI imports app.py's transcription symbol.
 install_transcription_refinements()
 
-from .ui_v053 import MATRIX_CSS, build_app
+from .ui_v060 import MATRIX_CSS, build_app
 
 
 def _env_bool(name: str, default: bool) -> bool:
