@@ -32,7 +32,7 @@ _TEENS = (
     "девятнадцать",
 )
 _TENS = ("", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто")
-_HUNDREDS = ("", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот", "восемьсот", "девятьсот")
+_HUNDREDS = ("", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот", "семьсот", "восемьсот", "девятьсот")
 _DIGIT_WORDS = ("ноль", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять")
 _SCALES = (
     (1_000_000_000, ("миллиард", "миллиарда", "миллиардов"), False),
@@ -176,8 +176,10 @@ def _normalize_input_text(text: str) -> str:
     for char in value:
         category = unicodedata.category(char)
         if category == "Cf":
-            cleaned.append(" ")
-        elif category == "Zs":
+            # Format controls have no spoken value. Remove them rather than
+            # inserting a separator so a hidden ZWJ inside a word cannot split it.
+            continue
+        if category == "Zs":
             cleaned.append(" ")
         else:
             cleaned.append(char)
@@ -277,6 +279,10 @@ def _reduce_ipa_word(token: str) -> str:
 
 def _normalize_ipa(ipa: str) -> str:
     value = unicodedata.normalize("NFC", ipa).replace("_", " ")
+    # eSpeak (and, on some paths, upstream text processors) can preserve or emit
+    # invisible Unicode format controls such as U+200D. They are not phonemes and
+    # must never reach Kokoro's vocabulary guard.
+    value = "".join(char for char in value if unicodedata.category(char) != "Cf")
     for old, new in _NORMALIZE:
         value = value.replace(old, new)
     value = re.sub(r"ɕ(?!ː)", "ɕː", value)
@@ -373,7 +379,12 @@ class RussianFrontend:
     def accentuate(self, text: str) -> str:
         safe_text = _normalize_input_text(text)
         processed = self.accent.process_all(self._brackets(safe_text))
-        return _plus_to_acute(str(processed))
+        # Defensive second boundary: if RUAccent itself emits a format control,
+        # remove it before eSpeak sees the marked Russian text.
+        processed_text = "".join(
+            char for char in str(processed) if unicodedata.category(char) != "Cf"
+        )
+        return _plus_to_acute(processed_text)
 
     def _espeak_ipa(self, marked: str) -> str:
         env = os.environ.copy()
