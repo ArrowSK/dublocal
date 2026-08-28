@@ -62,6 +62,8 @@ THEME_CONSISTENCY_CSS = r"""
   --panel-background-fill-dark: #0b1510 !important;
   --panel-border-color: rgba(43, 108, 66, 0.62) !important;
   --panel-border-color-dark: rgba(43, 108, 66, 0.62) !important;
+  --accordion-text-color: var(--dl-text) !important;
+  --accordion-text-color-dark: var(--dl-text) !important;
 
   --input-background-fill: #0d1711 !important;
   --input-background-fill-dark: #0d1711 !important;
@@ -94,6 +96,22 @@ THEME_CONSISTENCY_CSS = r"""
   --checkbox-border-color-hover-dark: rgba(66, 239, 131, 0.72) !important;
   --checkbox-border-color-selected: var(--dl-green) !important;
   --checkbox-border-color-selected-dark: var(--dl-green) !important;
+  --checkbox-label-background-fill: #101b15 !important;
+  --checkbox-label-background-fill-dark: #101b15 !important;
+  --checkbox-label-background-fill-hover: #16271d !important;
+  --checkbox-label-background-fill-hover-dark: #16271d !important;
+  --checkbox-label-background-fill-selected: rgba(66, 239, 131, 0.12) !important;
+  --checkbox-label-background-fill-selected-dark: rgba(66, 239, 131, 0.12) !important;
+  --checkbox-label-border-color: var(--dl-border) !important;
+  --checkbox-label-border-color-dark: var(--dl-border) !important;
+  --checkbox-label-border-color-hover: rgba(66, 239, 131, 0.72) !important;
+  --checkbox-label-border-color-hover-dark: rgba(66, 239, 131, 0.72) !important;
+  --checkbox-label-border-color-selected: rgba(66, 239, 131, 0.72) !important;
+  --checkbox-label-border-color-selected-dark: rgba(66, 239, 131, 0.72) !important;
+  --checkbox-label-text-color: var(--dl-text) !important;
+  --checkbox-label-text-color-dark: var(--dl-text) !important;
+  --checkbox-label-text-color-selected: var(--dl-text) !important;
+  --checkbox-label-text-color-selected-dark: var(--dl-text) !important;
 
   --loader-color: var(--dl-green) !important;
   --loader-color-dark: var(--dl-green) !important;
@@ -128,6 +146,8 @@ THEME_CONSISTENCY_CSS = r"""
   --button-secondary-text-color-hover: var(--dl-text) !important;
   --button-secondary-text-color-hover-dark: var(--dl-text) !important;
 
+  --table-text-color: var(--dl-text) !important;
+  --table-text-color-dark: var(--dl-text) !important;
   --table-border-color: rgba(43, 108, 66, 0.62) !important;
   --table-border-color-dark: rgba(43, 108, 66, 0.62) !important;
   --table-even-background-fill: #0b1510 !important;
@@ -139,8 +159,12 @@ THEME_CONSISTENCY_CSS = r"""
 
   --link-text-color: var(--dl-green-soft) !important;
   --link-text-color-dark: var(--dl-green-soft) !important;
+  --link-text-color-active: var(--dl-green) !important;
+  --link-text-color-active-dark: var(--dl-green) !important;
   --link-text-color-hover: var(--dl-green) !important;
   --link-text-color-hover-dark: var(--dl-green) !important;
+  --link-text-color-visited: var(--dl-green-soft) !important;
+  --link-text-color-visited-dark: var(--dl-green-soft) !important;
   --code-background-fill: #07100a !important;
   --code-background-fill-dark: #07100a !important;
 }
