@@ -16,21 +16,6 @@ def _write_srt(path: Path, text: str = "Hello") -> None:
     path.write_text(f"1\n00:00:01,000 --> 00:00:04,000\n{text}\n", encoding="utf-8")
 
 
-def test_timing_plan_can_slow_below_old_half_speed_limit():
-    plan = m53.plan_segment_timing(0, 4_000, 1_600)
-    assert plan.tempo_factor < 0.5
-    assert plan.exact is True
-    assert abs((plan.start_ms + plan.expected_duration_ms) - 4_000) <= 25
-
-
-def test_atempo_chain_supports_sub_half_speed_without_invalid_single_filter():
-    chain = m53._atempo_chain(0.30)
-    stages = chain.split(",")
-    assert len(stages) == 2
-    assert stages[0].startswith("atempo=0.500")
-    assert stages[1].startswith("atempo=0.600")
-
-
 def test_balanced_mix_keeps_original_bed_below_full_scale(monkeypatch, tmp_path: Path):
     source = tmp_path / "movie.mkv"
     voice = tmp_path / "voice.wav"
@@ -101,12 +86,12 @@ def test_subtitle_only_package_keeps_original_audio_and_adds_no_dub(monkeypatch,
     assert ".subtitles.en.mkv" in result.output_path.name
 
 
-def test_install_runtime_refinements_patches_only_existing_audio_timing_layers(monkeypatch):
+def test_install_runtime_refinements_leaves_timing_to_native_kokoro_generation():
     old_fit = m53.m5.fit_voice_timing
     old_mix = m53.m51.create_dubbed_mix
     try:
         m53.install_runtime_refinements()
-        assert m53.m5.fit_voice_timing is m53.fit_voice_timing_exact
+        assert m53.m5.fit_voice_timing is old_fit
         assert m53.m51.create_dubbed_mix is m53.create_balanced_dubbed_mix
     finally:
         m53.m5.fit_voice_timing = old_fit
