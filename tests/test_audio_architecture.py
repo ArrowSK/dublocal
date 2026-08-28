@@ -73,12 +73,12 @@ def test_explicit_separation_remains_available_without_prepared_runtime(monkeypa
     assert plan.resolved == "separated"
 
 
-def test_v061_ui_composes_without_mutating_the_test_process() -> None:
+def test_product_ui_composes_without_mutating_the_test_process() -> None:
     completed = subprocess.run(
         [
             sys.executable,
             "-c",
-            "from dublocal.ui_v061 import build_app; assert build_app() is not None",
+            "from dublocal.product_ui import build_app; assert build_app() is not None",
         ],
         capture_output=True,
         text=True,

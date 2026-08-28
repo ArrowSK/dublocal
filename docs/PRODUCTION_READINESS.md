@@ -12,18 +12,18 @@ Those choices are useful during rapid development but should not define the publ
 
 ### 1. Consolidate the layered implementation
 
-The repository currently carries successive UI/runtime layers such as `ui.py`, `ui_v042.py`, `ui_v050.py`, `ui_v053.py`, `ui_v060.py`, `ui_v060_refined.py`, `ui_v061.py`, `ui_v062.py`, `ui_v063.py` and `ui_v064.py`, plus runtime refinements installed by import-time wrappers.
+The first UI cleanup pass is complete: the launcher now uses one active `product_ui.py` layer for the current Simple/Advanced shell, batch queue, update UX, model wizard, provider controls, audio controls and final theme. The superseded `ui_v060.py`, `ui_v060_refined.py`, `ui_v061.py`, `ui_v062.py`, `ui_v063.py` and `ui_v064.py` overlays have been removed after parity tests were added.
 
-This has protected working behavior while the product was changing quickly, but it makes startup depend on patch order and makes regressions harder to reason about.
+The remaining detailed-workflow builder still carries the older `ui_v053.py` → `ui_v050.py` → `ui_v042.py` → `ui.py` chain, and runtime refinements are still installed through several compatibility wrappers. Those layers protected working behavior while the product was changing quickly, but they should not remain the final 1.0 structure.
 
 Before 1.0:
 
-- fold the active UI into one canonical UI module;
+- consolidate the remaining detailed-workflow UI chain behind normal canonical modules;
 - fold active transcription/TTS/audio refinements into their owning modules behind normal functions/classes rather than import-time monkeypatches;
-- delete superseded version-overlay modules after regression tests prove parity;
+- delete superseded compatibility modules only after regression tests prove parity;
 - keep public behavior and the current Simple/Advanced UX unchanged during the cleanup.
 
-This is the largest code-cleanup task, but it is consolidation rather than a rewrite.
+The important rule is that this is consolidation, not a pipeline rewrite.
 
 ### 2. Ship a real macOS application artifact
 
@@ -106,7 +106,7 @@ The 1.0 effort should therefore be treated as **productionization and consolidat
 ## Recommended sequence
 
 1. Freeze new architecture-changing features.
-2. Consolidate UI/runtime overlays into canonical modules while preserving behavior.
+2. Finish consolidating the remaining detailed UI/runtime overlays while preserving behavior.
 3. Add macOS release/smoke CI and reproducible dependency constraints.
 4. Build signed/notarized release artifacts and switch updater to tagged releases.
 5. Synchronize docs/licences and run the release-candidate test matrix.
