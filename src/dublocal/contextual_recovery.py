@@ -13,8 +13,26 @@ _CODE_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTAL
 _ID_LINE_RE = re.compile(r"^\s*\[?(\d+)\]?\s*(?::|[-–—])\s*(.+?)\s*$")
 _CONTAINER_KEYS = ("translations", "items", "results", "data", "output")
 _TRANSLATION_PREFIX_RE = re.compile(
-    r"^\s*(?:translation|translated text|перевод|переведенный текст)\s*:\s*",
+    r"^\s*(?:final\s+translation|translation|translated\s+text|answer|result|перевод|переведенный\s+текст)\s*:\s*",
     re.IGNORECASE,
+)
+_TRANSLATION_HEADER_RE = re.compile(
+    r"^\s*(?:final\s+translation|translation|translated\s+text|answer|result|перевод|переведенный\s+текст)\s*:??\s*$",
+    re.IGNORECASE,
+)
+_RUNTIME_NOISE_MARKERS = (
+    "loading model",
+    "available commands",
+    "using custom system prompt",
+    "build      :",
+    "model      :",
+    "ftype      :",
+    "modalities :",
+    "/no_think",
+    "target lines",
+    "final single-subtitle recovery task",
+    "exiting...",
+    ".gguf",
 )
 
 
@@ -181,34 +199,62 @@ def build_format_repair_prompt(
     )
 
 
+def _compact_recovery_context(original_context_prompt: str, max_chars: int = 3_600) -> str:
+    """Keep the useful tail of the contextual prompt without re-feeding the whole prompt.
+
+    Single-subtitle recovery used to prepend the complete programme prompt for every
+    missing subtitle. On long/high-context jobs that made each fallback call almost as
+    expensive as a normal translation call. The tail contains recent approved
+    translations and the current TARGET LINES, which are the highest-value context for
+    a last-resort single-line repair.
+    """
+
+    text = clean_generated_text(original_context_prompt)
+    if len(text) <= max_chars:
+        return text
+    return "[earlier programme context omitted for fast recovery]\n" + text[-max_chars:]
+
+
 def build_single_line_recovery_prompt(
     original_context_prompt: str,
     segment: Segment,
     target_language_label: str,
     prior_chunk_output: str,
 ) -> str:
-    """Build a final single-ID recovery prompt while retaining the original context."""
+    """Build a compact final single-ID recovery prompt.
 
+    The normal chunk translation already had the full programme context. Recovery is a
+    formatting/omission fallback, so resend only the most useful nearby tail instead of
+    the complete context for every missing subtitle.
+    """
+
+    context = _compact_recovery_context(original_context_prompt)
     prior = clean_generated_text(prior_chunk_output)
-    if len(prior) > 8_000:
-        prior = prior[-8_000:]
+    if len(prior) > 3_000:
+        prior = prior[-3_000:]
     return (
-        original_context_prompt.rstrip()
-        + "\n\nFINAL SINGLE-SUBTITLE RECOVERY TASK:\n"
-        + f"Use all programme, nearby and prior-translation context above. Translate ONLY subtitle [{segment.index}] "
-        + f"into natural {target_language_label}.\n"
+        "/no_think\n"
+        "FINAL SINGLE-SUBTITLE RECOVERY TASK.\n"
+        + f"Translate ONLY subtitle [{segment.index}] into natural {target_language_label}.\n"
         + f"Source text: {segment.text}\n"
         + f"Return EXACTLY one line: [{segment.index}] - translated text\n"
         + "Do not output JSON, Markdown, explanation, labels, alternatives or any other subtitle ID.\n"
-        + "Keep names, tone, profanity and meaning faithful to the source; do not invent missing lyrics/dialogue.\n"
-        + "For reference, the previous chunk recovery output was:\n"
+        + "Keep names, tone, profanity and meaning faithful to the source; do not invent missing dialogue.\n\n"
+        + "COMPACT CHUNK CONTEXT — reference only:\n"
+        + context
+        + "\n\nPREVIOUS CHUNK RECOVERY OUTPUT — reference only:\n"
         + prior
         + "\n"
     )
 
 
+def _runtime_noise_line(line: str) -> bool:
+    folded = line.casefold().strip()
+    return any(marker in folded for marker in _RUNTIME_NOISE_MARKERS)
+
+
 def clean_single_line_output(raw: str, segment_id: int) -> str:
-    """Extract one subtitle translation without ever concatenating runtime/log output."""
+    """Extract one subtitle translation without concatenating runtime/log output."""
 
     text = clean_generated_text(raw)
     if not text:
@@ -236,13 +282,37 @@ def clean_single_line_output(raw: str, segment_id: int) -> str:
             if candidate:
                 return candidate
 
-    # A single bare line is tolerated for compatibility. Multiple unstructured lines
-    # are rejected rather than joined, because recent llama-cli builds may print UI/log text.
-    if len(lines) == 1:
-        candidate = _TRANSLATION_PREFIX_RE.sub("", lines[0]).strip().strip('"“”')
+    # Some llama.cpp modes may wrap an otherwise valid answer in one labelled line
+    # plus harmless runtime text. Accept exactly one labelled translation candidate;
+    # never concatenate arbitrary lines.
+    labelled: list[str] = []
+    for line in lines:
+        candidate = _TRANSLATION_PREFIX_RE.sub("", line).strip().strip('"“”')
+        if candidate != line.strip().strip('"“”') and candidate:
+            labelled.append(candidate)
+    labelled = list(dict.fromkeys(labelled))
+    if len(labelled) == 1 and len(labelled[0]) <= 1_000:
+        return labelled[0]
+
+    # Also tolerate a standalone header followed by exactly one useful line, even if
+    # llama.cpp prints known status text around it.
+    useful = [line for line in lines if not _runtime_noise_line(line)]
+    for position, line in enumerate(useful[:-1]):
+        if _TRANSLATION_HEADER_RE.fullmatch(line):
+            following = useful[position + 1].strip().strip('"“”')
+            if following and len(following) <= 1_000:
+                return following
+
+    # A single bare line is tolerated for compatibility. If known runtime noise is
+    # present, the one remaining useful line is equally unambiguous.
+    candidates = [line for line in useful if not _TRANSLATION_HEADER_RE.fullmatch(line)]
+    if len(candidates) == 1:
+        candidate = _TRANSLATION_PREFIX_RE.sub("", candidates[0]).strip().strip('"“”')
         if candidate and len(candidate) <= 1_000:
             return candidate
 
+    preview = " | ".join(lines[:4])[:220]
     raise DubLocalError(
-        f"Contextual translator returned ambiguous or contaminated text for subtitle id {segment_id}."
+        f"Contextual translator returned ambiguous or contaminated text for subtitle id {segment_id}. "
+        f"Output preview: {preview or '(empty after cleanup)'}"
     )
