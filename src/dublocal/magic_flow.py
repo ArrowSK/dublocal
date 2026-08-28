@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -9,9 +8,21 @@ from .caption_ux import curate_caption_info
 from .contextual_progress import translate_srt_contextual_with_progress
 from .language_utils import normalize_language_code
 from .media import DubLocalError, extract_subtitle, inspect_local_media, inspect_youtube
-from .m5 import _audio_stream_count, _duration_seconds, _new_job_dir, _probe, _require, _run_ffmpeg_progress, _video_stream_count, _target_language_metadata
-from .m51 import VIDEO_QUALITY_CHOICES, _primary_video_height, _target_height, acquire_source_media, render_dubbed_media
-from .m53 import _VIDEO_BITRATES if False else None
+from .m5 import (
+    _duration_seconds,
+    _new_job_dir,
+    _probe,
+    _require,
+    _run_ffmpeg_progress,
+    _target_language_metadata,
+    _video_stream_count,
+)
+from .m51 import (
+    _primary_video_height,
+    _target_height,
+    acquire_source_media,
+    render_dubbed_media,
+)
 from .output_naming import friendly_subtitle_path, safe_language_suffix, safe_media_stem
 from .progress_operations import generate_voice_track_with_progress
 from .subtitle_export import export_subtitle
@@ -116,8 +127,7 @@ def recommend_subtitle_source(
 
     Auto policy prioritizes creator/embedded text, then an already-installed Accurate
     Whisper model, then existing automatic captions, then an already-installed Base
-    model. This is intentionally hardware-safe: Magic Flow never starts a multi-hundred-MiB
-    model download implicitly.
+    model. Magic Flow never starts a large model download implicitly.
     """
 
     manual = _manual_tracks(info)
@@ -156,8 +166,8 @@ def recommend_subtitle_source(
             track_value=str(track.get("value")),
         )
 
-    # If the user already paid the storage cost for the Accurate model, use it before
-    # YouTube automatic captions. This is especially valuable for songs/accents/noisy audio.
+    # If the user already paid the storage cost for Accurate, favor it over automatic
+    # captions. This is especially useful for songs, accents and noisy material.
     if accurate in WHISPER_MODELS and _installed_whisper(accurate):
         return SubtitleDecision(
             "transcribe",
@@ -227,7 +237,6 @@ def _task_set(tasks: Iterable[str] | None) -> set[str]:
 
 
 def _video_bitrate(height: int) -> str:
-    # Keep aligned with M5.1 without importing private constants across modules.
     return {2160: "25M", 1440: "16M", 1080: "10M", 720: "5M", 480: "2500k"}[height]
 
 
@@ -301,7 +310,11 @@ def _package_subtitles_only(
     if container == "mp4":
         command += ["-c:s", "mov_text", "-movflags", "+faststart"]
 
-    existing_subtitle_count = sum(1 for item in probe.get("streams", []) if item.get("codec_type") == "subtitle") if container == "mkv" else 0
+    existing_subtitle_count = (
+        sum(1 for item in probe.get("streams", []) if item.get("codec_type") == "subtitle")
+        if container == "mkv"
+        else 0
+    )
     for offset, (_path, language, title, default) in enumerate(subtitles):
         index = existing_subtitle_count + offset
         lang = _target_language_metadata(normalize_language_code(language))
@@ -377,9 +390,11 @@ def run_magic_flow(
             decision,
             progress_callback=_stage_callback(progress_callback, 0.08, 0.34),
         )
-        # Make the normal subtitle download filename immediately useful even if the
-        # user stops here.
         source_subtitle = Path(export_subtitle(source_subtitle, "srt"))
+
+    if wants_translate and source_language != "auto" and source_language == target:
+        wants_translate = False
+        _notify(progress_callback, 0.36, "Source already matches the requested output language")
 
     if wants_translate:
         assert source_subtitle is not None
@@ -421,8 +436,6 @@ def run_magic_flow(
     if wants_media:
         if wants_voice:
             assert voice_wav is not None
-            # "Keep original audio" means keep the untouched source track as a separate
-            # selectable stream in addition to the balanced DubLocal mix.
             mode = "add" if keep_original_audio_track else "replace"
             rendered = render_dubbed_media(
                 info,
@@ -448,7 +461,11 @@ def run_magic_flow(
                 target,
                 container=container,
                 video_quality=video_quality,
-                progress_callback=_stage_callback(progress_callback, 0.62 if wants_translate else 0.34, 1.0),
+                progress_callback=_stage_callback(
+                    progress_callback,
+                    0.62 if wants_translate else 0.34,
+                    1.0,
+                ),
             )
 
     outputs: list[str] = []
