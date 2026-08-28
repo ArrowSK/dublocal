@@ -87,6 +87,27 @@ Official Kokoro frontends currently exposed cover American/British English, Span
 
 M4 produces a voice-only WAV. M5 handles source-audio ducking/mixing and media remuxing.
 
+## Russian third-party local TTS
+
+Russian is intentionally represented as a separate local provider rather than as an official Kokoro language.
+
+| Component | Purpose | Licence / distribution policy |
+| --- | --- | --- |
+| `zaakirio/kokoro-ru` v2 | Russian Kokoro-compatible weights and Sveta/Masha/Dima voice packs | Upstream model card reports OpenRAIL weights and Apache-2.0 code; not bundled; explicit preparation only; pinned source revision; persistent local provider snapshot |
+| Dialogs Russian speech corpus | Source speech for the named Russian voices according to the model card | Dataset documentation states actor written consent for open/commercial use; retain source/licence attribution with commercial distribution records |
+| RUAccent | Russian stress, `ё` restoration and homograph handling | MIT for the v1 system used by this integration; installed only with the optional Russian runtime |
+| eSpeak NG | Russian phonemization engine used with the provider's acute-aware eSpeak data | GPL-3.0+ external executable; DubLocal does not bundle it and does not import the GPL Python `phonemizer` package |
+
+The built-in provider records published SHA-256 values for both Russian model-weight files. Preparation resolves the pinned source revision, verifies declared hashes, stores the provider in persistent DubLocal application data and writes an install receipt. Generation then loads the local config, model, voice and eSpeak data paths; it does not depend on the `kokoro-ru` fork remaining reachable.
+
+The eSpeak executable boundary is deliberate. DubLocal invokes a separately installed local command instead of incorporating eSpeak or the Python `phonemizer` package into the Apache-2.0 application. GPL permits commercial use, but this architecture is a distribution boundary rather than a legal guarantee about every future packaging arrangement. A packaged release that wants to ship eSpeak itself requires a separate GPL compliance review.
+
+Russian model/data provenance is materially stronger than the Ukrainian candidate reviewed at the same time, but DubLocal still treats third-party uploader metadata as evidence rather than a warranty of rights. `MODEL_LICENSES.json` and the generated voice manifest preserve the declared provider licence and source information.
+
+No Ukrainian TTS provider is enabled by default at this stage. A third-party Ukrainian provider may be evaluated later only after its recording/speaker/data chain of rights is sufficiently documented.
+
+Custom TTS providers are described in `docs/TTS_PROVIDERS.md`. They are data manifests only: executable modules, scripts, entrypoints and shell commands are rejected. Remote custom providers require an immutable revision plus SHA-256 pins for their config/model/voice assets.
+
 ## Shared-cache rule
 
 A model being present in the Hugging Face cache does not make it owned by DubLocal. DubLocal registrations can be removed without erasing shared snapshots another local application may need.

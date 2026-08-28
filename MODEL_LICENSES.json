@@ -152,7 +152,7 @@
       "remove_policy": "remove_dublocal_registration_keep_shared_snapshot",
       "weight_size": "310 MiB",
       "sha256": "dd4c874ecad8853d94415c21937c7e35ea09cc22f178b63821294ed010121436",
-      "role": "Legacy fast translation from English to allowlisted multilingual target languages"
+      "role": "Legacy fast translation from English to supported multilingual target languages"
     },
     {
       "id": "kokoro-82m-official",
@@ -166,7 +166,30 @@
       "storage_policy": "shared_huggingface_cache",
       "remove_policy": "never_delete_shared_cache_from_dublocal",
       "revision_policy": "development build follows official upstream repository; pin immutable revision before first packaged release",
-      "role": "M4 local text-to-speech model and official voice assets"
+      "role": "Local text-to-speech model and official voice assets for official Kokoro languages"
+    },
+    {
+      "id": "kokoro-ru-v2-vetted",
+      "backend": "kokoro-local-provider",
+      "upstream": "zaakirio/kokoro-ru",
+      "revision": "9da785e",
+      "license": "OpenRAIL",
+      "code_license_reported_upstream": "Apache-2.0",
+      "commercial_use": true,
+      "redistribution": false,
+      "bundled": false,
+      "download_on_demand": true,
+      "voices": ["Sveta", "Masha", "Dima"],
+      "weight_sha256": {
+        "kokoro-ru-v2-base.pth": "3bbee5bc05cfa182afc365b9116eaed8355f939c3c0af8aa0e43fdc45343ca15",
+        "kokoro-ru-v2-dima.pth": "658ae47e24224257ea9f83c88ea7743c5c9f0922c6bc339805ffebcfdbcb2b24"
+      },
+      "storage_policy": "persistent DubLocal application-data provider snapshot with resolved revision/install receipt",
+      "remove_policy": "provider snapshot remains local until the user explicitly removes/replaces it",
+      "role": "Vetted third-party Russian TTS provider; official Hexgrad Kokoro has no Russian language code",
+      "provenance_note": "Upstream model card identifies Dialogs Russian speech actors with commercial/open consent and additional public-domain Russian LibriSpeech material; retain model-card/licence attribution with distribution metadata",
+      "frontend_dependencies": "RUAccent is MIT; eSpeak NG is GPL-3.0+ and is invoked as a separately installed external executable, not bundled by DubLocal",
+      "distribution_policy": "do not bundle Russian weights or eSpeak NG in a packaged release without a release-specific licence/attribution review"
     },
     {
       "id": "demucs-htdemucs",

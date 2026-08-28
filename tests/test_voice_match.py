@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from dublocal.tts_provider_refinement import _apply_provider_metadata
 from dublocal.voice_match import (
     AUTO_VOICE_VALUE,
     auto_default_voice,
@@ -26,7 +27,11 @@ def test_fundamental_estimator_separates_lower_and_higher_vocal_ranges():
 
 
 def test_auto_voice_is_default_when_language_has_choices():
+    _apply_provider_metadata()
     choices = auto_voice_choices("en-US")
     assert choices[0] == (AUTO_VOICE_VALUE, AUTO_VOICE_VALUE)
     assert auto_default_voice("en-US") == AUTO_VOICE_VALUE
-    assert auto_default_voice("ru") is None
+    assert auto_default_voice("ru") == AUTO_VOICE_VALUE
+    russian = auto_voice_choices("ru")
+    assert russian[0] == (AUTO_VOICE_VALUE, AUTO_VOICE_VALUE)
+    assert any(value == "rm_dima" for _label, value in russian)
