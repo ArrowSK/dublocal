@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from dublocal import authenticated_web as web
 from dublocal.authenticated_web_policy import (
+    canonical_authenticated_url,
     install_authenticated_web_policy,
     redact_authenticated_error,
 )
+from dublocal.media import DubLocalError
 from dublocal.source_providers import SourceInspection, SourceItem
 
 
@@ -39,3 +43,34 @@ def test_authenticated_errors_redact_signed_url_credentials() -> None:
     assert "abc123" not in safe
     assert "REDACTED" in safe
     assert "quality=hd" in safe
+
+
+def test_canonical_identity_preserves_non_secret_query_routing() -> None:
+    canonical = canonical_authenticated_url(
+        "https://training.example.com/watch?lesson=42&token=secret&lang=fr#chapter"
+    )
+    assert canonical == "https://training.example.com/watch?lesson=42&lang=fr"
+
+
+def test_signed_hls_url_is_still_inspected_for_encryption() -> None:
+    install_authenticated_web_policy()
+    calls: list[str] = []
+
+    class Response:
+        def text(self) -> str:
+            return '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\nsegment.ts\n'
+
+    class Request:
+        def get(self, url: str, timeout: int):
+            calls.append(url)
+            assert timeout == 20_000
+            return Response()
+
+    class Context:
+        request = Request()
+
+    provider = web.GenericAuthenticatedProvider()
+    signed = "https://cdn.example.com/master.m3u8?token=secret&Signature=abc123"
+    with pytest.raises(DubLocalError, match="encrypted/DRM-protected"):
+        provider._check_manifest(Context(), signed)
+    assert calls == [signed]
