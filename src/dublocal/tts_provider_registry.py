@@ -53,12 +53,14 @@ _TOP_LEVEL_KEYS = {
     "preferred",
     "notes",
     "required_patterns",
+    "checksums",
 }
 _VOICE_KEYS = {"id", "label", "gender", "model_file", "voice_file"}
 _SOURCE_KEYS = {"type", "repo_id", "revision", "path"}
 _LICENSE_KEYS = {"id", "commercial_use", "redistribution", "source", "attribution"}
 _PROVIDER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,63}$")
 _REVISION_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 BUILTIN_RUSSIAN_PROVIDER: dict[str, Any] = {
@@ -69,8 +71,9 @@ BUILTIN_RUSSIAN_PROVIDER: dict[str, Any] = {
     "language_label": "Russian",
     "backend": "kokoro-local",
     "frontend": "russian-v2",
-    # Pin a known snapshot rather than following mutable main. The resolved full
-    # commit is recorded in the local install receipt when the provider is prepared.
+    # The remote is used only to prepare a persistent local snapshot. The resolved
+    # full commit is recorded in the install receipt and normal synthesis never
+    # consults this fork again.
     "source": {
         "type": "huggingface",
         "repo_id": "zaakirio/kokoro-ru",
@@ -119,6 +122,13 @@ BUILTIN_RUSSIAN_PROVIDER: dict[str, Any] = {
         "voices/dima.pt",
         "espeak-data/**",
     ],
+    # Published LFS object SHA-256 values for the two model weight files. The pinned
+    # commit already fixes the remaining files; the install receipt also fingerprints
+    # all small assets after download.
+    "checksums": {
+        "kokoro-ru-v2-base.pth": "3bbee5bc05cfa182afc365b9116eaed8355f939c3c0af8aa0e43fdc45343ca15",
+        "kokoro-ru-v2-dima.pth": "658ae47e24224257ea9f83c88ea7743c5c9f0922c6bc339805ffebcfdbcb2b24",
+    },
     "notes": "Persistent local snapshot; generation does not contact the model fork after preparation.",
 }
 
@@ -174,6 +184,21 @@ def _safe_relative(value: str, field: str) -> str:
 
 def _selection_prefix(frontend: str) -> str:
     return "r" if frontend == "russian-v2" else frontend.rsplit("-", 1)[-1]
+
+
+def _normalize_checksums(raw: Any) -> dict[str, str]:
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, dict):
+        raise DubLocalError("TTS provider checksums must be a JSON object of relative path → SHA-256.")
+    output: dict[str, str] = {}
+    for path, digest in raw.items():
+        relative = _safe_relative(str(path), "checksum path")
+        value = str(digest).lower()
+        if not _SHA256_RE.fullmatch(value):
+            raise DubLocalError(f"Checksum for {relative} must be a 64-character SHA-256 hex value.")
+        output[relative] = value
+    return output
 
 
 def validate_provider_manifest(raw: dict[str, Any], *, builtin: bool = False) -> dict[str, Any]:
@@ -276,6 +301,20 @@ def validate_provider_manifest(raw: dict[str, Any], *, builtin: bool = False) ->
             *sorted({item["voice_file"] for item in voices}),
         ]
 
+    checksums = _normalize_checksums(raw.get("checksums"))
+    if source_type == "huggingface" and not builtin:
+        primary_assets = {
+            config_file,
+            *{item["model_file"] for item in voices},
+            *{item["voice_file"] for item in voices},
+        }
+        missing_checksums = sorted(primary_assets - set(checksums))
+        if missing_checksums:
+            raise DubLocalError(
+                "Remote custom TTS providers must SHA-256 pin every config/model/voice asset. Missing: "
+                + ", ".join(missing_checksums)
+            )
+
     return {
         "schema_version": _SCHEMA_VERSION,
         "id": provider_id,
@@ -292,7 +331,7 @@ def validate_provider_manifest(raw: dict[str, Any], *, builtin: bool = False) ->
         "preferred": bool(raw.get("preferred", False)),
         "notes": str(raw.get("notes") or ""),
         "required_patterns": required_patterns,
-        "builtin": bool(builtin),
+        "checksums": checksums,
     }
 
 
@@ -309,7 +348,9 @@ def _load_custom_manifests() -> list[TTSProvider]:
 
 
 def all_providers() -> list[TTSProvider]:
-    builtin = TTSProvider(validate_provider_manifest(BUILTIN_RUSSIAN_PROVIDER, builtin=True), builtin=True)
+    builtin = TTSProvider(
+        validate_provider_manifest(BUILTIN_RUSSIAN_PROVIDER, builtin=True), builtin=True
+    )
     return [builtin, *_load_custom_manifests()]
 
 
@@ -386,7 +427,6 @@ def _required_files(provider: TTSProvider, root: Path) -> list[str]:
         files.add(voice["model_file"])
         files.add(voice["voice_file"])
     if provider.manifest["frontend"] == "russian-v2":
-        # Russian quality depends on the acute-aware eSpeak data snapshot.
         data = root / "espeak-data"
         if not data.is_dir():
             raise DubLocalError("Russian provider is missing its acute-aware espeak-data directory.")
@@ -397,9 +437,19 @@ def _required_files(provider: TTSProvider, root: Path) -> list[str]:
     return sorted(files)
 
 
+def _verify_declared_checksums(provider: TTSProvider, root: Path) -> None:
+    for relative, expected in provider.manifest.get("checksums", {}).items():
+        path = root / relative
+        if not path.is_file():
+            raise DubLocalError(f"Checksummed TTS provider asset is missing: {relative}")
+        actual = _sha256(path)
+        if actual.lower() != str(expected).lower():
+            raise DubLocalError(
+                f"TTS provider checksum mismatch for {relative}: expected {expected}, got {actual}."
+            )
+
+
 def prepare_provider(provider: TTSProvider) -> Path:
-    # Once prepared, use the persistent local copy without consulting the upstream
-    # source. This is the explicit resilience boundary for third-party forks.
     if provider_is_installed(provider):
         return provider.install_dir
 
@@ -412,7 +462,8 @@ def prepare_provider(provider: TTSProvider) -> Path:
         else:
             resolved = _download_hf_source(provider, staging)
         required = _required_files(provider, staging)
-        hashes = {
+        _verify_declared_checksums(provider, staging)
+        small_hashes = {
             item: _sha256(staging / item)
             for item in required
             if (staging / item).stat().st_size <= 8 * 1024 * 1024
@@ -423,7 +474,8 @@ def prepare_provider(provider: TTSProvider) -> Path:
             "provider_manifest": provider.manifest,
             "resolved_revision": resolved,
             "required_files": required,
-            "small_file_sha256": hashes,
+            "declared_sha256": dict(provider.manifest.get("checksums", {})),
+            "small_file_sha256": small_hashes,
         }
         (staging / "install-receipt.json").write_text(
             json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -469,7 +521,11 @@ def provider_status_text() -> str:
     lines = ["```text", "[TTS providers] language → audited backend"]
     for provider in all_providers():
         installed = "ready · persistent local snapshot" if provider_is_installed(provider) else "not prepared"
-        commercial = "commercial-use declared" if provider.manifest["license"].get("commercial_use") else "commercial-use NOT declared"
+        commercial = (
+            "commercial-use declared"
+            if provider.manifest["license"].get("commercial_use")
+            else "commercial-use NOT declared"
+        )
         source = provider.manifest["source"]
         if source["type"] == "huggingface":
             source_label = f"{source['repo_id']}@{source['revision']}"
@@ -480,6 +536,7 @@ def provider_status_text() -> str:
         )
     lines += [
         "[custom] JSON manifests are data-only; arbitrary Python/modules/commands are rejected",
+        "[integrity] remote custom providers require pinned revisions + SHA-256 for config/model/voice assets",
         "[resilience] prepared providers run from DubLocal's persistent local copy, not from the remote fork",
         "```",
     ]
