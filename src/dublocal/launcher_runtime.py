@@ -28,7 +28,7 @@ install_transcription_refinements()
 install_native_timing_refinement()
 install_adaptive_audio_refinement()
 
-from .ui_v064 import MATRIX_CSS, build_app
+from .product_ui import MATRIX_CSS, build_app
 
 
 def _env_bool(name: str, default: bool) -> bool:
