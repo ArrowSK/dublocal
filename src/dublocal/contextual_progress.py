@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from .adaptive_contextual import active_recommendation, contextual_model_spec, contextual_model_valid
-from .contextual_policy import build_review_prompt, build_translation_prompt, context_plan
+from .contextual_policy import (
+    CONTEXTUAL_PROMPT_VERSION,
+    build_review_prompt,
+    build_translation_prompt,
+    context_plan,
+)
 from .contextual_recovery import (
     build_format_repair_prompt,
     build_single_line_recovery_prompt,
@@ -30,6 +35,12 @@ from .translation import (
     TranslationResult,
     normalise_language_code,
 )
+from .translation_cache import (
+    CachedTranslation,
+    load_translation_cache,
+    save_translation_cache,
+    translation_cache_key,
+)
 from .translation_quality import is_protected_caption_tag, validate_translation_text
 
 
@@ -49,6 +60,81 @@ def _validated_chunk(
         )
         for segment, text in zip(target_segments, texts, strict=True)
     ]
+
+
+def _validated_cached_translation(
+    cached: CachedTranslation | None,
+    source_segments: Sequence[Segment],
+    target_language: str,
+) -> CachedTranslation | None:
+    """Accept only a complete cache entry that still passes current output guards."""
+
+    if cached is None or len(cached.segments) != len(source_segments):
+        return None
+    source_language = normalise_language_code(cached.source_language)
+    if source_language not in TRANSLATION_LANGUAGES or source_language == target_language:
+        return None
+
+    checked: list[TranslatedSegment] = []
+    try:
+        for source, item in zip(source_segments, cached.segments, strict=True):
+            if (
+                item.index != source.index
+                or item.start_ms != source.start_ms
+                or item.end_ms != source.end_ms
+            ):
+                return None
+            if is_protected_caption_tag(source.text):
+                if item.translated_text != source.text:
+                    return None
+                text = source.text
+            else:
+                text = validate_translation_text(
+                    item.translated_text,
+                    target_language=target_language,
+                    segment_id=source.index,
+                )
+            checked.append(
+                TranslatedSegment(
+                    index=source.index,
+                    start_ms=source.start_ms,
+                    end_ms=source.end_ms,
+                    source_text=source.text,
+                    translated_text=text,
+                )
+            )
+    except DubLocalError:
+        return None
+
+    return CachedTranslation(
+        segments=checked,
+        source_language=source_language,
+        target_language=target_language,
+        route=cached.route,
+    )
+
+
+def _write_translation_output(
+    translated: Sequence[TranslatedSegment],
+    target_language: str,
+) -> Path:
+    output_dir = _new_job_dir("contextual-translation")
+    output = output_dir / f"captions.{target_language}.srt"
+    output.write_text(
+        segments_to_srt(
+            [
+                Segment(
+                    index=item.index,
+                    start_ms=item.start_ms,
+                    end_ms=item.end_ms,
+                    text=item.translated_text,
+                )
+                for item in translated
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return output
 
 
 def _language_detection_sample(segments: Sequence[Segment]) -> str:
@@ -293,7 +379,8 @@ def translate_srt_contextual_with_progress(
     if path.suffix.lower() != ".srt":
         raise DubLocalError("Contextual translation expects DubLocal's normalized SRT timeline.")
 
-    source = normalise_language_code(source_language)
+    requested_source = normalise_language_code(source_language)
+    source = requested_source
     source_is_auto = source == "auto"
     target = normalise_language_code(target_language)
     if not source_is_auto and source not in TRANSLATION_LANGUAGES:
@@ -302,13 +389,10 @@ def translate_srt_contextual_with_progress(
         raise DubLocalError("Choose a supported translation target language.")
     if not source_is_auto and source == target:
         raise DubLocalError("Source and target languages are the same; no translation is needed.")
-    if not _llama_command() or not contextual_model_valid(selected_model_key):
-        raise ContextualTranslationMissingError(
-            f"{spec.label} contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
-        )
 
     try:
-        segments = parse_srt(path.read_text(encoding="utf-8", errors="replace"))
+        source_srt_text = path.read_text(encoding="utf-8", errors="replace")
+        segments = parse_srt(source_srt_text)
     except ValueError as exc:
         raise DubLocalError(f"Could not read the subtitle timeline: {exc}") from exc
     if not segments:
@@ -317,6 +401,49 @@ def translate_srt_contextual_with_progress(
     plan = context_plan(segments)
     if plan.input_budget_tokens > selected_context_cap:
         plan = replace(plan, input_budget_tokens=selected_context_cap)
+
+    cache_key = translation_cache_key(
+        source_srt_text,
+        requested_source_language=requested_source,
+        target_language=target,
+        model_key=selected_model_key,
+        model_revision=str(spec.metadata.get("revision") or ""),
+        model_sha256=str(spec.metadata.get("sha256") or ""),
+        review=selected_review,
+        context_cap_tokens=selected_context_cap,
+        chunk_segments=plan.chunk_segments,
+        input_budget_tokens=plan.input_budget_tokens,
+        prompt_version=CONTEXTUAL_PROMPT_VERSION,
+    )
+    cached = _validated_cached_translation(
+        load_translation_cache(cache_key, segments, target_language=target),
+        segments,
+        target,
+    )
+    if cached is not None:
+        if progress_callback:
+            progress_callback(0.05, "Reusing verified local translation cache")
+        output = _write_translation_output(cached.segments, target)
+        if progress_callback:
+            progress_callback(1.0, "Contextual translation ready from local cache")
+        route = cached.route
+        if "cache hit" not in route.casefold():
+            route += " · cache hit"
+        return TranslationResult(
+            srt_path=output,
+            segments=cached.segments,
+            source_language=cached.source_language,
+            target_language=target,
+            route=route,
+        )
+
+    # A verified cache hit above is intentionally usable even if llama.cpp or the
+    # model is temporarily unavailable. A cache miss still requires the exact model.
+    if not _llama_command() or not contextual_model_valid(selected_model_key):
+        raise ContextualTranslationMissingError(
+            f"{spec.label} contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
+        )
+
     starts = list(range(0, len(segments), plan.chunk_segments))
     total_chunks = max(1, len(starts))
     translated: list[TranslatedSegment] = []
@@ -440,22 +567,7 @@ def translate_srt_contextual_with_progress(
         if runtime is not None:
             runtime.__exit__(None, None, None)
 
-    output_dir = _new_job_dir("contextual-translation")
-    output = output_dir / f"captions.{target}.srt"
-    output.write_text(
-        segments_to_srt(
-            [
-                Segment(
-                    index=item.index,
-                    start_ms=item.start_ms,
-                    end_ms=item.end_ms,
-                    text=item.translated_text,
-                )
-                for item in translated
-            ]
-        ),
-        encoding="utf-8",
-    )
+    output = _write_translation_output(translated, target)
     if progress_callback:
         progress_callback(1.0, "Contextual translation complete")
 
@@ -463,6 +575,13 @@ def translate_srt_contextual_with_progress(
         f"{spec.label} {'+ review' if selected_review else 'single pass'} · "
         f"{TRANSLATION_LANGUAGES[source]['label']} → {TRANSLATION_LANGUAGES[target]['label']} · "
         f"{plan.input_budget_tokens}-token input · {runtime_mode}"
+    )
+    save_translation_cache(
+        cache_key,
+        translated,
+        source_language=source,
+        target_language=target,
+        route=route,
     )
     return TranslationResult(
         srt_path=output,
