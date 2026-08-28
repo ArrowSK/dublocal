@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from dublocal.contextual_policy import build_translation_prompt, context_plan
+from dublocal.contextual_policy import (
+    CONTEXTUAL_PROMPT_VERSION,
+    build_review_prompt,
+    build_translation_prompt,
+    context_plan,
+)
 from dublocal.timeline import Segment
 
 
@@ -42,3 +47,23 @@ def test_prompt_protects_tags_and_uses_faithful_line_protocol():
     assert "[ID] - translated text" in prompt
     assert "Do not output JSON" in prompt
     assert "lyrics" in prompt
+
+
+def test_review_reuses_source_context_without_duplicating_target_lines():
+    segments = [
+        Segment(1, 0, 1000, "Hello there."),
+        Segment(2, 1000, 2000, "How are you?"),
+    ]
+    plan = context_plan(segments)
+    original = build_translation_prompt(segments, 0, 2, "en", "ru", [], plan)
+    review = build_review_prompt(
+        original,
+        segments,
+        ["Привет.", "Как дела?"],
+        "ru",
+    )
+    assert review.count("[1] Hello there.") == original.count("[1] Hello there.")
+    assert "DRAFT TRANSLATIONS TO REVIEW" in review
+    assert "[1] Привет." in review
+    assert "CHECK 7" in review
+    assert CONTEXTUAL_PROMPT_VERSION
