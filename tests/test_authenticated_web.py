@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dublocal import authenticated_web as web
+from dublocal.authenticated_web_policy import install_authenticated_web_policy
 from dublocal.source_providers import SourceInspection, SourceItem
 
 
@@ -38,6 +39,7 @@ def test_domestika_is_selected_before_generic_provider() -> None:
 
 
 def test_signed_url_values_are_redacted_and_not_used_for_persistent_identity() -> None:
+    install_authenticated_web_policy()
     source = "https://media.example.com/video.m3u8?token=topsecret&Signature=abc123&quality=hd#part"
     redacted = web.sanitize_url(source)
     assert "topsecret" not in redacted
@@ -47,7 +49,7 @@ def test_signed_url_values_are_redacted_and_not_used_for_persistent_identity() -
     canonical = web.canonical_source_url(source)
     assert "token=" not in canonical
     assert "Signature=" not in canonical
-    assert canonical == "https://media.example.com/video.m3u8"
+    assert canonical == "https://media.example.com/video.m3u8?quality=hd"
 
 
 def test_drm_manifest_detection_is_conservative() -> None:
@@ -62,6 +64,7 @@ def test_drm_manifest_detection_is_conservative() -> None:
 
 
 def test_course_resume_excludes_completed_lessons(monkeypatch, tmp_path) -> None:
+    install_authenticated_web_policy()
     monkeypatch.setattr(web, "course_manifest_root", lambda: tmp_path)
     inspection = _inspection()
     assert web.pending_item_ids(inspection) == ("one", "two")
