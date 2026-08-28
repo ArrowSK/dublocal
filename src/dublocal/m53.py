@@ -13,9 +13,9 @@ from .timeline import parse_srt
 from .voice_text import spoken_text
 
 
-# Keep speech anchored to the subtitle window, but avoid truly pathological stretching.
-# 0.30x is slow enough to fill substantially longer sung/dialogue phrases while remaining
-# inside FFmpeg's chained atempo path; 2.50x is the corresponding conservative speed-up cap.
+# Legacy M5.3 post-generation timing helpers remain below for compatibility/history,
+# but are no longer installed at runtime. Current timing is performed natively by
+# Kokoro during synthesis (see native_tts_timing.py), avoiding robotic atempo stretch.
 _MIN_TEMPO = 0.30
 _MAX_TEMPO = 2.50
 _EXACT_TOLERANCE_MS = 25
@@ -49,7 +49,7 @@ class SubtitlePackageResult:
 
 
 def plan_segment_timing(start_ms: int, end_ms: int, voice_duration_ms: int) -> SegmentTimingPlan:
-    """Plan a variable per-line tempo so speech ends at the subtitle end time."""
+    """Legacy post-generation timing planner retained for compatibility/tests."""
 
     slot_ms = max(1, int(end_ms) - int(start_ms))
     onset_ms = min(_MAX_ONSET_MS, max(_MIN_ONSET_MS, int(round(slot_ms * _ONSET_RATIO))))
@@ -70,7 +70,7 @@ def plan_segment_timing(start_ms: int, end_ms: int, voice_duration_ms: int) -> S
 
 
 def _atempo_chain(factor: float) -> str:
-    """Build an atempo chain for factors outside the single-filter 0.5x..2x range."""
+    """Legacy helper: build an atempo chain for archived/compatibility callers."""
 
     value = float(factor)
     if value <= 0:
@@ -121,11 +121,7 @@ def fit_voice_timing_exact(
     maximum_speedup: float = 1.25,
     progress_callback=None,
 ) -> m5.TimingFit:
-    """Fit each TTS segment to its own subtitle window with a small iterative correction.
-
-    `maximum_speedup` is retained for API compatibility; M5.3 uses its own symmetric,
-    bounded tempo policy because short translated lines also need controlled slow-down.
-    """
+    """Legacy post-generation fitter. Current runtime does not install this function."""
 
     del maximum_speedup
     source = Path(voice_wav).expanduser().resolve()
@@ -172,8 +168,6 @@ def fit_voice_timing_exact(
             fitted_duration = m5._wav_duration_ms(fitted_wav)
             adjusted += 1
 
-            # atempo duration rounding can accumulate on long lines. One correction pass
-            # keeps the spoken end aligned to the subtitle end without padding fake silence.
             error_ms = fitted_duration - plan.target_duration_ms
             if abs(error_ms) > _EXACT_TOLERANCE_MS:
                 correction = fitted_duration / max(1, plan.target_duration_ms)
@@ -223,7 +217,6 @@ def _dialogue_windows(subtitle_path: str | Path | None) -> list[tuple[float, flo
     for segment in segments:
         if not spoken_text(segment.text):
             continue
-        # A little pre-roll and longer release prevent obvious level pumping at edits.
         start = max(0.0, segment.start_ms / 1000.0 - 0.18)
         end = max(start, segment.end_ms / 1000.0 + 0.50)
         raw.append((start, end))
@@ -403,24 +396,19 @@ def package_subtitled_media(
             command += ["-c:v", "copy"]
 
     command += ["-map", "0:a?", "-c:a", "copy"]
-    preserved_subtitles = 0
     if container == "mkv":
-        command += ["-map", "0:s?"]
-        preserved_subtitles = m51._subtitle_stream_count(probe)
-    command += ["-map", "1:0", "-map_metadata", "0"]
-
-    if container == "mkv":
-        command += ["-c:s", "copy"]
-    else:
+        command += ["-map", "0:s?", "-c:s", "copy"]
+    command += ["-map", "1:0"]
+    if container == "mp4":
         command += ["-c:s", "mov_text", "-movflags", "+faststart"]
 
-    subtitle_index = preserved_subtitles if container == "mkv" else 0
+    preserved = m51._subtitle_stream_count(probe) if container == "mkv" else 0
     command += [
-        f"-metadata:s:s:{subtitle_index}",
+        f"-metadata:s:s:{preserved}",
         f"language={language}",
-        f"-metadata:s:s:{subtitle_index}",
+        f"-metadata:s:s:{preserved}",
         f"title=DubLocal source subtitles · {language}",
-        f"-disposition:s:{subtitle_index}",
+        f"-disposition:s:{preserved}",
         "default",
         "-progress",
         "pipe:1",
@@ -462,7 +450,8 @@ def package_subtitled_media(
 
 
 def install_runtime_refinements() -> None:
-    """Install M5.3 refinements without changing the stable public M5/M5.1 API."""
+    """Install M5.3 mix refinements without re-timing generated speech."""
 
-    m5.fit_voice_timing = fit_voice_timing_exact
+    # Timing is now handled natively during Kokoro generation. Do not install the
+    # legacy FFmpeg atempo fitter here; large post-generation stretches sound robotic.
     m51.create_dubbed_mix = create_balanced_dubbed_mix
