@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unicodedata
 
-from dublocal.russian_frontend import _integer_to_russian, _normalize_input_text, _normalize_ipa
+from dublocal.russian_frontend import (
+    _filter_kokoro_oov,
+    _integer_to_russian,
+    _normalize_input_text,
+    _normalize_ipa,
+)
 
 
 def test_zero_width_joiner_before_digit_is_removed_and_digit_is_spoken():
@@ -29,3 +34,17 @@ def test_russian_number_expansion_handles_cardinals_signs_and_decimals():
     assert _integer_to_russian(2026) == "две тысячи двадцать шесть"
     assert _normalize_input_text("-12") == "минус двенадцать"
     assert _normalize_input_text("3.14") == "три запятая один четыре"
+
+
+def test_espeak_caret_artifact_is_dropped_before_kokoro_validation():
+    phonemes, oov = _filter_kokoro_oov("blɐg^ɐslɐvlʲˈajtʲe", set("blɐgslovʲˈajte"))
+
+    assert "^" not in phonemes
+    assert not oov
+
+
+def test_real_unknown_ipa_symbol_still_fails_closed():
+    phonemes, oov = _filter_kokoro_oov("taɬ", {"t", "a"})
+
+    assert phonemes == "taɬ"
+    assert oov == {"ɬ"}
