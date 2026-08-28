@@ -167,6 +167,38 @@
       "remove_policy": "never_delete_shared_cache_from_dublocal",
       "revision_policy": "development build follows official upstream repository; pin immutable revision before first packaged release",
       "role": "M4 local text-to-speech model and official voice assets"
+    },
+    {
+      "id": "demucs-htdemucs",
+      "backend": "demucs",
+      "upstream": "facebookresearch/demucs",
+      "runtime_version": "4.0.1",
+      "model": "htdemucs",
+      "license": "MIT",
+      "commercial_use": true,
+      "redistribution": false,
+      "bundled": false,
+      "download_on_demand": true,
+      "storage_policy": "upstream Demucs/PyTorch cache",
+      "remove_policy": "DubLocal does not delete upstream/shared Demucs model caches",
+      "role": "Optional two-stem vocal/accompaniment separation for music-aware dubbing on all Apple Silicon memory tiers",
+      "distribution_policy": "download from upstream only; do not bundle or redistribute weights until a packaged release records immutable model artifact metadata and checksum"
+    },
+    {
+      "id": "demucs-htdemucs-ft",
+      "backend": "demucs",
+      "upstream": "facebookresearch/demucs",
+      "runtime_version": "4.0.1",
+      "model": "htdemucs_ft",
+      "license": "MIT",
+      "commercial_use": true,
+      "redistribution": false,
+      "bundled": false,
+      "download_on_demand": true,
+      "storage_policy": "upstream Demucs/PyTorch cache",
+      "remove_policy": "DubLocal does not delete upstream/shared Demucs model caches",
+      "role": "Optional slower fine-tuned vocal/accompaniment separation reserved by default for high-memory Apple Silicon",
+      "distribution_policy": "download from upstream only; do not bundle or redistribute weights until a packaged release records immutable model artifact metadata and checksum"
     }
   ]
 }
