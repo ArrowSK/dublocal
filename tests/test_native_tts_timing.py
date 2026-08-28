@@ -16,10 +16,17 @@ def _write_srt(path: Path) -> None:
     )
 
 
-def test_native_speed_estimate_uses_measured_duration():
-    assert worker._native_speed_for_target(1.0, 3_000, 4_000) == 0.75
+def test_native_speed_estimate_only_speeds_up_overflow_by_default():
+    assert worker._native_speed_for_target(1.0, 3_000, 4_000) == 1.0
     assert worker._native_speed_for_target(1.0, 4_000, 2_000) == 2.0
-    assert worker._native_speed_for_target(1.0, 1_000, 4_000) == 0.5
+    assert worker._native_speed_for_target(1.0, 1_000, 4_000) == 1.0
+    assert worker._native_speed_for_target(0.8, 1_000, 4_000) == 0.8
+    assert worker._native_speed_for_target(
+        1.0,
+        3_000,
+        4_000,
+        allow_slowdown=True,
+    ) == 0.75
 
 
 def test_worker_request_receives_per_segment_subtitle_targets():
@@ -52,11 +59,11 @@ def test_generation_wrapper_enriches_worker_and_manifest(monkeypatch, tmp_path: 
             "segments": [
                 {
                     "index": 1,
-                    "speed": 0.75,
+                    "speed": 1.0,
                     "pilot_duration_ms": 3000,
                     "target_duration_ms": 4000,
-                    "timing_error_ms": 40,
-                    "generation_passes": 2,
+                    "timing_error_ms": -1000,
+                    "generation_passes": 1,
                 },
                 {
                     "index": 2,
@@ -81,8 +88,16 @@ def test_generation_wrapper_enriches_worker_and_manifest(monkeypatch, tmp_path: 
             {
                 "speed": speed,
                 "segments": [
-                    {"index": 1, "text": "Hello there.", "voice": (segment_voices or {}).get(1, voice)},
-                    {"index": 2, "text": "Second line.", "voice": (segment_voices or {}).get(2, voice)},
+                    {
+                        "index": 1,
+                        "text": "Hello there.",
+                        "voice": (segment_voices or {}).get(1, voice),
+                    },
+                    {
+                        "index": 2,
+                        "text": "Second line.",
+                        "voice": (segment_voices or {}).get(2, voice),
+                    },
                 ],
             },
             tmp_path,
@@ -120,8 +135,8 @@ def test_generation_wrapper_enriches_worker_and_manifest(monkeypatch, tmp_path: 
     payload = json.loads(manifest.read_text(encoding="utf-8"))
     assert payload["timing_mode"] == "native_kokoro_speed"
     assert payload["post_stretch"] is False
-    assert payload["segments"][0]["native_speed"] == 0.75
-    assert payload["segments"][0]["generation_passes"] == 2
+    assert payload["segments"][0]["native_speed"] == 1.0
+    assert payload["segments"][0]["generation_passes"] == 1
 
 
 def test_export_timing_uses_generated_track_without_waveform_stretch(tmp_path: Path):
@@ -138,9 +153,9 @@ def test_export_timing_uses_generated_track_without_waveform_stretch(tmp_path: P
                         "index": 1,
                         "slot_ms": 4000,
                         "target_duration_ms": 4000,
-                        "native_speed": 0.75,
-                        "timing_error_ms": 40,
-                        "generation_passes": 2,
+                        "native_speed": 1.0,
+                        "timing_error_ms": -1000,
+                        "generation_passes": 1,
                     },
                     {
                         "index": 2,
@@ -159,6 +174,6 @@ def test_export_timing_uses_generated_track_without_waveform_stretch(tmp_path: P
     result = native.use_native_generated_timing(voice, tmp_path / "unused")
 
     assert result.wav_path == voice.resolve()
-    assert result.adjusted_segments == 2
+    assert result.adjusted_segments == 1
     assert result.remaining_overflows == 1
     assert result.maximum_speedup == 1.2
