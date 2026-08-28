@@ -51,6 +51,26 @@ def _local_manifest(path: Path, *, provider_id: str = "test-russian", preferred:
     }
 
 
+def _snapshot_tts_metadata() -> tuple[dict, list, dict, dict]:
+    return (
+        dict(tts.KOKORO_LANGUAGES),
+        list(tts.KOKORO_LANGUAGE_CHOICES),
+        dict(tts._PREPARE_TEXT),
+        dict(tts._TRANSLATION_TO_KOKORO),
+    )
+
+
+def _restore_tts_metadata(snapshot: tuple[dict, list, dict, dict]) -> None:
+    languages, choices, prepare_text, translation_map = snapshot
+    tts.KOKORO_LANGUAGES.clear()
+    tts.KOKORO_LANGUAGES.update(languages)
+    tts.KOKORO_LANGUAGE_CHOICES[:] = choices
+    tts._PREPARE_TEXT.clear()
+    tts._PREPARE_TEXT.update(prepare_text)
+    tts._TRANSLATION_TO_KOKORO.clear()
+    tts._TRANSLATION_TO_KOKORO.update(translation_map)
+
+
 def test_builtin_russian_provider_is_pinned_and_commercially_declared() -> None:
     provider = validate_provider_manifest(BUILTIN_RUSSIAN_PROVIDER, builtin=True)
     assert provider["language"] == "ru"
@@ -140,10 +160,14 @@ def test_provider_timing_never_slows_a_line_that_fits() -> None:
 
 
 def test_russian_is_exposed_through_language_to_provider_mapping(monkeypatch) -> None:
-    monkeypatch.setattr(refinement, "all_providers", registry.all_providers)
-    refinement._apply_provider_metadata()
-    assert tts.suggested_kokoro_language("ru") == "ru"
-    assert tts.kokoro_default_voice("ru") == "rf_sveta"
-    choices = dict((value, label) for label, value in tts.kokoro_voice_choices("ru"))
-    assert "rf_sveta" in choices
-    assert "rm_dima" in choices
+    snapshot = _snapshot_tts_metadata()
+    try:
+        monkeypatch.setattr(refinement, "all_providers", registry.all_providers)
+        refinement._apply_provider_metadata()
+        assert tts.suggested_kokoro_language("ru") == "ru"
+        assert tts.kokoro_default_voice("ru") == "rf_sveta"
+        choices = dict((value, label) for label, value in tts.kokoro_voice_choices("ru"))
+        assert "rf_sveta" in choices
+        assert "rm_dima" in choices
+    finally:
+        _restore_tts_metadata(snapshot)
