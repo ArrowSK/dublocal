@@ -39,18 +39,30 @@ def _duration_ms(sample_count: int, sample_rate: int) -> int:
     return int(round(max(0, int(sample_count)) * 1000 / max(1, int(sample_rate))))
 
 
-def _native_speed_for_target(current_speed: float, measured_ms: int, target_ms: int) -> float:
-    """Estimate the Kokoro generation speed needed to fill a subtitle window.
+def _native_speed_for_target(
+    current_speed: float,
+    measured_ms: int,
+    target_ms: int,
+    *,
+    allow_slowdown: bool = False,
+) -> float:
+    """Estimate the Kokoro generation speed needed to fit a subtitle window.
 
-    Kokoro's speed parameter changes prosody during synthesis, which sounds materially
-    more natural than stretching an already-generated waveform with FFmpeg atempo.
+    Automatic timing treats the subtitle window as a maximum, not a duration target.
+    If naturally generated speech is shorter than the source line, leaving silence is
+    preferable to slowing the model and creating low-speed prosody/articulation artifacts.
+    A manually selected base speed is still respected; adaptive timing simply will not
+    reduce it further unless an explicit caller opts into slowdown.
     """
 
     speed = max(_MIN_NATIVE_SPEED, min(_MAX_NATIVE_SPEED, float(current_speed)))
     if measured_ms <= 0 or target_ms <= 0:
         return speed
     requested = speed * float(measured_ms) / float(target_ms)
-    return max(_MIN_NATIVE_SPEED, min(_MAX_NATIVE_SPEED, requested))
+    requested = max(_MIN_NATIVE_SPEED, min(_MAX_NATIVE_SPEED, requested))
+    if not allow_slowdown and requested < speed:
+        return speed
+    return requested
 
 
 def _timing_tolerance_ms(target_ms: int) -> int:
@@ -160,10 +172,15 @@ def _run(request: dict) -> dict:
 
         if adaptive_timing and target_ms > 0:
             tolerance = _timing_tolerance_ms(target_ms)
-            desired_speed = _native_speed_for_target(segment_speed, pilot_duration, target_ms)
+            desired_speed = _native_speed_for_target(
+                segment_speed,
+                pilot_duration,
+                target_ms,
+                allow_slowdown=False,
+            )
             if (
-                abs(pilot_duration - target_ms) > tolerance
-                and abs(desired_speed - segment_speed) >= 0.025
+                pilot_duration - target_ms > tolerance
+                and desired_speed - segment_speed >= 0.025
             ):
                 audio = synthesize(text, voice, desired_speed)
                 final_speed = desired_speed
@@ -171,12 +188,18 @@ def _run(request: dict) -> dict:
                 generation_passes = 2
 
                 # Kokoro duration is close to inverse speed but not perfectly linear.
-                # One native re-generation correction is enough; never waveform-stretch.
-                corrected_speed = _native_speed_for_target(final_speed, final_duration, target_ms)
+                # Correct only remaining overflow. If the second pass is already short,
+                # keep the natural pause instead of slowing the voice back down.
+                corrected_speed = _native_speed_for_target(
+                    final_speed,
+                    final_duration,
+                    target_ms,
+                    allow_slowdown=False,
+                )
                 if (
-                    abs(final_duration - target_ms) > tolerance
-                    and abs(corrected_speed - final_speed) >= 0.025
-                    and _MIN_NATIVE_SPEED < corrected_speed < _MAX_NATIVE_SPEED
+                    final_duration - target_ms > tolerance
+                    and corrected_speed - final_speed >= 0.025
+                    and corrected_speed < _MAX_NATIVE_SPEED
                 ):
                     audio = synthesize(text, voice, corrected_speed)
                     final_speed = corrected_speed
