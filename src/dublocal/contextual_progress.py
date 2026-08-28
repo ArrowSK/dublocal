@@ -15,6 +15,7 @@ from .contextual_policy import (
 )
 from .contextual_recovery import (
     build_format_repair_prompt,
+    build_missing_recovery_prompt,
     build_single_line_recovery_prompt,
     clean_single_line_output,
     recover_chunk_output,
@@ -230,6 +231,14 @@ def _translate_chunk_with_recovery(
     total_chunks: int,
     progress_callback: ProgressCallback | None,
 ) -> list[str]:
+    """Translate one chunk and repair malformed output with bounded model calls.
+
+    Recovery used to make one full-context model call for every missing subtitle. A
+    malformed 48-line chunk could therefore turn into dozens of expensive calls. Keep
+    strict validation, but recover all missing IDs together and reserve one compact
+    single-line retry only for the final stubborn ID.
+    """
+
     raw = runtime.generate(prompt, max_output_tokens=max_output_tokens)
     try:
         return _validated_chunk(
@@ -238,18 +247,42 @@ def _translate_chunk_with_recovery(
             target_language,
         )
     except DubLocalError:
+        pass
+
+    target_label = TRANSLATION_LANGUAGES[target_language]["label"]
+    recovered: dict[int, str] = {}
+
+    def absorb(candidate_raw: str, candidates: Sequence[Segment]) -> None:
+        partial = recover_partial_output(candidate_raw, candidates)
+        for segment in candidates:
+            if segment.index in recovered or segment.index not in partial:
+                continue
+            try:
+                recovered[segment.index] = validate_translation_text(
+                    partial[segment.index],
+                    target_language=target_language,
+                    segment_id=segment.index,
+                )
+            except DubLocalError:
+                continue
+
+    absorb(raw, target_segments)
+    last_output = raw
+
+    # If the primary response contained no usable aligned IDs, make one whole-chunk
+    # format repair. If it contained useful IDs, keep them and go directly to a compact
+    # missing-ID batch instead of translating the whole chunk again.
+    if not recovered:
         if progress_callback:
             progress_callback(
                 max(0.02, min(0.88, (chunk_number - 0.4) / max(1, total_chunks) * 0.80 + 0.02)),
-                f"Recovering output for chunk {chunk_number}/{total_chunks}",
+                f"Repairing output format for chunk {chunk_number}/{total_chunks}",
             )
-
-        target_label = TRANSLATION_LANGUAGES[target_language]["label"]
-        repair_prompt = build_format_repair_prompt(raw, target_segments, target_label)
         repaired = runtime.generate(
-            repair_prompt,
+            build_format_repair_prompt(raw, target_segments, target_label),
             max_output_tokens=max(512, max_output_tokens),
         )
+        last_output = repaired
         try:
             return _validated_chunk(
                 recover_chunk_output(repaired, target_segments),
@@ -257,39 +290,59 @@ def _translate_chunk_with_recovery(
                 target_language,
             )
         except DubLocalError:
-            pass
+            absorb(repaired, target_segments)
 
-        recovered = recover_partial_output(raw, target_segments)
-        recovered.update(recover_partial_output(repaired, target_segments))
+    missing = [segment for segment in target_segments if segment.index not in recovered]
 
-        for segment in target_segments:
-            if segment.index not in recovered:
-                continue
-            try:
-                recovered[segment.index] = validate_translation_text(
-                    recovered[segment.index],
-                    target_language=target_language,
-                    segment_id=segment.index,
-                )
-            except DubLocalError:
-                recovered.pop(segment.index, None)
-
+    # At most two compact batch retries, regardless of how many subtitle IDs are
+    # missing. This is the main performance guard for malformed model responses.
+    for attempt in range(1, 3):
+        if not missing:
+            break
+        if progress_callback:
+            progress_callback(
+                max(0.02, min(0.91, (chunk_number - 0.2) / max(1, total_chunks) * 0.82 + 0.02)),
+                f"Recovering {len(missing)} missing subtitle{'s' if len(missing) != 1 else ''} together · attempt {attempt}/2",
+            )
+        recovery_prompt = build_missing_recovery_prompt(
+            prompt,
+            target_segments,
+            missing,
+            recovered,
+            target_label,
+            last_output,
+        )
+        missing_text = "\n".join(segment.text for segment in missing)
+        recovery_output = runtime.generate(
+            recovery_prompt,
+            max_output_tokens=max(256, min(max_output_tokens, estimate_tokens(missing_text) * 3 + 256)),
+        )
+        last_output = recovery_output
+        absorb(recovery_output, missing)
         missing = [segment for segment in target_segments if segment.index not in recovered]
-        for position, segment in enumerate(missing, start=1):
+
+    # If one ID remains, first try to interpret the last batch response more
+    # permissively. Only if that still fails do one final compact single-line model
+    # call. Never enter an unbounded per-subtitle loop.
+    if len(missing) == 1:
+        segment = missing[0]
+        try:
+            candidate = clean_single_line_output(last_output, segment.index)
+            recovered[segment.index] = validate_translation_text(
+                candidate,
+                target_language=target_language,
+                segment_id=segment.index,
+            )
+            missing = []
+        except DubLocalError:
             if progress_callback:
                 progress_callback(
-                    max(0.02, min(0.90, (chunk_number - 0.2) / max(1, total_chunks) * 0.82 + 0.02)),
-                    f"Recovering subtitle {position}/{len(missing)} in chunk {chunk_number}/{total_chunks}",
+                    max(0.02, min(0.92, (chunk_number - 0.1) / max(1, total_chunks) * 0.83 + 0.02)),
+                    f"Final compact recovery for subtitle {segment.index}",
                 )
-            single_prompt = build_single_line_recovery_prompt(
-                prompt,
-                segment,
-                target_label,
-                repaired,
-            )
             single_raw = runtime.generate(
-                single_prompt,
-                max_output_tokens=max(128, min(512, estimate_tokens(segment.text) * 4 + 96)),
+                build_single_line_recovery_prompt(prompt, segment, target_label, last_output),
+                max_output_tokens=max(128, min(384, estimate_tokens(segment.text) * 4 + 96)),
             )
             partial = recover_partial_output(single_raw, [segment])
             candidate = (
@@ -302,16 +355,18 @@ def _translate_chunk_with_recovery(
                 target_language=target_language,
                 segment_id=segment.index,
             )
+            missing = []
 
-        expected = [segment.index for segment in target_segments]
-        still_missing = [index for index in expected if index not in recovered]
-        if still_missing:
-            raise DubLocalError(
-                "Contextual translator could not recover all required subtitle IDs "
-                f"for chunk {chunk_number}/{total_chunks} (missing={still_missing[:5]}). "
-                "DubLocal stopped instead of writing a corrupted SRT."
-            )
-        return [recovered[index] for index in expected]
+    if missing:
+        still_missing = [segment.index for segment in missing]
+        raise DubLocalError(
+            "Contextual translator could not recover all required subtitle IDs "
+            f"for chunk {chunk_number}/{total_chunks} after bounded batch recovery "
+            f"(missing={still_missing[:8]}). DubLocal stopped instead of writing a corrupted SRT."
+        )
+
+    expected = [segment.index for segment in target_segments]
+    return [recovered[index] for index in expected]
 
 
 def _review_chunk(
