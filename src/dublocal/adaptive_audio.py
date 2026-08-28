@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import threading
 import wave
 from dataclasses import dataclass
@@ -109,7 +108,11 @@ def _subtitle_music_score(subtitle_path: str | Path | None) -> float:
 
     spoken = [segment for segment in segments if spoken_text(segment.text)]
     if spoken:
-        timeline_ms = max(1, max(segment.end_ms for segment in spoken) - min(segment.start_ms for segment in spoken))
+        timeline_ms = max(
+            1,
+            max(segment.end_ms for segment in spoken)
+            - min(segment.start_ms for segment in spoken),
+        )
         occupied_ms = sum(max(0, segment.end_ms - segment.start_ms) for segment in spoken)
         duty = min(1.0, occupied_ms / timeline_ms)
         lengths = [len(segment.text.strip()) for segment in spoken if segment.text.strip()]
@@ -197,7 +200,10 @@ def audio_mix_status(selected: str | None = None) -> str:
 def prepare_separation_ui() -> str:
     try:
         result = prepare_separation_runtime()
-        return separation_status() + f"\n```text\n[done] {result}\n[model] separation weights download on first separated export\n```"
+        return (
+            separation_status()
+            + f"\n```text\n[done] {result}\n[model] separation weights download on first separated export\n```"
+        )
     except Exception as exc:
         return f"```text\n[error] {exc}\n```"
 
@@ -232,7 +238,10 @@ def _read_pcm16_slice(
     if width != 2:
         raise DubLocalError("Demucs returned a vocal stem in an unsupported WAV format.")
     start_frame = max(0, int(round(start_ms * rate / 1000)))
-    end_frame = min(handle.getnframes(), max(start_frame, int(round(end_ms * rate / 1000))))
+    end_frame = min(
+        handle.getnframes(),
+        max(start_frame, int(round(end_ms * rate / 1000))),
+    )
     handle.setpos(start_frame)
     frames = handle.readframes(max(0, end_frame - start_frame))
     raw = np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768.0
@@ -275,7 +284,11 @@ def detect_vocal_onset_ms(
         return start
 
     pre = [value for time_ms, value in values if time_ms < start]
-    search = [(time_ms, value) for time_ms, value in values if start - 50 <= time_ms <= start + 550]
+    search = [
+        (time_ms, value)
+        for time_ms, value in values
+        if start - 50 <= time_ms <= start + 550
+    ]
     if not search:
         return start
     baseline = median(pre) if pre else 0.0
@@ -362,7 +375,11 @@ def _build_aligned_voice(
                     f"Kokoro segment sample rate changed unexpectedly ({voice_rate} Hz vs {sample_rate} Hz)."
                 )
             source_measure_end = min(end_ms, adjusted_start + max(350, duration_ms))
-            source_rms = _segment_source_rms(vocal_handle, adjusted_start, source_measure_end)
+            source_rms = _segment_source_rms(
+                vocal_handle,
+                adjusted_start,
+                source_measure_end,
+            )
             voice_rms = _rms(voice_audio)
             gain_db = 0.0
             if source_rms >= 0.004 and voice_rms >= 0.004:
@@ -384,13 +401,20 @@ def _build_aligned_voice(
     if not raw_plans:
         return voice_wav, _fallback_windows(fallback_subtitle_path), []
 
-    valid_gains = [float(item["raw_gain_db"]) for item in raw_plans if abs(float(item["raw_gain_db"])) > 1e-6]
+    valid_gains = [
+        float(item["raw_gain_db"])
+        for item in raw_plans
+        if abs(float(item["raw_gain_db"])) > 1e-6
+    ]
     centre = max(-3.0, min(3.0, median(valid_gains))) if valid_gains else 0.0
 
     plans: list[SegmentMixPlan] = []
     for item in raw_plans:
         raw_gain = float(item["raw_gain_db"])
-        gain_db = max(-4.0, min(4.0, max(centre - 2.0, min(centre + 2.0, raw_gain))))
+        gain_db = max(
+            -4.0,
+            min(4.0, max(centre - 2.0, min(centre + 2.0, raw_gain))),
+        )
         plans.append(
             SegmentMixPlan(
                 index=int(item["index"]),
@@ -450,7 +474,9 @@ def _build_aligned_voice(
 
 
 def _guide_expression(windows: list[tuple[float, float]]) -> str:
-    return "+".join(f"between(t\\,{start:.3f}\\,{end:.3f})" for start, end in windows)
+    return "+".join(
+        f"between(t\\,{start:.3f}\\,{end:.3f})" for start, end in windows
+    )
 
 
 def _create_separated_mix(
@@ -480,7 +506,7 @@ def _create_separated_mix(
             "[2:a:0]aresample=48000,aformat=channel_layouts=stereo,asplit=2[dub_key][dub_mix];"
             f"aevalsrc=exprs='{guide}':s=48000:d={duration:.3f}[vocal_guide];"
             "[acc][dub_key]sidechaincompress=threshold=0.22:ratio=1.7:attack=18:release=240[acc_duck];"
-            "[voc][vocal_guide]sidechaincompress=threshold=0.025:ratio=24:attack=6:release=260[voc_suppressed];"
+            "[voc][vocal_guide]sidechaincompress=threshold=0.025:ratio=20:attack=6:release=260[voc_suppressed];"
             "[acc_duck][voc_suppressed][dub_mix]amix=inputs=3:duration=first:dropout_transition=0:normalize=0,"
             "acompressor=threshold=0.42:ratio=1.7:attack=20:release=220:makeup=1,"
             "alimiter=limit=0.92[mix]"
@@ -491,7 +517,7 @@ def _create_separated_mix(
             "[1:a:0]aresample=48000,aformat=channel_layouts=stereo[voc];"
             "[2:a:0]aresample=48000,aformat=channel_layouts=stereo,asplit=3[dub_acc][dub_voc][dub_mix];"
             "[acc][dub_acc]sidechaincompress=threshold=0.22:ratio=1.7:attack=18:release=240[acc_duck];"
-            "[voc][dub_voc]sidechaincompress=threshold=0.025:ratio=24:attack=6:release=260[voc_suppressed];"
+            "[voc][dub_voc]sidechaincompress=threshold=0.025:ratio=20:attack=6:release=260[voc_suppressed];"
             "[acc_duck][voc_suppressed][dub_mix]amix=inputs=3:duration=first:dropout_transition=0:normalize=0,"
             "acompressor=threshold=0.42:ratio=1.7:attack=20:release=220:makeup=1,"
             "alimiter=limit=0.92[mix]"
@@ -601,7 +627,13 @@ def create_adaptive_dubbed_mix(
                 profile=recommend_separation_profile(),
                 prepare_if_missing=plan.requested == "separated",
                 progress_callback=(
-                    (lambda fraction, label: _notify(progress_callback, 0.02 + 0.52 * fraction, label))
+                    (
+                        lambda fraction, label: _notify(
+                            progress_callback,
+                            0.02 + 0.52 * fraction,
+                            label,
+                        )
+                    )
                     if progress_callback
                     else None
                 ),
@@ -616,8 +648,8 @@ def create_adaptive_dubbed_mix(
             )
             adjusted = sum(1 for item in segment_plans if item.delay_ms > 0)
             _LAST_MIX_SUMMARY = (
-                f"vocal separation · {stems.model} · source vocal suppressed · accompaniment preserved · "
-                f"{adjusted} onset adjustment(s)"
+                f"vocal separation · {stems.model} · source vocal suppressed · "
+                f"accompaniment preserved · {adjusted} onset adjustment(s)"
             )
             _write_mix_manifest(
                 output_dir,
