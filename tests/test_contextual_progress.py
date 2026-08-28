@@ -51,11 +51,11 @@ def test_translate_chunk_recovers_malformed_primary_output():
     assert "natural Russian" in runtime.prompts[1]
 
 
-def test_translate_chunk_recovers_only_missing_ids_individually():
+def test_translate_chunk_recovers_missing_ids_in_one_batch():
     runtime = FakeRuntime(
         [
             "not structured",
-            "[1] - Привет.\n",  # whole-chunk recovery omitted subtitle 2
+            "[1] - Привет.\n",  # whole-chunk repair omitted subtitle 2
             "[2] - Как дела?",
         ]
     )
@@ -71,15 +71,41 @@ def test_translate_chunk_recovers_only_missing_ids_individually():
     )
     assert result == ["Привет.", "Как дела?"]
     assert len(runtime.prompts) == 3
-    assert "subtitle [2]" in runtime.prompts[2]
+    assert "MISSING SUBTITLE RECOVERY" in runtime.prompts[2]
+    assert "Missing IDs: 2" in runtime.prompts[2]
     assert "original prompt with programme context" in runtime.prompts[2]
+
+
+def test_many_missing_subtitles_do_not_trigger_one_model_call_per_line():
+    targets = [
+        Segment(index=index, start_ms=index * 1000, end_ms=(index + 1) * 1000, text=f"Line {index}.")
+        for index in range(1, 11)
+    ]
+    primary = "\n".join(f"[{index}] - Translation {index}." for index in range(1, 4))
+    recovered_batch = "\n".join(f"[{index}] - Translation {index}." for index in range(4, 11))
+    runtime = FakeRuntime([primary, recovered_batch])
+
+    result = contextual_progress._translate_chunk_with_recovery(
+        runtime,
+        "large original context",
+        targets,
+        "en",
+        max_output_tokens=1024,
+        chunk_number=1,
+        total_chunks=1,
+        progress_callback=None,
+    )
+
+    assert result == [f"Translation {index}." for index in range(1, 11)]
+    assert len(runtime.prompts) == 2
+    assert "Missing IDs: 4, 5, 6, 7, 8, 9, 10" in runtime.prompts[1]
 
 
 def test_wrong_script_is_recovered_instead_of_written():
     runtime = FakeRuntime(
         [
             "[1] - Привет.\n[2] - Где находится我的心?",
-            "[1] - Привет.\n[2] - Где моё сердце?",
+            "[2] - Где моё сердце?",
         ]
     )
     result = contextual_progress._translate_chunk_with_recovery(
@@ -93,6 +119,8 @@ def test_wrong_script_is_recovered_instead_of_written():
         progress_callback=None,
     )
     assert result == ["Привет.", "Где моё сердце?"]
+    assert len(runtime.prompts) == 2
+    assert "Missing IDs: 2" in runtime.prompts[1]
 
 
 def test_auto_language_parser_accepts_code_label_and_json():
