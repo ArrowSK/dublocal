@@ -8,16 +8,21 @@ from platformdirs import user_cache_dir
 from .adaptive_audio import install_adaptive_audio_refinement
 from .job_cache import prune_job_cache
 from .m53 import install_runtime_refinements
-from .native_tts_timing import install_native_timing_refinement
 from .transcription_v053 import install_transcription_refinements
+from .tts_provider_refinement import install_tts_provider_refinement
 from .v060_refinements import install_audio_balance_refinement
+
+# Provider routing must be installed before native_tts_timing is imported: that
+# module captures the then-current TTS generator as its stable synthesis backend.
+install_tts_provider_refinement()
+from .native_tts_timing import install_native_timing_refinement
 
 # Install wrappers before UI modules import app/progress-operation/render symbols.
 install_transcription_refinements()
 install_native_timing_refinement()
 install_adaptive_audio_refinement()
 
-from .ui_v061 import MATRIX_CSS, build_app
+from .ui_v062 import MATRIX_CSS, build_app
 
 
 def _env_bool(name: str, default: bool) -> bool:
