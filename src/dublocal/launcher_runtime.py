@@ -33,6 +33,13 @@ install_adaptive_audio_refinement()
 install_language_extensions()
 install_shareable_burn_refinement()
 
+from .authenticated_web_policy import install_authenticated_web_policy
+
+# Apply authenticated-source safety semantics before the UI imports queue functions by
+# value: explicit empty lesson selections stay empty and persisted/rendered source
+# errors redact reusable signed URL credentials.
+install_authenticated_web_policy()
+
 from . import product_ui
 from .course_import_ui import install_course_import_ui
 from .cancellation_ui import install_cancellation_ui
