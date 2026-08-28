@@ -73,6 +73,10 @@ class _InjectedSettingsContext:
         if self._label == "Settings":
             with gr.Accordion("Local TTS providers · Russian & custom models", open=False):
                 status = gr.Markdown(provider_status_text(), elem_classes=["console"])
+                action = gr.Markdown(
+                    "```text\n[provider] choose a provider to prepare, or register a custom manifest below\n```",
+                    elem_classes=["console"],
+                )
                 self._original_html(
                     '<div class="dl-note"><strong>Russian:</strong> DubLocal uses a vetted third-party Kokoro-RU provider, not official Hexgrad Russian support. Preparing it stores a persistent local snapshot and exact revision receipt; normal generation then uses local files even if that model fork later disappears. <strong>Ukrainian:</strong> no built-in provider is enabled yet pending a stronger rights/provenance review.</div>'
                 )
@@ -87,11 +91,11 @@ class _InjectedSettingsContext:
                 prepare.click(
                     fn=prepare_registered_provider_ui,
                     inputs=[provider],
-                    outputs=[status, status],
+                    outputs=[status, action],
                 )
 
                 self._original_html(
-                    '<div class="dl-compact-note"><strong>Custom models are manifests, not plugins.</strong> DubLocal accepts only allowlisted local Kokoro-compatible frontends and model/voice/config files. Python modules, scripts, shell commands and arbitrary entrypoints are rejected. Remote manifests must pin an immutable commit revision; local mirrors are also supported.</div>'
+                    '<div class="dl-compact-note"><strong>Custom models are manifests, not plugins.</strong> DubLocal accepts only allowlisted local Kokoro-compatible frontends and model/voice/config files. Python modules, scripts, shell commands and arbitrary entrypoints are rejected. Remote manifests must pin an immutable commit revision and SHA-256 assets; local mirrors are also supported.</div>'
                 )
                 manifest = gr.Code(
                     label="Custom provider manifest · JSON",
@@ -100,10 +104,6 @@ class _InjectedSettingsContext:
                     lines=18,
                 )
                 register = gr.Button("Validate & register custom provider", variant="secondary")
-                action = gr.Markdown(
-                    "```text\n[custom] edit the manifest, then validate/register it\n```",
-                    elem_classes=["console"],
-                )
                 register.click(
                     fn=_register_and_refresh,
                     inputs=[manifest],
