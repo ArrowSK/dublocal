@@ -18,6 +18,7 @@ _INSTALLED = False
 _MAGIC_AUDIO_PREFERENCE_CHOICES = [
     ("Keep original audio as a separate selectable track", "keep-original"),
     ("Single voice for the whole item · best overall match", "single-voice"),
+    ("Burn subtitles into Shareable MP4 · always visible in messaging apps", "burn-share-subs"),
 ]
 _SHAREABLE_OUTPUT_CHOICE = (
     "MP4 · Shareable · WhatsApp / Telegram · H.264 + AAC",
@@ -168,14 +169,15 @@ def _rows_cancelled(rows: Any) -> tuple[int, int]:
 
 
 def _apply_magic_audio_preferences(args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
-    """Translate the compact Audio & voice UI group back into the stable engine inputs."""
+    """Translate compact Audio, voice & sharing choices back into stable engine inputs."""
 
     values = list(args)
     if len(values) > 8 and isinstance(values[8], (list, tuple, set)):
         preferences = {str(item) for item in values[8]}
         tasks = [str(item) for item in (values[5] or [])]
-        if "single-voice" in preferences and "single-voice" not in tasks:
-            tasks.append("single-voice")
+        for marker in ("single-voice", "burn-share-subs"):
+            if marker in preferences and marker not in tasks:
+                tasks.append(marker)
         values[5] = tasks
         values[8] = "keep-original" in preferences
         return tuple(values), kwargs
@@ -184,8 +186,9 @@ def _apply_magic_audio_preferences(args: tuple[Any, ...], kwargs: dict[str, Any]
     if isinstance(raw, (list, tuple, set)):
         preferences = {str(item) for item in raw}
         tasks = [str(item) for item in (kwargs.get("tasks") or [])]
-        if "single-voice" in preferences and "single-voice" not in tasks:
-            tasks.append("single-voice")
+        for marker in ("single-voice", "burn-share-subs"):
+            if marker in preferences and marker not in tasks:
+                tasks.append(marker)
         updated = dict(kwargs)
         updated["tasks"] = tasks
         updated["keep_original_audio_track"] = "keep-original" in preferences
@@ -194,12 +197,7 @@ def _apply_magic_audio_preferences(args: tuple[Any, ...], kwargs: dict[str, Any]
 
 
 def install_cancellation_ui(product_ui) -> None:
-    """Layer production cancellation and compact Magic Flow controls onto the UI.
-
-    The established Product UI remains authoritative. This narrow wrapper provides the
-    Stop lifecycle plus two Magic Flow affordances that can be folded into product_ui
-    during the planned runtime/UI consolidation.
-    """
+    """Layer production cancellation and compact Magic Flow controls onto the UI."""
 
     global _INSTALLED
     if _INSTALLED:
@@ -244,9 +242,6 @@ def install_cancellation_ui(product_ui) -> None:
             if label != "Run Magic Flow":
                 return original_button(value, *args, **kwargs)
 
-            # The primary Run action and secondary Stop action belong to the same
-            # decision row. Creating both inside one Row keeps them aligned while
-            # preserving the original Run component/event wiring.
             with gr.Row(elem_classes=["dl-magic-actions"]):
                 button = original_button(value, *args, **kwargs)
                 stop = original_button(
@@ -266,12 +261,12 @@ def install_cancellation_ui(product_ui) -> None:
             if label != "Keep original audio as a separate selectable track":
                 return original_checkbox(*args, **kwargs)
             return gr.CheckboxGroup(
-                label="Audio & voice",
+                label="Audio, voice & sharing",
                 choices=_MAGIC_AUDIO_PREFERENCE_CHOICES,
                 value=["keep-original"],
                 info=(
-                    "Single voice analyzes the whole source and then uses one best-overall Kokoro voice throughout, "
-                    "which is usually smoother for interviews and continuous speakers."
+                    "Single voice uses one best-overall Kokoro voice throughout. Burn subtitles applies only to Shareable MP4 "
+                    "and renders the intended translation (or source subtitles) permanently into the picture."
                 ),
                 elem_classes=["dl-audio-voice-prefs"],
             )
@@ -287,7 +282,7 @@ def install_cancellation_ui(product_ui) -> None:
             updated["choices"] = choices
             updated["info"] = (
                 "Shareable MP4 keeps one intended audio track and produces messaging-friendly H.264/AAC with fast start. "
-                "DubLocal still saves the standalone subtitle files because WhatsApp/Telegram may not expose selectable subtitle tracks."
+                "Enable Burn subtitles if the text must always be visible in WhatsApp/Telegram; standalone SRT files are still saved."
             )
             return original_dropdown(*args, **updated)
 
