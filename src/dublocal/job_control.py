@@ -32,6 +32,7 @@ def begin_job() -> None:
 
 def end_job() -> None:
     _ACTIVE.clear()
+    _CANCEL.clear()
 
 
 def job_active() -> bool:
