@@ -290,6 +290,38 @@ def _normalize_ipa(ipa: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _filter_kokoro_oov(phonemes: str, vocab: set[str]) -> tuple[str, set[str]]:
+    """Remove only non-phonetic OOV artifacts before Kokoro validation.
+
+    eSpeak can occasionally emit punctuation/symbol control markers such as the
+    ASCII caret (U+005E) even when the Russian source text contains no caret. Those
+    characters are not phonemes and are not represented in the Russian Kokoro
+    vocabulary, so rejecting an otherwise valid subtitle line is counterproductive.
+
+    Keep the guard strict for letters and combining/modifier marks: an unknown IPA
+    symbol still remains in ``oov`` and fails loudly so a real pronunciation mapping
+    problem is not hidden. Only unsupported punctuation, symbols, separators and
+    control characters are discarded.
+    """
+
+    cleaned: list[str] = []
+    oov: set[str] = set()
+    for char in str(phonemes):
+        if char in vocab:
+            cleaned.append(char)
+            continue
+        if char.isspace():
+            cleaned.append(" ")
+            continue
+        category = unicodedata.category(char)
+        if category[:1] in {"P", "S", "Z", "C"}:
+            continue
+        cleaned.append(char)
+        oov.add(char)
+    value = re.sub(r"\s+", " ", "".join(cleaned)).strip()
+    return value, oov
+
+
 class _TokenTypeIdsShim:
     """Keep RUAccent ONNX exports usable with newer Transformers tokenizers."""
 
@@ -406,7 +438,6 @@ class RussianFrontend:
     def phonemize(self, text: str) -> tuple[str, set[str]]:
         marked = _respell(self.accentuate(text).lower())
         phonemes = _normalize_ipa(self._espeak_ipa(marked))
-        oov = {char for char in phonemes if char != " " and char not in self.vocab}
-        return phonemes, oov
+        return _filter_kokoro_oov(phonemes, self.vocab)
 
     __call__ = phonemize
