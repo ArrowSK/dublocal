@@ -15,6 +15,14 @@ from .job_control import (
 
 
 _INSTALLED = False
+_MAGIC_AUDIO_PREFERENCE_CHOICES = [
+    ("Keep original audio as a separate selectable track", "keep-original"),
+    ("Single voice for the whole item · best overall match", "single-voice"),
+]
+_SHAREABLE_OUTPUT_CHOICE = (
+    "MP4 · Shareable · WhatsApp / Telegram · H.264 + AAC",
+    "share",
+)
 _STOP_CSS = r"""
 /* Final Magic Flow spacing and action hierarchy. Keep this scoped so Advanced
    and Settings retain their established layout. */
@@ -108,6 +116,9 @@ _STOP_CSS = r"""
 .dl-magic-shell .dl-queue-note + * {
   margin-top: 2px !important;
 }
+.dl-audio-voice-prefs {
+  margin: 2px 0 4px 0 !important;
+}
 
 @media (max-width: 720px) {
   .dl-magic-shell {
@@ -156,12 +167,38 @@ def _rows_cancelled(rows: Any) -> tuple[int, int]:
     return done, cancelled
 
 
-def install_cancellation_ui(product_ui) -> None:
-    """Layer production cancellation onto the consolidated product UI.
+def _apply_magic_audio_preferences(args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Translate the compact Audio & voice UI group back into the stable engine inputs."""
 
-    This is intentionally narrow: it preserves the existing Magic Flow layout and
-    pipeline while adding a Stop control, cancellation state, and browser-unload
-    cleanup. It can be folded into product_ui during the next runtime consolidation.
+    values = list(args)
+    if len(values) > 8 and isinstance(values[8], (list, tuple, set)):
+        preferences = {str(item) for item in values[8]}
+        tasks = [str(item) for item in (values[5] or [])]
+        if "single-voice" in preferences and "single-voice" not in tasks:
+            tasks.append("single-voice")
+        values[5] = tasks
+        values[8] = "keep-original" in preferences
+        return tuple(values), kwargs
+
+    raw = kwargs.get("keep_original_audio_track")
+    if isinstance(raw, (list, tuple, set)):
+        preferences = {str(item) for item in raw}
+        tasks = [str(item) for item in (kwargs.get("tasks") or [])]
+        if "single-voice" in preferences and "single-voice" not in tasks:
+            tasks.append("single-voice")
+        updated = dict(kwargs)
+        updated["tasks"] = tasks
+        updated["keep_original_audio_track"] = "keep-original" in preferences
+        return args, updated
+    return args, kwargs
+
+
+def install_cancellation_ui(product_ui) -> None:
+    """Layer production cancellation and compact Magic Flow controls onto the UI.
+
+    The established Product UI remains authoritative. This narrow wrapper provides the
+    Stop lifecycle plus two Magic Flow affordances that can be folded into product_ui
+    during the planned runtime/UI consolidation.
     """
 
     global _INSTALLED
@@ -172,6 +209,7 @@ def install_cancellation_ui(product_ui) -> None:
     original_run_ui = product_ui._run_batch_magic_ui
 
     def run_ui_with_lifecycle(*args: Any, **kwargs: Any):
+        args, kwargs = _apply_magic_audio_preferences(args, kwargs)
         begin_job()
         try:
             outputs = original_run_ui(*args, **kwargs)
@@ -198,6 +236,8 @@ def install_cancellation_ui(product_ui) -> None:
 
     def build_app_with_stop():
         original_button = gr.Button
+        original_checkbox = gr.Checkbox
+        original_dropdown = gr.Dropdown
 
         def button_factory(value=None, *args: Any, **kwargs: Any):
             label = str(value if value is not None else kwargs.get("value") or "")
@@ -221,11 +261,45 @@ def install_cancellation_ui(product_ui) -> None:
             )
             return button
 
+        def checkbox_factory(*args: Any, **kwargs: Any):
+            label = str(kwargs.get("label") or "")
+            if label != "Keep original audio as a separate selectable track":
+                return original_checkbox(*args, **kwargs)
+            return gr.CheckboxGroup(
+                label="Audio & voice",
+                choices=_MAGIC_AUDIO_PREFERENCE_CHOICES,
+                value=["keep-original"],
+                info=(
+                    "Single voice analyzes the whole source and then uses one best-overall Kokoro voice throughout, "
+                    "which is usually smoother for interviews and continuous speakers."
+                ),
+                elem_classes=["dl-audio-voice-prefs"],
+            )
+
+        def dropdown_factory(*args: Any, **kwargs: Any):
+            label = str(kwargs.get("label") or "")
+            if label != "Output format":
+                return original_dropdown(*args, **kwargs)
+            updated = dict(kwargs)
+            choices = list(updated.get("choices") or [])
+            if not any(isinstance(item, (list, tuple)) and len(item) >= 2 and item[1] == "share" for item in choices):
+                choices.append(_SHAREABLE_OUTPUT_CHOICE)
+            updated["choices"] = choices
+            updated["info"] = (
+                "Shareable MP4 keeps one intended audio track and produces messaging-friendly H.264/AAC with fast start. "
+                "DubLocal still saves the standalone subtitle files because WhatsApp/Telegram may not expose selectable subtitle tracks."
+            )
+            return original_dropdown(*args, **updated)
+
         gr.Button = button_factory
+        gr.Checkbox = checkbox_factory
+        gr.Dropdown = dropdown_factory
         try:
             demo = original_build()
         finally:
             gr.Button = original_button
+            gr.Checkbox = original_checkbox
+            gr.Dropdown = original_dropdown
 
         unload = getattr(demo, "unload", None)
         if callable(unload):

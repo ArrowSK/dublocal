@@ -272,6 +272,162 @@ def _video_bitrate(height: int) -> str:
     return {2160: "25M", 1440: "16M", 1080: "10M", 720: "5M", 480: "2500k"}[height]
 
 
+def _shareable_video_bitrate(height: int | None) -> str:
+    value = int(height or 1080)
+    for candidate in (2160, 1440, 1080, 720, 480):
+        if value >= candidate:
+            return _video_bitrate(candidate)
+    return _video_bitrate(480)
+
+
+def _primary_stream(probe: dict[str, Any], codec_type: str) -> dict[str, Any]:
+    for item in probe.get("streams", []):
+        if item.get("codec_type") == codec_type:
+            return item
+    return {}
+
+
+def _make_shareable_media(
+    source_media: str | Path,
+    info: dict[str, Any],
+    language: str,
+    *,
+    subtitle_path: str | Path | None = None,
+    subtitle_language: str | None = None,
+    video_quality: str = "source",
+    progress_callback: ProgressCallback | None = None,
+) -> Path:
+    """Create a messaging-friendly MP4 with one audio track.
+
+    The share preset guarantees an MP4 container, H.264/yuv420p video when a video
+    transcode is needed, AAC stereo audio, fast-start metadata and only the intended
+    primary audio track. One intended SRT may be embedded as mov_text for players that
+    expose it; DubLocal still keeps the standalone SRT because messaging apps may not.
+    """
+
+    source = Path(source_media).expanduser().resolve()
+    if not source.is_file():
+        raise DubLocalError("The rendered media is no longer available for shareable export.")
+
+    probe = _probe(source)
+    duration = _duration_seconds(probe)
+    video_stream = _primary_stream(probe, "video")
+    audio_stream = _primary_stream(probe, "audio")
+    target_height = _target_height(video_quality)
+    source_height = _primary_video_height(probe)
+    scale_height = (
+        target_height
+        if target_height is not None and source_height is not None and source_height > target_height
+        else None
+    )
+    video_is_shareable = (
+        bool(video_stream)
+        and str(video_stream.get("codec_name") or "").lower() == "h264"
+        and str(video_stream.get("pix_fmt") or "").lower() in {"yuv420p", "yuvj420p"}
+        and scale_height is None
+    )
+
+    output_dir = _new_job_dir("magic-share")
+    suffix = safe_language_suffix(language)
+    output = output_dir / f"{safe_media_stem(info)}.share.{suffix}.mp4"
+    ffmpeg = _require("ffmpeg")
+    command = [
+        ffmpeg,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(source),
+    ]
+
+    subtitle: Path | None = None
+    if subtitle_path:
+        candidate = Path(subtitle_path).expanduser().resolve()
+        if candidate.is_file() and candidate.suffix.lower() == ".srt":
+            subtitle = candidate
+            command += ["-i", str(candidate)]
+
+    encode_video = False
+    if video_stream:
+        command += ["-map", "0:v:0"]
+        if video_is_shareable:
+            command += ["-c:v", "copy"]
+        else:
+            encode_video = True
+            if scale_height is not None:
+                command += ["-vf", f"scale=-2:{scale_height}"]
+            effective_height = scale_height or source_height
+            command += [
+                "-c:v",
+                "h264_videotoolbox",
+                "-b:v",
+                _shareable_video_bitrate(effective_height),
+                "-pix_fmt",
+                "yuv420p",
+                "-tag:v",
+                "avc1",
+            ]
+
+    if audio_stream:
+        command += [
+            "-map",
+            "0:a:0",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-ac",
+            "2",
+        ]
+
+    if subtitle is not None:
+        command += ["-map", "1:0", "-c:s", "mov_text"]
+        lang = _target_language_metadata(normalize_language_code(subtitle_language or language))
+        command += [
+            "-metadata:s:s:0",
+            f"language={lang}",
+            "-metadata:s:s:0",
+            f"title=DubLocal subtitles · {lang}",
+            "-disposition:s:0",
+            "default",
+        ]
+
+    command += ["-map_metadata", "0", "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(output)]
+
+    def run(current: list[str], label: str) -> None:
+        _run_ffmpeg_progress(
+            current,
+            duration_seconds=duration,
+            start_fraction=0.02,
+            end_fraction=0.99,
+            label=label,
+            progress_callback=progress_callback,
+        )
+
+    try:
+        run(command, "Creating shareable MP4")
+    except DubLocalError as exc:
+        if not encode_video or "h264_videotoolbox" not in command:
+            raise
+        fallback = list(command)
+        codec_index = fallback.index("h264_videotoolbox")
+        fallback[codec_index] = "libx264"
+        try:
+            run(fallback, "Creating shareable MP4 · software H.264 fallback")
+        except DubLocalError as fallback_exc:
+            raise DubLocalError(
+                f"Could not create the shareable H.264/AAC MP4 ({fallback_exc}). "
+                "The normal MKV output remains the safest archival format."
+            ) from exc
+
+    if not output.is_file() or output.stat().st_size == 0:
+        raise DubLocalError("Shareable MP4 export completed without a usable file.")
+    _notify(progress_callback, 1.0, "Shareable MP4 ready")
+    return output
+
+
 def _package_subtitles_only(
     info: dict[str, Any],
     source_subtitle: Path,
@@ -391,8 +547,14 @@ def run_magic_flow(
         raise DubLocalError("Confirm that you have the right or legal authority to process this media.")
 
     selected = _task_set(tasks)
+    single_voice = "single-voice" in selected
+    selected.discard("single-voice")
     if not selected:
         raise DubLocalError("Choose at least one Magic Flow output.")
+
+    if container not in {"mkv", "mp4", "share"}:
+        raise DubLocalError("Choose MKV, MP4, or Shareable MP4 output.")
+    shareable = container == "share"
 
     target = normalize_language_code(target_language)
     if target == "auto":
@@ -449,12 +611,15 @@ def run_magic_flow(
                 "Uncheck Voice-over/Output media or choose a Kokoro-supported output language."
             )
         cleaned = prepare_voice_srt(timeline)
-        fallback_voice, segment_voices, _summary = resolve_auto_voice_plan(
+        fallback_voice, segment_voices, summary = resolve_auto_voice_plan(
             cleaned,
             info,
             voice_language,
             progress_callback=_stage_callback(progress_callback, 0.62, 0.68),
         )
+        if single_voice:
+            segment_voices = {}
+            _notify(progress_callback, 0.68, f"Single best-match voice selected · {fallback_voice} · {summary}")
         voice = generate_voice_track_with_progress(
             cleaned,
             language=voice_language,
@@ -466,39 +631,62 @@ def run_magic_flow(
         voice_wav = voice.wav_path
 
     if wants_media:
+        intended_subtitle = translated_subtitle or source_subtitle
+        intended_subtitle_language = target if translated_subtitle else source_language
         if wants_voice:
             assert voice_wav is not None
-            mode = "add" if keep_original_audio_track else "replace"
+            mode = "replace" if shareable else ("add" if keep_original_audio_track else "replace")
             rendered = render_dubbed_media(
                 info,
                 voice_wav,
                 target if translated_subtitle else source_language,
                 mode=mode,
-                container=container,
+                container="mkv" if shareable else container,
                 video_quality=video_quality,
                 source_subtitle_path=source_subtitle,
                 translated_subtitle_path=translated_subtitle,
                 source_language=source_language,
                 translated_language=target if translated_subtitle else None,
-                progress_callback=_stage_callback(progress_callback, 0.82, 1.0),
+                progress_callback=_stage_callback(progress_callback, 0.82, 0.94 if shareable else 1.0),
             )
             media_output = rendered.output_path
+            if shareable:
+                media_output = _make_shareable_media(
+                    media_output,
+                    info,
+                    target if translated_subtitle else source_language,
+                    subtitle_path=intended_subtitle,
+                    subtitle_language=intended_subtitle_language,
+                    video_quality=video_quality,
+                    progress_callback=_stage_callback(progress_callback, 0.94, 1.0),
+                )
         else:
             assert source_subtitle is not None
-            media_output = _package_subtitles_only(
+            packaged = _package_subtitles_only(
                 info,
                 source_subtitle,
                 translated_subtitle,
                 source_language,
                 target,
-                container=container,
+                container="mkv" if shareable else container,
                 video_quality=video_quality,
                 progress_callback=_stage_callback(
                     progress_callback,
                     0.62 if wants_translate else 0.34,
-                    1.0,
+                    0.90 if shareable else 1.0,
                 ),
             )
+            media_output = packaged
+            if shareable:
+                media_output = _make_shareable_media(
+                    packaged,
+                    info,
+                    target if translated_subtitle else source_language,
+                    subtitle_path=intended_subtitle,
+                    subtitle_language=intended_subtitle_language,
+                    video_quality=video_quality,
+                    progress_callback=_stage_callback(progress_callback, 0.90, 1.0),
+                )
 
     outputs: list[str] = []
     if source_subtitle:
