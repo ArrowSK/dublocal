@@ -2,55 +2,96 @@
 
 DubLocal is still in active development. Versions below describe development builds from `main`.
 
-> **Current development build:** `v0.5.3.dev0` — **M5 Stabilization**
+> **Current development build:** `v0.6.0.dev0` — **Magic Flow UX**
 >
 > There is no packaged GitHub Release yet. Development builds update from official `main` inside DubLocal.
 
-## v0.5.3.dev0 — M5 Stabilization — current
+## v0.6.0.dev0 — Magic Flow UX — current
 
-v0.5.3 is a real-world quality and reliability pass based on complete music-video dubbing tests. It keeps the existing workflow and avoids adding another heavy AI model.
+v0.6 turns the mature local pipeline into a simpler product-facing workflow while keeping detailed controls available.
+
+### Magic Flow
+
+- Added a new default **Magic Flow** at the top of Main.
+- Normal inputs are reduced to source, rights confirmation, output language and desired outputs.
+- One **Run Magic Flow** action resolves prerequisites and executes the existing local pipeline.
+- Users can independently request subtitles, translation, voice-over and/or an output media file.
+- Downstream choices imply their required upstream stages, so a dub automatically gets the subtitle and translation timeline it needs.
+
+### Automatic subtitle-route recommendation
+
+Magic Flow recommends the safest ready route rather than simply choosing the first caption it sees:
+
+1. creator/embedded text subtitles;
+2. already-installed Accurate Large-v3-Turbo-Q5 local transcription;
+3. existing automatic captions;
+4. another already-installed Whisper model.
+
+Magic Flow never silently downloads a large AI model. Missing resources are explained and remain explicit Model Manager actions.
+
+### Simple, medium and detailed UX
+
+- The default Magic Flow stays compact.
+- A collapsed **More options** section exposes subtitle strategy, original-audio retention, MKV/MP4 and video quality.
+- The existing Source → Subtitles → Translate → Voice-over → Export workflow remains below for stage-by-stage control.
+- Existing detailed stages remain individually collapsible.
+
+### Auto source-language handoff
+
+- Fixed the detailed workflow so a language detected by **Transcribe locally → Auto** is consumed by Translate when **From = Auto** remains selected.
+- When no reliable cached language exists, contextual translation is allowed to perform its own local Qwen language identification instead of rejecting Auto.
+- Legacy OPUS gives a clear manual-language requirement because it has no contextual detector.
+
+### Commercial-facing output behavior
+
+- Magic Flow uses meaningful source-derived filenames.
+- MKV and Original/best quality are the recommended defaults.
+- Original audio can be retained as a separate selectable track.
+- Translation without voice can still produce a media package with selectable original/translated subtitles and untouched source audio.
+- The processing engines are shared with the detailed workflow; Magic Flow is orchestration, not a second implementation.
+
+## v0.5.3.dev0 — M5 Stabilization
 
 ### More stable dubbed loudness
 
-- The original soundtrack now stays at a reduced, stable bed level instead of returning to full programme loudness whenever no DubLocal line is speaking.
-- Source subtitle dialogue/singing windows receive deeper attenuation so the original vocal remains clearly behind the dub.
-- Gentle compression and limiting reduce distracting level jumps without pretending the married source mix has been separated into dialogue and M&E stems.
+- The original soundtrack stays at a reduced, stable bed level instead of returning to full programme loudness between DubLocal lines.
+- Source subtitle dialogue/singing windows receive deeper attenuation.
+- Gentle compression and limiting reduce distracting level jumps without claiming source separation.
 
 ### Closer per-line timing
 
-- Voice remains anchored to the source subtitle start/end window.
-- DubLocal can chain legal FFmpeg `atempo` stages for an effective **0.30×–2.50×** correction range instead of stopping at the previous 0.5×–2.0× single-stage range.
-- A small correction pass compensates for duration rounding when the generated line still misses the target end by more than about 25 ms.
-- Truly pathological stretches are still reported rather than forced, and subtitle timestamps are never rewritten by TTS timing.
+- Voice remains anchored to each source subtitle start/end window.
+- DubLocal chains legal FFmpeg `atempo` stages for an effective 0.30×–2.50× correction range.
+- A small correction pass compensates for duration rounding.
+- Subtitle timestamps are never rewritten by TTS timing.
 
 ### Original media + subtitles only
 
-- Export now includes **Package original + subtitles · no dub**.
-- This mode keeps original audio untouched, adds the current source/transcribed subtitle as a selectable track, and adds neither translated subtitles nor a DubLocal audio track.
-- Local Original quality remains stream-copy by default; MKV remains the safest multi-track container.
+- Added **Package original + subtitles · no dub**.
+- Original audio remains untouched.
+- Local Original quality remains stream-copy by default.
 
 ### Smarter missing-word recovery without reopening ghosting
 
-- The existing anti-hallucination/repetition guard remains the first line of defence; Whisper is not made globally more eager.
-- DubLocal selectively rechecks only suspicious sparse subtitle regions and, for the Accurate music profile, short internal gaps bounded by real transcript text.
-- A recovery is accepted only when **two isolated no-context decodes agree closely**.
-- Candidate text that merely echoes neighbouring subtitles is rejected.
-- Sparse-line replacement must add meaningful information while staying related to the original result.
-- On Apple Silicon below 12 GiB, extra recovery is capped at **3 regions / 24 seconds** per transcription. There is no hidden second full-video pass.
+- Kept the anti-hallucination/repetition guard as the first defence.
+- Added selective rechecks of suspicious sparse subtitle regions and short internal gaps.
+- Recovery is accepted only when two isolated no-context decodes agree closely.
+- Neighbour-echo candidates are rejected.
+- Apple Silicon below 12 GiB is capped at 3 recovery regions / 24 seconds per transcription.
 
 ### M1-class compatibility
 
-- No new source-separation, diarization or transcription model is required.
+- No new source-separation, diarization or ASR model is required.
 - Timing and loudness work is FFmpeg DSP.
-- Smart transcript recovery reuses the already-selected Whisper model for short targeted ranges only.
-- Hardware-aware Qwen translation profiles remain unchanged, so an 8 GB M1 continues to use the lightweight contextual profile.
+- Smart transcript recovery reuses the already-selected Whisper model for short ranges only.
+- Hardware-aware Qwen translation profiles remain unchanged.
 
 ## v0.5.2.dev0 — Transcription + Timing Reliability
 
-- Added the optional whisper.cpp Silero VAD auxiliary speech detector for supported non-music transcription paths.
+- Added optional whisper.cpp Silero VAD for supported non-music transcription paths.
 - Added no-context/repetition protection for Accurate music transcription and isolated recovery/suppression of severe repeated hallucination storms.
 - Added variable per-line timing with a small onset cushion.
-- Fixed contextual `From = Auto` source-language resolution.
+- Added contextual `From = Auto` language identification support.
 
 ## v0.5.1.dev0 — Voice Match + Export Refinement
 
@@ -62,7 +103,7 @@ v0.5.3 is a real-world quality and reliability pass based on complete music-vide
 ## v0.5.0.dev0 — M5 Local Dubbed Media Export
 
 - Connected subtitle, translation and Kokoro stages into end-to-end dubbed-media export.
-- Added reliable source-language propagation and media-derived subtitle filenames.
+- Added media-derived subtitle filenames.
 - Strengthened contextual gender/reference, idiom/phraseology and metaphor handling.
 - Kept caption cues in subtitles while removing them from temporary TTS input.
 - Added timing fit, soundtrack ducking/mix, Replace/Add audio modes and video stream-copy.
@@ -72,13 +113,12 @@ v0.5.3 is a real-world quality and reliability pass based on complete music-vide
 - Made subtitle output first-class: SRT default with VTT/TXT conversion without rerunning transcription.
 - Added optional Accurate Large-v3-Turbo-Q5 Whisper model for difficult source audio.
 - Added hardware-aware **Recommended for this Mac** contextual translation profiles.
-- Low-memory Apple Silicon uses Qwen3 4B with reduced llama.cpp context allocation; stronger Macs use Qwen3 8B, with a senior review pass on the Best-quality profile.
 - Kept legacy OPUS as an explicit small/fast option.
 - Added protected subtitle tags, runtime/prompt leakage rejection, wrong-script validation and strict subtitle-ID/timestamp integrity.
 
 ## v0.4.1.dev0 — M3.1 Contextual Translation
 
-Introduced the first Qwen3 contextual translation path with nearby dialogue, programme-wide source context and rolling translated terminology/style memory.
+Introduced the first Qwen3 contextual translation path with nearby dialogue, programme-wide context and rolling translated terminology/style memory.
 
 ## v0.4.0.dev0 — M4 Local Voice
 
@@ -93,8 +133,8 @@ Introduced the first Qwen3 contextual translation path with nearby dialogue, pro
 
 ## v0.2.0.dev0 — M2 Local Transcription
 
-- Added local `whisper.cpp` transcription, model management, language selection/detection and timestamped SRT output.
-- Added the in-app updater.
+- Added local `whisper.cpp` transcription, Model Manager, language selection/detection and timestamped SRT output.
+- Added the first in-app updater.
 
 ## v0.1.0.dev0 — M1 Source and Captions
 
