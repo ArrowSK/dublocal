@@ -7,11 +7,6 @@ from platformdirs import user_cache_dir
 
 from .job_cache import prune_job_cache
 from .m53 import install_runtime_refinements
-from .transcription_v053 import install_transcription_refinements
-
-# Install the transcription wrapper before the UI imports app.py's transcription symbol.
-install_transcription_refinements()
-
 from .ui_v053 import MATRIX_CSS, build_app
 
 
