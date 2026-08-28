@@ -46,6 +46,10 @@ MAGIC_SUBTITLE_POLICY_CHOICES = [
     ("Prefer an existing subtitle track", "existing"),
     ("Force local transcription", "local"),
 ]
+MAGIC_LOCAL_TRANSCRIPTION_CHOICES = [
+    ("FAST · Base · 142 MiB", "local-fast"),
+    ("BEST · Accurate Large v3 Turbo Q5 · 547 MiB", "local-best"),
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +123,13 @@ def _installed_whisper(model_id: str) -> bool:
         return False
 
 
+def _forced_local_model(policy: str) -> str | None:
+    return {
+        "local-fast": "base",
+        "local-best": "large-v3-turbo-q5_0",
+    }.get(policy)
+
+
 def recommend_subtitle_source(
     info: dict[str, Any],
     policy: str = "auto",
@@ -128,6 +139,10 @@ def recommend_subtitle_source(
     Auto policy prioritizes creator/embedded text, then an already-installed Accurate
     Whisper model, then existing automatic captions, then an already-installed Base
     model. Magic Flow never starts a large model download implicitly.
+
+    When local transcription is explicitly forced, ``local-fast`` and ``local-best``
+    select the Base and Accurate models respectively. Plain ``local`` preserves the
+    historical behavior of choosing the best already-installed local model.
     """
 
     manual = _manual_tracks(info)
@@ -145,6 +160,23 @@ def recommend_subtitle_source(
             )
         policy = "local"
 
+    forced_model = _forced_local_model(policy)
+    if forced_model is not None:
+        if forced_model not in WHISPER_MODELS:
+            raise DubLocalError(f"DubLocal does not know local transcription model {forced_model!r}.")
+        if not _installed_whisper(forced_model):
+            quality = "FAST" if policy == "local-fast" else "BEST"
+            raise DubLocalError(
+                f"{quality} local transcription is selected, but "
+                f"{WHISPER_MODELS[forced_model]['label']} is not installed. "
+                "Open Settings → Model Setup or Model Manager, prepare that model, then run Magic Flow again."
+            )
+        return SubtitleDecision(
+            "transcribe",
+            f"Transcribe locally · {WHISPER_MODELS[forced_model]['label']}",
+            model_id=forced_model,
+        )
+
     if policy == "local":
         for model_id in (accurate, "base", "small", "tiny"):
             if model_id in WHISPER_MODELS and _installed_whisper(model_id):
@@ -155,7 +187,7 @@ def recommend_subtitle_source(
                 )
         raise DubLocalError(
             "Magic Flow needs a local Whisper model because no existing subtitle track is being used. "
-            "Open Settings → Model Manager and install Base or Accurate, then run Magic Flow again."
+            "Open Settings → Model Setup or Model Manager and install Base or Accurate, then run Magic Flow again."
         )
 
     if manual:
@@ -193,7 +225,7 @@ def recommend_subtitle_source(
 
     raise DubLocalError(
         "No usable existing subtitles were found and no local Whisper model is installed. "
-        "Open Settings → Model Manager, install Base or Accurate, then run Magic Flow again."
+        "Open Settings → Model Setup or Model Manager, install Base or Accurate, then run Magic Flow again."
     )
 
 
