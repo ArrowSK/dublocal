@@ -7,11 +7,13 @@ from platformdirs import user_cache_dir
 
 from .job_cache import prune_job_cache
 from .m53 import install_runtime_refinements
+from .native_tts_timing import install_native_timing_refinement
 from .transcription_v053 import install_transcription_refinements
 from .v060_refinements import install_audio_balance_refinement
 
-# Install the transcription wrapper before the UI imports app.py's transcription symbol.
+# Install wrappers before UI modules import app/progress-operation symbols.
 install_transcription_refinements()
+install_native_timing_refinement()
 
 from .ui_v060_refined import MATRIX_CSS, build_app
 
@@ -39,9 +41,8 @@ def main() -> None:
     # user documents. Prune stale/oversized jobs before a new session starts.
     prune_job_cache()
 
-    # Keep the stable M5/M5.1 public APIs while installing the current timing and
-    # dialogue-mix implementation. These DSP operations are intentionally lightweight
-    # enough for M1-class Macs and require no additional AI model.
+    # Audio balance/mixing remains lightweight. Voice timing is already resolved at
+    # Kokoro generation time; export must not stretch generated speech afterward.
     install_audio_balance_refinement()
     install_runtime_refinements()
 
