@@ -44,19 +44,37 @@ def clean_generated_text(text: str) -> str:
     return cleaned.strip()
 
 
+def _strip_echoed_segment_id(text: str, segment_id: int) -> str:
+    """Remove an accidentally repeated protocol id from translated subtitle text.
+
+    The contextual protocol already consumes the leading ``[ID] -`` marker. Some
+    model responses occasionally echo the same id once more inside the payload,
+    which previously leaked strings such as ``[49]`` into the written SRT. Only the
+    exact current segment id at the beginning is removed; other bracketed content is
+    preserved.
+    """
+
+    pattern = re.compile(rf"^\s*\[{int(segment_id)}\]\s*(?:[-:–—]\s*)?")
+    cleaned = pattern.sub("", text or "", count=1).strip()
+    return cleaned
+
+
 def target_language_guidance(target_language: str) -> str:
     """Return concise target-language quality rules for the local LLM."""
 
     if target_language == "ru":
         return (
-            "Write idiomatic contemporary Russian in Cyrillic. Do not calque English syntax. Reconstruct natural Russian syntax rather than "
-            "mirroring English word order. Use correct case, agreement, gender, number, tense and verbal aspect. Resolve grammatical gender from "
-            "supplied discourse context; when context does not establish gender, avoid inventing it and prefer a natural gender-neutral/rephrased "
-            "construction where possible. Translate idioms and phraseological expressions by their Russian meaning/register, not word-for-word. "
-            "Preserve metaphors as metaphors, using a natural Russian equivalent image where a literal calque would sound absurd, without adding "
-            "new imagery. Do not leave ordinary English words untranslated and do not create pseudo-Russian transliterations of English words. "
-            "Render proper names naturally in Russian when appropriate. Preserve profanity at the source register rather than sanitising or "
-            "intensifying it."
+            "Write idiomatic contemporary Russian in Cyrillic. Do not calque English syntax; reconstruct natural Russian phrasing rather than "
+            "mirroring English word order. Use correct case, noun gender, possessive/adjective agreement, number, tense and verbal aspect. "
+            "For a continuous first-person speaker, determine grammatical gender only from reliable discourse context and then keep it consistent "
+            "across past-tense verbs, short adjectives and participles. Do NOT infer the narrator's gender from a noun used only inside a comparison, "
+            "metaphor or role description (for example, 'I feel like a woman/man'). If the speaker's gender is not actually established, actively "
+            "rephrase into natural gender-neutral Russian instead of arbitrarily alternating masculine and feminine forms. Resolve pronouns and "
+            "addressee/reference consistently across connected subtitle fragments. Translate idioms and phraseological expressions by their Russian "
+            "meaning/register, not word-for-word. Preserve metaphors as metaphors, using a natural Russian equivalent image where a literal calque "
+            "would sound absurd, without adding new imagery. Perform a final Russian grammar check for case government and agreement before output. "
+            "Do not leave ordinary English words untranslated and do not create pseudo-Russian transliterations of English words. Render proper names "
+            "naturally in Russian when appropriate. Preserve profanity at the source register rather than sanitising or intensifying it."
         )
     if target_language == "uk":
         return (
@@ -88,7 +106,7 @@ def validate_translation_text(
 ) -> str:
     """Reject runtime leakage, unrelated scripts and substantial wrong-language leakage."""
 
-    cleaned = clean_generated_text(text)
+    cleaned = _strip_echoed_segment_id(clean_generated_text(text), segment_id)
     if not cleaned:
         raise DubLocalError(f"Contextual translator returned no text for subtitle id {segment_id}.")
 
