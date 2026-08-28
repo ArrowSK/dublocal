@@ -36,7 +36,7 @@ def _apply_timing_targets(
     request: dict[str, Any],
     targets: dict[int, int],
 ) -> dict[str, Any]:
-    """Return a worker request that asks Kokoro to fit each line natively."""
+    """Return a worker request that asks Kokoro to fit within each subtitle window."""
 
     enriched = dict(request)
     enriched["adaptive_timing"] = True
@@ -86,7 +86,9 @@ def _annotate_manifest(
             continue
         item["native_speed"] = float(response.get("speed", payload.get("speed", 1.0)))
         item["pilot_duration_ms"] = int(response.get("pilot_duration_ms") or 0)
-        item["target_duration_ms"] = int(response.get("target_duration_ms") or item.get("slot_ms") or 0)
+        item["target_duration_ms"] = int(
+            response.get("target_duration_ms") or item.get("slot_ms") or 0
+        )
         item["timing_error_ms"] = int(response.get("timing_error_ms") or 0)
         item["generation_passes"] = int(response.get("generation_passes") or 1)
 
@@ -107,11 +109,13 @@ def generate_voice_track_native_timed(
     speed: float = 1.0,
     segment_voices: dict[int, str] | None = None,
 ):
-    """Generate each subtitle line at a Kokoro-native speed matched to its timecode.
+    """Generate each subtitle line at a Kokoro-native speed that fits its timecode.
 
-    Kokoro first renders a normal pilot line, measures that real voice/translation, and
-    regenerates only lines that materially miss their subtitle window. This avoids the
-    robotic cadence produced by large FFmpeg atempo changes after synthesis.
+    Kokoro first renders a normal pilot line and measures that real voice/translation.
+    A line that already fits keeps its selected speed and any unused source time becomes
+    silence. Only lines that materially overflow are regenerated faster. This avoids
+    both post-generation waveform stretching and low-speed artifacts from artificially
+    filling long subtitle windows.
     """
 
     targets = _target_duration_map(subtitle_path)
@@ -173,12 +177,17 @@ def use_native_generated_timing(
                 continue
             passes = int(item.get("generation_passes") or 1)
             speed = float(item.get("native_speed") or payload.get("speed", 1.0))
-            target_ms = max(1, int(item.get("target_duration_ms") or item.get("slot_ms") or 1))
-            error_ms = abs(int(item.get("timing_error_ms") or 0))
+            target_ms = max(
+                1,
+                int(item.get("target_duration_ms") or item.get("slot_ms") or 1),
+            )
+            # Negative timing error means the generated speech ended early. Under the
+            # natural-timing policy that is a valid pause, not an unresolved mismatch.
+            overflow_ms = max(0, int(item.get("timing_error_ms") or 0))
             tolerance_ms = max(120, int(round(target_ms * 0.07)))
             if passes > 1:
                 adjusted += 1
-            if error_ms > tolerance_ms:
+            if overflow_ms > tolerance_ms:
                 remaining += 1
             if speed > 1.0:
                 highest_speedup = max(highest_speedup, speed)
