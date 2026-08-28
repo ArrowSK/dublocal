@@ -162,7 +162,8 @@ def _run(request: dict) -> dict:
     device = str(request.get("device") or "cpu")
     if device not in {"cpu", "mps", "cuda"}:
         device = "cpu"
-    if device == "mps" and not getattr(torch.backends, "mps", None).is_available():
+    mps = getattr(torch.backends, "mps", None)
+    if device == "mps" and (mps is None or not mps.is_available()):
         device = "cpu"
     if device == "cuda" and not torch.cuda.is_available():
         device = "cpu"
