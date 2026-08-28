@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from . import authenticated_web as web
 from .batch_flow import BatchFlowResult, QueueItemResult
@@ -30,6 +31,19 @@ def redact_authenticated_error(value: str | None) -> str | None:
     return text
 
 
+def canonical_authenticated_url(value: str) -> str:
+    """Keep stable routing/query identity while discarding reusable credentials."""
+
+    clean = web._valid_web_url(value)
+    parsed = urlparse(clean)
+    filtered = [
+        (key, item)
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if key.lower() not in web._SENSITIVE_QUERY_KEYS
+    ]
+    return urlunparse(parsed._replace(query=urlencode(filtered, doseq=True), fragment=""))
+
+
 def install_authenticated_web_policy() -> None:
     """Install P0 safety policy without changing the provider/acquisition architecture."""
 
@@ -41,6 +55,41 @@ def install_authenticated_web_policy() -> None:
     original_selected_items = web._selected_items
     original_update_course_state = web._update_course_state
     original_run_queue = web.run_authenticated_magic_queue
+
+    # Canonical course/lesson identity must retain non-secret query parameters. Some
+    # training portals route lessons through ?lesson=<id>; dropping every query value
+    # would collapse distinct lessons into one resume identity. Only credentials/signing
+    # material is removed.
+    web.canonical_source_url = canonical_authenticated_url
+
+    def check_manifest(self, context, candidate: str) -> None:
+        # Signed HLS/DASH URLs usually end in `master.m3u8?...` / `manifest.mpd?...`.
+        # Inspect the parsed path rather than the complete URL so query signing cannot
+        # accidentally skip the DRM/encryption boundary.
+        lower = candidate.lower()
+        path = urlparse(candidate).path.lower()
+        is_manifest = path.endswith((".m3u8", ".mpd"))
+        has_drm_marker = any(marker in lower for marker in web._DRM_MARKERS)
+        if not is_manifest and not has_drm_marker:
+            return
+        if has_drm_marker:
+            raise DubLocalError(
+                "This lesson appears to use DRM-protected media. DubLocal does not bypass DRM."
+            )
+        try:
+            response = context.request.get(candidate, timeout=20_000)
+            text = response.text()
+        except Exception:
+            # Failure to inspect is not permission to bypass a DRM system. yt-dlp still
+            # performs its own protected-media refusal and its errors are converted to
+            # DubLocal's hard DRM boundary by the provider.
+            return
+        if web._manifest_is_protected(text, candidate):
+            raise DubLocalError(
+                "This lesson appears to use encrypted/DRM-protected media. DubLocal does not bypass DRM."
+            )
+
+    web.GenericAuthenticatedProvider._check_manifest = check_manifest
 
     def selected_items(inspection, selected_ids):
         # ``None`` means no explicit filter (all pending). An explicit empty list means
@@ -75,7 +124,9 @@ def install_authenticated_web_policy() -> None:
         try:
             result = original_run_queue(*args, **kwargs)
         except DubLocalError as exc:
-            raise DubLocalError(redact_authenticated_error(str(exc)) or "Authenticated import failed.") from exc
+            raise DubLocalError(
+                redact_authenticated_error(str(exc)) or "Authenticated import failed."
+            ) from exc
         safe_items = tuple(
             QueueItemResult(
                 item=item.item,
