@@ -8,5 +8,6 @@ def test_production_magic_flow_builds_with_stop_control() -> None:
     config = app.get_config_file()
     rendered = str(config)
 
-    assert "STOP current job" in rendered
+    assert "Stop" in rendered
+    assert "dl-magic-actions" in rendered
     assert "Closing this page also releases active model/tool processes" in rendered
