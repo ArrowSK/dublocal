@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 from dublocal import adaptive_audio
@@ -69,3 +71,18 @@ def test_explicit_separation_remains_available_without_prepared_runtime(monkeypa
     monkeypatch.setattr(adaptive_audio, "separation_runtime", lambda: None)
     plan = adaptive_audio.resolve_mix_plan({}, None, "separated")
     assert plan.resolved == "separated"
+
+
+def test_v061_ui_composes_without_mutating_the_test_process() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from dublocal.ui_v061 import build_app; assert build_app() is not None",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
