@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from .contextual_translation import _parse_chunk_output
 from .media import DubLocalError
@@ -206,13 +206,58 @@ def _compact_recovery_context(original_context_prompt: str, max_chars: int = 3_6
     missing subtitle. On long/high-context jobs that made each fallback call almost as
     expensive as a normal translation call. The tail contains recent approved
     translations and the current TARGET LINES, which are the highest-value context for
-    a last-resort single-line repair.
+    a last-resort repair.
     """
 
     text = clean_generated_text(original_context_prompt)
     if len(text) <= max_chars:
         return text
     return "[earlier programme context omitted for fast recovery]\n" + text[-max_chars:]
+
+
+def build_missing_recovery_prompt(
+    original_context_prompt: str,
+    target_segments: Sequence[Segment],
+    missing_segments: Sequence[Segment],
+    recovered: Mapping[int, str],
+    target_language_label: str,
+    prior_output: str,
+) -> str:
+    """Recover every missing subtitle in one compact model call.
+
+    The previous implementation made one expensive model call per missing subtitle.
+    This prompt keeps chunk-local context and already recovered translations while
+    asking for all missing IDs at once.
+    """
+
+    missing_ids = ", ".join(str(segment.index) for segment in missing_segments)
+    source_lines = "\n".join(f"[{segment.index}] {segment.text}" for segment in target_segments)
+    recovered_lines = "\n".join(
+        f"[{segment.index}] {recovered[segment.index]}"
+        for segment in target_segments
+        if segment.index in recovered
+    )
+    prior = clean_generated_text(prior_output)
+    if len(prior) > 3_000:
+        prior = prior[-3_000:]
+    return (
+        "/no_think\n"
+        "MISSING SUBTITLE RECOVERY — repair all missing IDs in ONE response.\n"
+        + f"Missing IDs: {missing_ids}.\n"
+        + f"Translate only those missing IDs into natural {target_language_label}.\n"
+        + "Return EXACTLY one line per missing ID in this form: [ID] - translated text\n"
+        + "Return no other subtitle IDs, JSON, Markdown, headings, explanations or alternatives.\n"
+        + "Keep meaning, names, tone and profanity faithful; preserve speaker/reference consistency from the supplied chunk context.\n\n"
+        + "COMPACT ORIGINAL CONTEXT — reference only:\n"
+        + _compact_recovery_context(original_context_prompt, max_chars=2_800)
+        + "\n\nSOURCE CHUNK — reference only:\n"
+        + source_lines
+        + "\n\nALREADY RECOVERED TRANSLATIONS — preserve continuity, do not output:\n"
+        + (recovered_lines if recovered_lines else "(none)")
+        + "\n\nPREVIOUS MODEL OUTPUT — reference only:\n"
+        + prior
+        + "\n"
+    )
 
 
 def build_single_line_recovery_prompt(
