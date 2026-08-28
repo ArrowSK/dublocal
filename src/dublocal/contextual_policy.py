@@ -109,20 +109,25 @@ def build_review_prompt(
     draft_texts: Sequence[str],
     target_language: str,
 ) -> str:
-    """Ask the same loaded model to act as a conservative senior translation reviewer.
+    """Ask the loaded model for a conservative senior review.
 
-    The original translation prompt already contains the source TARGET LINES and all
-    programme/nearby context. Repeating those source lines again adds prompt-evaluation
-    cost but no information, so the review appends only the draft translations.
+    Normal translation prompts already contain the source TARGET LINES, so do not send
+    them twice. Keep a source-lines fallback for direct/library callers that provide a
+    different original prompt.
     """
 
     target = TRANSLATION_LANGUAGES[target_language]["label"]
+    source_lines = [_segment_line(segment) for segment in target_segments]
+    source_fallback = ""
+    if not all(line in original_prompt for line in source_lines):
+        source_fallback = "\n\nSOURCE TARGET LINES:\n" + "\n".join(source_lines)
     draft_lines = "\n".join(
         f"[{segment.index}] {text}"
         for segment, text in zip(target_segments, draft_texts, strict=True)
     )
     return (
         original_prompt.rstrip()
+        + source_fallback
         + "\n\nSENIOR REVIEW PASS — improve the DRAFT TRANSLATIONS below before final output.\n"
         + f"Review against the source TARGET LINES and ALL programme/nearby context already supplied above. Output polished natural {target}.\n"
         + "Review connected subtitle fragments as continuous discourse, not independent sentences.\n"
