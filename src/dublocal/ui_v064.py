@@ -104,6 +104,9 @@ MATRIX_CSS = previous.MATRIX_CSS + r"""
 """
 
 
+_ORIGINAL_BATCH_MAGIC_PANEL = previous._build_batch_magic_panel
+
+
 def _setup_progress(progress: gr.Progress):
     estimator = ProgressEstimator()
 
@@ -152,7 +155,7 @@ def _build_model_setup_card(*, first_run: bool) -> gr.Column:
             + (
                 "DubLocal has chosen a practical local model set for this Mac. One action prepares subtitles, contextual translation and voice-over; nothing is downloaded until you approve it."
                 if first_run
-                else "Use the same simple hardware-aware setup at any time. It prepares or repairs only the models DubLocal recommends for this Mac. Detailed per-model controls remain under Advanced Models."
+                else "Use the same simple hardware-aware setup at any time. It prepares or repairs only the models DubLocal recommends for this Mac. Detailed per-model controls remain under Model Manager."
             )
             + "</div>"
         )
@@ -183,13 +186,7 @@ def _build_model_setup_card(*, first_run: bool) -> gr.Column:
 def _build_batch_magic_panel_with_first_run(original_html) -> None:
     if model_setup_state().first_run_pending:
         _build_model_setup_card(first_run=True)
-    previous._ORIGINAL_BATCH_MAGIC_PANEL(original_html)
-
-
-# Keep a stable reference for the wrapper above and for tests. This is assigned at
-# import time before build_app temporarily swaps the public symbol.
-_ORIGINAL_BATCH_MAGIC_PANEL = previous._build_batch_magic_panel
-previous._ORIGINAL_BATCH_MAGIC_PANEL = _ORIGINAL_BATCH_MAGIC_PANEL
+    _ORIGINAL_BATCH_MAGIC_PANEL(original_html)
 
 
 class _ModelManagerTabsContext:
@@ -205,13 +202,9 @@ class _ModelManagerTabsContext:
         with self._original_tab("Model Setup"):
             _build_model_setup_card(first_run=False)
 
-        advanced_kwargs = dict(self._kwargs)
-        if self._args:
-            advanced_args = ("Advanced Models", *self._args[1:])
-            self._advanced = self._original_tab(*advanced_args, **advanced_kwargs)
-        else:
-            advanced_kwargs["label"] = "Advanced Models"
-            self._advanced = self._original_tab(**advanced_kwargs)
+        # Keep the established tab name because existing runtime guidance and docs
+        # already point users to Model Manager for expert controls.
+        self._advanced = self._original_tab(*self._args, **self._kwargs)
         return self._advanced.__enter__()
 
     def __exit__(self, exc_type, exc, tb):
