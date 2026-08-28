@@ -69,3 +69,32 @@ def test_magic_force_local_uses_best_installed_model(monkeypatch):
 
     assert decision.method == "transcribe"
     assert decision.model_id == "base"
+
+
+def test_magic_force_local_fast_selects_base_even_when_best_is_installed(monkeypatch):
+    installed = {"base", "large-v3-turbo-q5_0"}
+    monkeypatch.setattr(magic, "_installed_whisper", lambda model_id: model_id in installed)
+
+    decision = magic.recommend_subtitle_source(_info(), "local-fast")
+
+    assert decision.method == "transcribe"
+    assert decision.model_id == "base"
+    assert "Base" in decision.label
+
+
+def test_magic_force_local_best_selects_accurate(monkeypatch):
+    installed = {"base", "large-v3-turbo-q5_0"}
+    monkeypatch.setattr(magic, "_installed_whisper", lambda model_id: model_id in installed)
+
+    decision = magic.recommend_subtitle_source(_info(), "local-best")
+
+    assert decision.method == "transcribe"
+    assert decision.model_id == "large-v3-turbo-q5_0"
+    assert "Large v3 Turbo" in decision.label
+
+
+def test_magic_force_local_quality_requires_selected_model(monkeypatch):
+    monkeypatch.setattr(magic, "_installed_whisper", lambda model_id: model_id == "base")
+
+    with pytest.raises(DubLocalError, match="BEST local transcription"):
+        magic.recommend_subtitle_source(_info(), "local-best")
