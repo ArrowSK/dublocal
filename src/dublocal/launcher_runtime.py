@@ -34,8 +34,13 @@ install_language_extensions()
 install_shareable_burn_refinement()
 
 from . import product_ui
+from .course_import_ui import install_course_import_ui
 from .cancellation_ui import install_cancellation_ui
 
+# Course/website import extends only the source/acquisition boundary. Install it before
+# cancellation so the existing Stop lifecycle wraps YouTube, local and course queues in
+# exactly the same way.
+install_course_import_ui(product_ui)
 install_cancellation_ui(product_ui)
 MATRIX_CSS = product_ui.MATRIX_CSS
 build_app = product_ui.build_app
