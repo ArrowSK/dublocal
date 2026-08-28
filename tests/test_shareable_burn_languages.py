@@ -93,8 +93,11 @@ def test_ukrainian_and_bulgarian_are_translation_choices_without_tts_claim():
     from dublocal.tts import suggested_kokoro_language
 
     targets = dict((code, label) for label, code in app.TARGET_LANGUAGE_CHOICES)
+    sources = dict((code, label) for label, code in app.LANGUAGE_CHOICES)
     assert targets["uk"] == "Ukrainian"
     assert targets["bg"] == "Bulgarian"
+    assert sources["uk"] == "Ukrainian"
+    assert sources["bg"] == "Bulgarian"
     assert translation.TRANSLATION_LANGUAGES["uk"]["label"] == "Ukrainian"
     assert translation.TRANSLATION_LANGUAGES["bg"]["label"] == "Bulgarian"
     assert language_utils.normalize_language_code("українська") == "uk"
