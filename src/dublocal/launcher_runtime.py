@@ -8,7 +8,9 @@ from platformdirs import user_cache_dir
 from .adaptive_audio import install_adaptive_audio_refinement
 from .job_cache import prune_job_cache
 from .job_control import install_shutdown_hooks, shutdown_all
+from .language_extensions import install_language_extensions
 from .m53 import install_runtime_refinements
+from .shareable_burn import install_shareable_burn_refinement
 from .transcription_v053 import install_transcription_refinements
 from . import tts_provider_refinement
 from .tts_runtime_compat import install_russian_runtime_compat
@@ -28,6 +30,8 @@ from .native_tts_timing import install_native_timing_refinement
 install_transcription_refinements()
 install_native_timing_refinement()
 install_adaptive_audio_refinement()
+install_language_extensions()
+install_shareable_burn_refinement()
 
 from . import product_ui
 from .cancellation_ui import install_cancellation_ui
