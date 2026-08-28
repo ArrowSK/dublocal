@@ -21,7 +21,7 @@ def test_russian_prompt_treats_first_person_gender_as_discourse_consistency():
     prompt = build_translation_prompt(segments, 0, len(segments), "en", "ru", [], context_plan(segments))
     assert "RUSSIAN FIRST-PERSON CONSISTENCY" in prompt
     assert "comparison/metaphor noun does not change the narrator's gender" in prompt
-    assert "avoid a gender-marked predicate rather than guessing" in prompt
+    assert "avoids a gender-marked predicate rather than guessing" in prompt
 
 
 def test_russian_review_requires_final_gender_and_case_audit():
