@@ -16,19 +16,111 @@ from .job_control import (
 
 _INSTALLED = False
 _STOP_CSS = r"""
+/* Final Magic Flow spacing and action hierarchy. Keep this scoped so Advanced
+   and Settings retain their established layout. */
+.dl-magic-shell {
+  padding: 20px 22px !important;
+}
+.dl-magic-shell .dl-magic-title {
+  margin: 0 0 4px 0 !important;
+}
+.dl-magic-shell .dl-magic-subtitle {
+  margin: 0 0 14px 0 !important;
+  line-height: 1.45 !important;
+}
+.dl-magic-shell .dl-queue-note,
+.dl-magic-shell .dl-compact-note {
+  line-height: 1.45 !important;
+}
+.dl-magic-shell .dl-stage-status {
+  margin: 8px 0 6px 0 !important;
+  padding: 10px 12px !important;
+  border: 1px solid rgba(43, 108, 66, 0.62) !important;
+  border-radius: 8px !important;
+  background: rgba(7, 18, 11, 0.58) !important;
+  box-sizing: border-box !important;
+}
+.dl-magic-actions {
+  display: flex !important;
+  align-items: stretch !important;
+  gap: 12px !important;
+  margin: 12px 0 6px 0 !important;
+  width: 100% !important;
+}
+.dl-magic-actions > * {
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+.dl-magic-actions button {
+  min-height: 44px !important;
+  width: 100% !important;
+  margin: 0 !important;
+  border-radius: 8px !important;
+  font-weight: 650 !important;
+}
+.dl-magic-actions button.primary {
+  flex: 2 1 0 !important;
+}
 .dl-stop-button {
-  max-width: 190px !important;
-  margin-left: auto !important;
-  margin-top: 6px !important;
+  flex: 1 1 0 !important;
+  max-width: none !important;
+  margin: 0 !important;
+  background: #101b15 !important;
+  border: 1px solid rgba(66, 239, 131, 0.52) !important;
+  color: var(--dl-green-soft) !important;
+  box-shadow: none !important;
+}
+.dl-stop-button:hover {
+  background: #16271d !important;
+  border-color: rgba(66, 239, 131, 0.82) !important;
+  color: var(--dl-text) !important;
 }
 .dl-stop-note {
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
   color: var(--dl-muted) !important;
-  font-size: 12px !important;
-  padding: 0 !important;
-  margin: 2px 0 8px 0 !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  padding: 0 2px !important;
+  margin: 0 0 10px 0 !important;
+}
+.dl-magic-shell .accordion {
+  margin-top: 4px !important;
+  margin-bottom: 4px !important;
+}
+.dl-magic-shell .accordion > .label-wrap {
+  padding-left: 14px !important;
+  padding-right: 14px !important;
+}
+.dl-magic-shell .accordion .form {
+  padding-left: 14px !important;
+  padding-right: 14px !important;
+}
+.dl-magic-shell .block,
+.dl-magic-shell .form,
+.dl-magic-shell .wrap {
+  box-sizing: border-box !important;
+}
+.dl-magic-shell .gradio-row {
+  gap: 14px !important;
+}
+.dl-magic-shell .dl-queue-note + * {
+  margin-top: 2px !important;
+}
+
+@media (max-width: 720px) {
+  .dl-magic-shell {
+    padding: 16px !important;
+  }
+  .dl-magic-actions {
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+  .dl-magic-actions button.primary,
+  .dl-stop-button {
+    flex: 1 1 auto !important;
+  }
 }
 """
 
@@ -108,19 +200,25 @@ def install_cancellation_ui(product_ui) -> None:
         original_button = gr.Button
 
         def button_factory(value=None, *args: Any, **kwargs: Any):
-            button = original_button(value, *args, **kwargs)
             label = str(value if value is not None else kwargs.get("value") or "")
-            if label == "Run Magic Flow":
+            if label != "Run Magic Flow":
+                return original_button(value, *args, **kwargs)
+
+            # The primary Run action and secondary Stop action belong to the same
+            # decision row. Creating both inside one Row keeps them aligned while
+            # preserving the original Run component/event wiring.
+            with gr.Row(elem_classes=["dl-magic-actions"]):
+                button = original_button(value, *args, **kwargs)
                 stop = original_button(
-                    "STOP current job",
-                    variant="stop",
+                    "Stop",
+                    variant="secondary",
                     elem_classes=["dl-stop-button"],
                 )
-                stop.click(fn=_stop_magic_flow, queue=False)
-                gr.Markdown(
-                    "Stop cancels the current item and the remaining queue while keeping completed files. Closing this page also releases active model/tool processes.",
-                    elem_classes=["dl-stop-note"],
-                )
+            stop.click(fn=_stop_magic_flow, queue=False)
+            gr.Markdown(
+                "Stop ends the current item and remaining queue; completed files stay. Closing this page also releases active model/tool processes.",
+                elem_classes=["dl-stop-note"],
+            )
             return button
 
         gr.Button = button_factory
