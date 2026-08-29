@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import shlex
+import subprocess
+
 from . import __version__
 from .updater import (
     EXPECTED_BRANCH,
@@ -8,7 +12,7 @@ from .updater import (
     check_for_updates,
     install_update,
     repair_installation,
-    schedule_restart,
+    repository_root,
 )
 
 
@@ -21,6 +25,47 @@ def updater_idle_status() -> str:
 
 def _blocked_status(message: str) -> str:
     return f"### Update needs attention\n{message}"
+
+
+def schedule_restart() -> None:
+    """Detach the restart helper before the running backend is terminated.
+
+    DubLocal's shutdown lifecycle deliberately kills all descendant helper processes.
+    A restart helper left as a direct child of the running backend is therefore killed
+    together with ffmpeg/model workers as soon as the launcher sends SIGTERM to the
+    old process. Use a short bootstrap zsh that backgrounds/disowns the real restart
+    command, wait for that bootstrap shell to exit, and only then return to the UI.
+    The surviving helper is re-parented by macOS and can stop the old backend and
+    launch the refreshed one safely.
+    """
+
+    root = repository_root()
+    launcher = root / "scripts" / "macos" / "launch-dublocal.sh"
+    if not launcher.is_file():
+        raise UpdateError("The DubLocal macOS launcher script is missing.")
+
+    command = (
+        "(sleep 1; "
+        "DUBLOCAL_LAUNCH_ACTION=restart "
+        f"/bin/zsh {shlex.quote(str(launcher))}"
+        ") </dev/null >/dev/null 2>&1 &!"
+    )
+    env = os.environ.copy()
+    try:
+        bootstrap = subprocess.Popen(
+            ["/bin/zsh", "-c", command],
+            cwd=str(root),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        returncode = bootstrap.wait(timeout=5)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise UpdateError(f"DubLocal could not schedule its restart: {exc}") from exc
+    if returncode != 0:
+        raise UpdateError("DubLocal could not detach the automatic restart helper.")
 
 
 def update_dublocal_ui() -> str:
