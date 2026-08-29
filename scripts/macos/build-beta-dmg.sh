@@ -93,11 +93,12 @@ set_plist LSMultipleInstancesProhibited bool true
 /usr/bin/plutil -lint "$PLIST" >/dev/null
 /usr/bin/touch "$APP"
 
-# The first beta is deliberately unsigned/not notarized. Fail the build if an identity
-# or ad-hoc signature unexpectedly appears so release metadata never claims the wrong
-# security state.
+# osacompile currently creates an ad-hoc signed applet on hosted/current macOS. Beta 1
+# is intentionally unsigned, so explicitly strip that generated signature after all
+# bundle mutations and then verify that no signature remains.
+/usr/bin/codesign --remove-signature "$APP" >/dev/null 2>&1 || true
 if /usr/bin/codesign -dv "$APP" >/dev/null 2>&1; then
-  echo "DubLocal.app unexpectedly has a code signature; beta 1 must remain unsigned." >&2
+  echo "DubLocal.app unexpectedly still has a code signature; beta 1 must remain unsigned." >&2
   exit 1
 fi
 
