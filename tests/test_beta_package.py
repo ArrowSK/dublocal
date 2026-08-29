@@ -32,9 +32,11 @@ def test_beta_builder_creates_branded_unsigned_dmg() -> None:
     assert "/usr/bin/osacompile -o" in script
     assert "io.github.arrowsk.dublocal" in script
     assert "CFBundleShortVersionString" in script
+    assert "/usr/bin/codesign --remove-signature" in script
     assert "/usr/bin/codesign -dv" in script
     assert "/usr/bin/hdiutil create" in script
     assert "/usr/bin/hdiutil verify" in script
+    assert "/usr/bin/shasum -a 256" in script
     assert "macOS-unsigned.dmg" in script
     assert "Do not disable Gatekeeper globally" in script
 
@@ -46,6 +48,7 @@ def test_beta_workflow_builds_on_real_macos_runner_and_uploads_dmg() -> None:
     assert "zsh scripts/macos/build-beta-dmg.sh" in workflow
     assert "actions/upload-artifact@v4" in workflow
     assert "dist/*.dmg" in workflow
+    assert "dist/*.sha256" in workflow
 
 
 def test_beta_package_version_matches_python_package() -> None:
