@@ -41,15 +41,18 @@ from .authenticated_web_policy import install_authenticated_web_policy
 install_authenticated_web_policy()
 
 from . import product_ui
+from .beta_branding import install_beta_branding
 from .course_import_ui import install_course_import_ui
 from .storage_cleanup_ui import install_storage_cleanup_ui
 from .cancellation_ui import install_cancellation_ui
 
 # Course/website import extends only the source/acquisition boundary. Storage cleanup
-# then wraps the resulting unified queue/settings surface, and cancellation remains the
-# outer lifecycle wrapper for YouTube, local and course jobs alike.
+# then wraps the resulting unified queue/settings surface. The beta branding adds the
+# established logo without redesigning controls, and cancellation remains the outer
+# lifecycle wrapper for YouTube, local and course jobs alike.
 install_course_import_ui(product_ui)
 install_storage_cleanup_ui(product_ui)
+install_beta_branding(product_ui)
 install_cancellation_ui(product_ui)
 MATRIX_CSS = product_ui.MATRIX_CSS
 build_app = product_ui.build_app
