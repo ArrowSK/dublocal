@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+from pathlib import Path
 
 from . import __version__
 from .updater import (
@@ -27,6 +28,29 @@ def _blocked_status(message: str) -> str:
     return f"### Update needs attention\n{message}"
 
 
+def _restart_command(root: Path) -> str:
+    """Return the detached restart target for source or packaged installations."""
+
+    beta_bootstrap = os.environ.get("DUBLOCAL_BETA_BOOTSTRAP", "").strip()
+    if beta_bootstrap:
+        bootstrap = Path(beta_bootstrap).expanduser()
+        if bootstrap.is_file():
+            # Re-enter the packaged bootstrap after Git changes so its private editable
+            # environment can absorb any dependency changes before the backend restarts.
+            return (
+                "DUBLOCAL_FORCE_RESTART=1 "
+                f"/bin/zsh {shlex.quote(str(bootstrap))}"
+            )
+
+    launcher = root / "scripts" / "macos" / "launch-dublocal.sh"
+    if not launcher.is_file():
+        raise UpdateError("The DubLocal macOS launcher script is missing.")
+    return (
+        "DUBLOCAL_LAUNCH_ACTION=restart "
+        f"/bin/zsh {shlex.quote(str(launcher))}"
+    )
+
+
 def schedule_restart() -> None:
     """Detach the restart helper before the running backend is terminated.
 
@@ -35,19 +59,18 @@ def schedule_restart() -> None:
     together with ffmpeg/model workers as soon as the launcher sends SIGTERM to the
     old process. Use a short bootstrap zsh that backgrounds/disowns the real restart
     command, wait for that bootstrap shell to exit, and only then return to the UI.
-    The surviving helper is re-parented by macOS and can stop the old backend and
-    launch the refreshed one safely.
+
+    Packaged beta installations route the detached restart back through the app's
+    bootstrap script. That preserves the existing Git updater while refreshing the
+    private editable environment when a future update changes Python dependencies.
+    Source/development installations retain the established direct launcher restart.
     """
 
     root = repository_root()
-    launcher = root / "scripts" / "macos" / "launch-dublocal.sh"
-    if not launcher.is_file():
-        raise UpdateError("The DubLocal macOS launcher script is missing.")
-
+    restart = _restart_command(root)
     command = (
         "(sleep 1; "
-        "DUBLOCAL_LAUNCH_ACTION=restart "
-        f"/bin/zsh {shlex.quote(str(launcher))}"
+        f"{restart}"
         ") </dev/null >/dev/null 2>&1 &!"
     )
     env = os.environ.copy()

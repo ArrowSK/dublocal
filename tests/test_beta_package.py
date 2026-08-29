@@ -24,6 +24,28 @@ def test_beta_bootstrap_preserves_managed_git_updater_architecture() -> None:
     assert "Model Manager" not in script  # models remain controlled inside the app
 
 
+def test_beta_bootstrap_takes_over_after_setup_or_packaged_update() -> None:
+    script = _text("scripts/macos/beta-bootstrap.sh")
+
+    assert 'SETUP_CHANGED=0' in script
+    assert 'SETUP_CHANGED=1' in script
+    assert '${DUBLOCAL_FORCE_RESTART:-0}' in script
+    assert 'LAUNCH_ACTION="restart"' in script
+    assert 'LAUNCH_ACTION="open"' in script
+    assert 'DUBLOCAL_BETA_BOOTSTRAP="$BOOTSTRAP_PATH"' in script
+    assert 'DUBLOCAL_LAUNCH_ACTION="$LAUNCH_ACTION"' in script
+
+
+def test_packaged_updater_reenters_bootstrap_before_restart() -> None:
+    update = _text("src/dublocal/normal_update.py")
+
+    assert 'DUBLOCAL_BETA_BOOTSTRAP' in update
+    assert 'DUBLOCAL_FORCE_RESTART=1' in update
+    assert 'def _restart_command' in update
+    assert 'DUBLOCAL_LAUNCH_ACTION=restart' in update
+    assert 'restart = _restart_command(root)' in update
+
+
 def test_beta_builder_creates_branded_unsigned_dmg() -> None:
     script = _text("scripts/macos/build-beta-dmg.sh")
 
