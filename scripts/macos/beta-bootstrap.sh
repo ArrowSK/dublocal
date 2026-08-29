@@ -5,6 +5,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 CONTENTS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_INFO="$CONTENTS_DIR/Resources/build-info.env"
+BOOTSTRAP_PATH="$CONTENTS_DIR/Resources/beta-bootstrap.sh"
 APP_SUPPORT="$HOME/Library/Application Support/DubLocal"
 SOURCE_ROOT="$APP_SUPPORT/app"
 VENV="$SOURCE_ROOT/.venv"
@@ -15,6 +16,7 @@ BOOTSTRAP_LOG="$LOG_DIR/bootstrap.log"
 REPO_URL="https://github.com/ArrowSK/dublocal.git"
 EXPECTED_BRANCH="main"
 SETUP_MARKER="$APP_SUPPORT/bootstrap-revision"
+SETUP_CHANGED=0
 
 mkdir -p "$APP_SUPPORT" "$LOG_DIR"
 exec >>"$BOOTSTRAP_LOG" 2>&1
@@ -153,6 +155,10 @@ ensure_environment() {
     return 0
   fi
 
+  # A new checkout or an in-app Git update may introduce dependency changes. Refresh
+  # the editable environment before the backend restarts; finished outputs/models are
+  # outside this environment and are never touched here.
+  SETUP_CHANGED=1
   base_python="$(ensure_python_base)"
   notify "Finishing DubLocal Beta setup…"
   if [[ ! -x "$PYTHON" ]]; then
@@ -187,5 +193,18 @@ check_ffmpeg
 LAUNCHER="$SOURCE_ROOT/scripts/macos/launch-dublocal.sh"
 [[ -f "$LAUNCHER" ]] || fail "The installed DubLocal launcher is missing."
 
+# A fresh beta setup must take ownership of the single local backend even when an old
+# source/development DubLocal instance is already running. Likewise, an in-app packaged
+# update/repair can force this bootstrap path so dependency refresh happens before a
+# clean restart. Ordinary subsequent app opens simply reuse the healthy managed backend.
+if [[ "$SETUP_CHANGED" == "1" || "${DUBLOCAL_FORCE_RESTART:-0}" == "1" ]]; then
+  LAUNCH_ACTION="restart"
+else
+  LAUNCH_ACTION="open"
+fi
+
 notify "DubLocal Beta ${BETA_VERSION:-0.6.0b1} is ready."
-exec env DUBLOCAL_LAUNCH_ACTION=open /bin/zsh "$LAUNCHER"
+exec env \
+  DUBLOCAL_BETA_BOOTSTRAP="$BOOTSTRAP_PATH" \
+  DUBLOCAL_LAUNCH_ACTION="$LAUNCH_ACTION" \
+  /bin/zsh "$LAUNCHER"
