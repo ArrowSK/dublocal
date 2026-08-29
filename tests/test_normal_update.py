@@ -43,6 +43,39 @@ def test_one_action_update_installs_and_schedules_restart(monkeypatch, tmp_path:
     assert restarted == [True]
 
 
+def test_restart_helper_is_detached_before_old_backend_shutdown(monkeypatch, tmp_path: Path) -> None:
+    launcher = tmp_path / "scripts" / "macos" / "launch-dublocal.sh"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("#!/bin/zsh\n", encoding="utf-8")
+    monkeypatch.setattr(normal, "repository_root", lambda: tmp_path)
+
+    calls = []
+
+    class Bootstrap:
+        def wait(self, timeout=None):
+            calls.append(("wait", timeout))
+            return 0
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+        return Bootstrap()
+
+    monkeypatch.setattr(normal.subprocess, "Popen", fake_popen)
+
+    normal.schedule_restart()
+
+    command, kwargs = calls[0]
+    assert command[:2] == ["/bin/zsh", "-c"]
+    assert "DUBLOCAL_LAUNCH_ACTION=restart" in command[2]
+    assert "&!" in command[2]
+    assert str(launcher) in command[2]
+    assert kwargs["start_new_session"] is True
+    assert kwargs["stdin"] is normal.subprocess.DEVNULL
+    assert kwargs["stdout"] is normal.subprocess.DEVNULL
+    assert kwargs["stderr"] is normal.subprocess.DEVNULL
+    assert calls[1] == ("wait", 5)
+
+
 def test_one_action_update_reports_up_to_date_without_restart(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         normal,
