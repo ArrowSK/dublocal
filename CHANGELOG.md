@@ -1,14 +1,28 @@
 # DubLocal changelog
 
-DubLocal is still in active development. Versions below describe development builds from `main`.
+DubLocal is still in active development. Versions below describe development/beta builds from `main`.
 
-> **Current development build:** `v0.6.0.dev0` — **Magic Flow UX**
+> **Current beta:** `v0.6.0b1` — **first packaged macOS beta**
 >
-> There is no packaged GitHub Release yet. Development builds update from official `main` inside DubLocal.
+> Beta 1 is built as an unsigned/not-notarized drag-to-Applications DMG. Normal in-app updates continue to track official `main`.
 
-## v0.6.0.dev0 — Magic Flow UX — current
+## v0.6.0b1 — First packaged macOS beta — current
 
-v0.6 turns the mature local pipeline into a simpler product-facing workflow while keeping detailed controls available.
+### macOS beta package
+
+- Added a reproducible macOS DMG builder and a real macOS CI packaging job.
+- Added a conventional `DubLocal.app` with the established DubLocal `.icns` icon plus an Applications shortcut in the DMG.
+- Added a first-launch bootstrap that keeps the managed application checkout under `~/Library/Application Support/DubLocal/app`.
+- The bootstrap pins a new installation to the exact packaged Git revision, while retaining a normal official `main` Git checkout so the existing safe updater/restart architecture remains usable.
+- The beta does not bundle AI models, authenticated-site browser state, Demucs or Whisper model data; these remain explicit local resources.
+- Added native first-launch handling for missing Git/Python and optional FFmpeg preparation without requiring a terminal-driven installer flow.
+- Added clear Gatekeeper instructions for the intentionally unsigned beta and explicitly avoids recommending global Gatekeeper disablement.
+- The DMG includes license notices and a SHA-256 checksum artifact.
+
+### Product branding
+
+- Reused the established `assets/macos/DubLocal.svg` identity for the packaged app icon.
+- Added the same DubLocal mark to the in-app header without redesigning the existing Simple/Advanced product UI.
 
 ### Authenticated course / website import
 
@@ -25,9 +39,15 @@ v0.6 turns the mature local pipeline into a simpler product-facing workflow whil
 - The existing Stop/cleanup lifecycle now covers authenticated acquisition and course queues as well.
 - Added safety policy so an explicit empty lesson selection never expands to all lessons and persisted/rendered import errors redact reusable signed-URL credentials.
 
+### Storage & cleanup hardening
+
+- Added centralized storage accounting and safe temporary cleanup.
+- Added bounded log, course-manifest, repair-backup and stale browser-runtime housekeeping.
+- Installed models, authenticated sessions and finished outputs remain protected from automatic/manual temporary cleanup.
+
 ### Magic Flow
 
-- Added a new default **Magic Flow** at the top of Main.
+- Added a default **Magic Flow** at the top of Main.
 - Normal inputs are reduced to source, rights confirmation, output language and desired outputs.
 - One **Run Magic Flow** action resolves prerequisites and executes the existing local pipeline.
 - Users can independently request subtitles, translation, voice-over and/or an output media file.
