@@ -1,13 +1,13 @@
 # DubLocal architecture
 
-**Current development build: v0.6.0.dev0 — Magic Flow UX**
+**Current beta: v0.6.0b1 — first packaged macOS beta**
 
 DubLocal is a local-first media pipeline with two user-facing control layers over the same processing engines:
 
 - **Magic Flow** — compact orchestration and hardware-safe recommendations.
-- **Detailed workflow** — explicit stage-by-stage control.
+- **Advanced workflow** — explicit stage-by-stage control.
 
-Magic Flow is not a second backend. It resolves dependencies and calls the same source, transcription, translation, TTS, timing, mixing and remuxing modules used by the detailed workflow.
+Magic Flow is not a second backend. It resolves dependencies and calls the same source, transcription, translation, TTS, timing, mixing and remuxing modules used by the Advanced workflow.
 
 ## Product-level flow
 
@@ -20,10 +20,22 @@ route recommendation / dependency resolution
 existing DubLocal pipeline
 ```
 
-The detailed workflow remains available directly:
+The source boundary accepts three normal source families:
 
 ```text
-YouTube / local media
+YouTube ───────────────────────────────┐
+Local file ────────────────────────────┼→ normalized/local media → pipeline
+Course / authenticated website ───────┘
+        │
+        └→ SourceProvider acquisition only; no duplicate dubbing backend
+```
+
+Authenticated acquisition ends when a normal local `AcquiredMedia` object exists. Website adapters do not know about Whisper, Qwen, TTS or export. Protected DRM/encrypted streams are refused rather than bypassed.
+
+The Advanced workflow remains available directly:
+
+```text
+YouTube / local / acquired authenticated media
         ↓
 inspection + caption discovery
         ↓
@@ -41,28 +53,73 @@ contextual translation
         ↓ optional
 speech-only TTS preparation
         ↓
-Kokoro
-  ├─ one local pipeline/model
-  ├─ manual or automatic lower/higher vocal-range preset
+local TTS provider
+  ├─ Kokoro / registered compatible provider
+  ├─ manual or automatic lower/higher vocal-range preset where supported
   └─ per-segment WAV + manifest
         ↓
 per-line timing fit
-  ├─ subtitle-window target
-  ├─ chained atempo, effective 0.30×–2.50×
-  └─ small end-time correction pass
         ↓
 soundtrack mix
   ├─ stable reduced original bed
   ├─ deeper subtitle-window dialogue/singing attenuation
-  └─ gentle compressor + limiter
+  └─ optional local vocal/accompaniment separation
         ↓
 track-aware remux/export
   ├─ replace primary audio
   ├─ add dubbed audio
   ├─ subtitle-only media package
-  ├─ selectable subtitle tracks
+  ├─ selectable/burned subtitle options
   └─ video stream-copy unless explicitly downscaled
 ```
+
+## Beta packaging architecture
+
+0.6.0b1 deliberately does **not** freeze the Python application into a second self-contained runtime. The established updater already has strong safety semantics around a real official Git checkout, so the first beta package preserves that architecture.
+
+```text
+DubLocal-0.6.0b1-macOS-unsigned.dmg
+        ↓ drag
+/Applications/DubLocal.app
+  ├─ AppleScript launcher applet
+  ├─ established DubLocal.icns identity
+  ├─ beta-bootstrap.sh
+  └─ build-info.env (package version + exact source revision)
+        ↓ first launch
+~/Library/Application Support/DubLocal/app
+  ├─ normal Git checkout
+  ├─ branch: main
+  ├─ origin: official ArrowSK/dublocal
+  └─ .venv
+        ↓
+existing scripts/macos/launch-dublocal.sh
+        ↓
+python -m dublocal.launcher_runtime
+```
+
+For a new beta installation, the bootstrap clones official `main` and resets it to the exact commit recorded in the DMG. It does this only for the newly created managed checkout. Existing managed checkouts are never silently hard-reset. Branch and remote mismatches are treated as errors rather than overwritten.
+
+This design preserves:
+
+- the existing `normal_update.py` official-main safety checks;
+- managed repair backups;
+- the hardened detached restart path;
+- user models/caches independently of the small `/Applications` bundle;
+- normal source-level diagnostics during the beta period.
+
+The beta DMG intentionally contains no AI weights, authenticated browser state, Demucs environment or Whisper model. Those remain app-managed resources.
+
+### Unsigned beta boundary
+
+The first beta is intentionally unsigned and not notarized. The packaging script validates that the generated `.app` has no code signature and creates an unsigned DMG plus SHA-256 checksum. User documentation requires the normal macOS Control-click/Open or Privacy & Security → Open Anyway path; it never recommends disabling Gatekeeper globally.
+
+Future signing/notarization should change the distribution security layer, not the managed source/update architecture unless a later packaging milestone explicitly redesigns it.
+
+## App identity and UI branding
+
+`assets/macos/DubLocal.svg` is the single established visual source for the first beta. The macOS builder renders it to the `.icns` used by Finder/Dock. `beta_branding.py` mirrors that same geometry inline in the Gradio header, avoiding a second logo or another file-serving permission just for branding.
+
+Branding is a wrapper around the current product builder; it does not replace Simple/Advanced UI behavior.
 
 ## Magic Flow orchestration
 
@@ -99,12 +156,12 @@ Translate
   → requires source subtitle timeline + contextual translation
 
 Voice-over
-  → requires source subtitle timeline + target-language timeline + Kokoro
+  → requires source subtitle timeline + target-language timeline + TTS provider
 
-Output media + Voice-over
+Media + Voice-over
   → requires full pipeline
 
-Output media + Translate, no Voice-over
+Media + Translate, no Voice-over
   → packages original media/audio + selectable subtitle tracks
 ```
 
@@ -123,9 +180,12 @@ This keeps the UI simple while preserving deterministic stage boundaries interna
 9. Video re-encoding is never implied by audio/subtitle changes.
 10. M1/low-memory compatibility is a runtime design constraint.
 11. ASR recovery prefers uncertainty/gaps over invented speech.
-12. DubLocal does not claim source separation when it is only attenuating a married mix.
-13. Magic Flow and Detailed workflow must call the same underlying engines rather than fork behavior.
-14. Auto language is a real state: detected language is consumed when known; contextual translation may identify it locally when unknown.
+12. Lightweight attenuation must not be described as true source separation.
+13. Magic Flow and Advanced must call the same underlying engines rather than fork behavior.
+14. Auto language is real state: detected language is consumed when known; contextual translation may identify it locally when unknown.
+15. Authenticated website import ends at normalized local media; site adapters do not own processing stages.
+16. Packaging must not create a second updater/restart implementation while the managed Git architecture is active.
+17. Temporary cleanup must never delete models, authenticated sessions or finished user outputs.
 
 ## Subtitle timeline
 
@@ -184,29 +244,29 @@ When the UI still supplies `auto`, contextual translation performs lightweight s
 
 ## Voice architecture
 
-Kokoro is a TTS backend, not the application architecture.
+TTS providers are downstream consumers of the same speech-only timeline rather than application architectures.
 
 The TTS path:
 
 1. preserves the original SRT;
 2. creates a temporary speech-only timeline with bracket cues removed;
-3. optionally analyses the source acoustic range;
-4. chooses lower/higher voice presets per segment;
-5. keeps one Kokoro runtime/model loaded;
-6. writes segment WAV files plus a timing manifest.
+3. optionally analyses source acoustic range;
+4. chooses compatible voice presets per segment when supported;
+5. keeps the active provider/model loaded where possible;
+6. writes segment WAV files plus timing data.
 
 ## Timing and mixing
 
-The timing layer measures actual generated WAV duration rather than assuming Kokoro speed is sufficient. FFmpeg `atempo` stages can be chained over the bounded 0.30×–2.50× effective range.
+Native TTS timing compares generated duration with each subtitle window and regenerates only genuine overflow where the provider supports speed control. The established FFmpeg correction path remains bounded rather than broadly stretching every generated line.
 
-The mixing layer keeps the married source programme at a reduced bed and attenuates it further during source dialogue/singing windows. This is lightweight DSP; it is not a source-separation model.
+The lightweight mixing path keeps the married source programme at a reduced bed and attenuates it further during source dialogue/singing windows. Optional Demucs separation is a distinct local enhancement and falls back safely when unavailable.
 
 ## Export architecture
 
 - MKV is the safest multi-track default.
-- Generated source/translated subtitles are external inputs during remux and remain selectable tracks.
-- Local Original video uses stream-copy.
-- Explicit local downscale uses Apple VideoToolbox H.264.
+- Generated source/translated subtitles remain selectable tracks unless burn-in is explicitly requested for a shareable output.
+- Local Original video uses stream-copy where compatible.
+- Explicit local downscale uses the established macOS encoding path.
 - YouTube quality selection occurs before download where possible so final video can still be copied.
 - Magic Flow can package subtitle tracks without generating/embedding DubLocal audio.
 
@@ -218,4 +278,6 @@ Temporary job data is created under the platform DubLocal cache, currently:
 ~/Library/Caches/DubLocal/jobs/
 ```
 
-Startup pruning removes stale/oversized job data. Persistent model registrations/shared caches are excluded from temporary cleanup.
+`storage_cleanup.py` is the centralized boundary between disposable and protected data. Startup/normal safe points can prune stale jobs, translation cache entries, aged course manifests, bounded logs/repair backups and safely identifiable obsolete browser revisions.
+
+Installed models, managed runtimes, shared Hugging Face data, authenticated website sessions and finished user outputs are protected from temporary cleanup. Settings → **Storage & Cleanup** exposes the same classification to the user.

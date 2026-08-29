@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <strong>Current development build: v0.6.0.dev0 · Magic Flow</strong><br>
+  <strong>Current beta: v0.6.0b1 · Magic Flow</strong><br>
   macOS 13+ · Apple Silicon and Intel · Apache-2.0
 </p>
 
@@ -18,7 +18,7 @@
 
 DubLocal turns a YouTube link, local media file, or legitimately accessible authenticated course/lesson into subtitles, translated subtitles, local AI voice-over, or a finished multi-track media file. It is designed to offer a simple consumer workflow without hiding the detailed controls needed for difficult material.
 
-There is no packaged DMG/GitHub Release yet. Development builds update from official `main` inside DubLocal.
+**0.6.0b1 is the first packaged macOS beta.** It is available as a conventional drag-to-Applications DMG with the DubLocal app icon and remains intentionally unsigned/not notarized for this first beta. The packaged app keeps a managed official Git checkout so the existing safe in-app updater and automatic restart path continue to work. See `docs/BETA_INSTALLATION.md` for first-launch Gatekeeper instructions and uninstall details.
 
 ## Magic Flow — the normal way to use DubLocal
 
@@ -68,7 +68,7 @@ The original stage-by-stage workflow remains below Magic Flow:
 
 **Source → Subtitles → Translate → Voice-over → Export**
 
-Use it when you want to inspect tracks, choose a particular Whisper model, review translation output, choose voices manually, or control export details stage by stage. **Course / Website** is available there for a direct single-lesson URL; full course selection remains in Simple so the detailed pipeline is not duplicated.
+Use it when you want to inspect tracks, choose a particular Whisper model, review translation output, choose voices manually, or control export details stage by step. **Course / Website** is available there for a direct single-lesson URL; full course selection remains in Simple so the detailed pipeline is not duplicated.
 
 ## What works now
 
@@ -202,12 +202,16 @@ Normal launch removes stale/oversized job data according to DubLocal's cache pol
 
 ## Install
 
+For beta users, use the unsigned `DubLocal-0.6.0b1-macOS-unsigned.dmg`, drag **DubLocal.app** to Applications, then follow `docs/BETA_INSTALLATION.md` for the one-time Gatekeeper step. The app icon and in-app header use the same established DubLocal logo.
+
+For development from source:
+
 ```bash
 git clone https://github.com/ArrowSK/dublocal.git
 cd dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-The installer creates native launchers under `~/Applications` and can repair the managed environment later from inside DubLocal.
+The source installer creates native launchers under `~/Applications`. The packaged beta instead keeps its managed checkout under `~/Library/Application Support/DubLocal/app` so the same updater can safely fast-forward official `main`.
 
-See `docs/INSTALLATION.md`, `docs/USER_GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/AUTHENTICATED_WEBSITES.md` and `docs/TROUBLESHOOTING.md` for details.
+See `docs/BETA_INSTALLATION.md`, `docs/INSTALLATION.md`, `docs/USER_GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/AUTHENTICATED_WEBSITES.md` and `docs/TROUBLESHOOTING.md` for details.
