@@ -35,6 +35,9 @@ def test_beta_builder_creates_branded_unsigned_dmg() -> None:
     assert "/usr/bin/codesign --remove-signature" in script
     assert "/usr/bin/codesign -dv" in script
     assert "/usr/bin/hdiutil create" in script
+    assert "verify_dmg()" in script
+    assert "/bin/sync" in script
+    assert 'for attempt in 1 2 3 4 5' in script
     assert "/usr/bin/hdiutil verify" in script
     assert "/usr/bin/shasum -a 256" in script
     assert "macOS-unsigned.dmg" in script
