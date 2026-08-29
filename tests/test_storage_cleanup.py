@@ -111,9 +111,9 @@ def test_log_is_rotated_before_new_launch(monkeypatch, tmp_path: Path) -> None:
     root = tmp_path / "logs"
     root.mkdir()
     current = _write(root / "dublocal.log", cleanup.LOG_ROTATE_BYTES + 1)
-    one = _write(root / "dublocal.log.1", 31)
-    two = _write(root / "dublocal.log.2", 32)
-    three = _write(root / "dublocal.log.3", 33)
+    _write(root / "dublocal.log.1", 31)
+    _write(root / "dublocal.log.2", 32)
+    _write(root / "dublocal.log.3", 33)
 
     monkeypatch.setattr(cleanup, "logs_root", lambda: root)
     result = cleanup.prepare_log_for_launch()
@@ -121,9 +121,8 @@ def test_log_is_rotated_before_new_launch(monkeypatch, tmp_path: Path) -> None:
     assert result.removed_items == 1
     assert not current.exists()
     assert (root / "dublocal.log.1").stat().st_size == cleanup.LOG_ROTATE_BYTES + 1
-    assert (root / "dublocal.log.2").stat().st_size == one.stat().st_size
-    assert (root / "dublocal.log.3").stat().st_size == two.stat().st_size
-    assert not three.exists()
+    assert (root / "dublocal.log.2").stat().st_size == 31
+    assert (root / "dublocal.log.3").stat().st_size == 32
 
 
 def test_old_playwright_revision_pruning_keeps_current(monkeypatch, tmp_path: Path) -> None:
