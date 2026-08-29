@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import wraps
 from typing import Any
 
 import gradio as gr
@@ -44,6 +45,7 @@ def install_storage_cleanup_ui(product_ui) -> None:
 
     product_ui._build_settings_injections = settings_with_storage
 
+    @wraps(original_run_ui)
     def run_ui_with_housekeeping(*args: Any, **kwargs: Any):
         try:
             return original_run_ui(*args, **kwargs)
