@@ -183,6 +183,10 @@ if [[ ! -x "$PYTHON" ]]; then
   exit 1
 fi
 
+# Rotate the append-only launcher/backend log before opening the next backend.
+# The cleanup module owns the retention policy and never touches models or outputs.
+"$PYTHON" -c 'from dublocal.storage_cleanup import prepare_log_for_launch; prepare_log_for_launch()' >/dev/null 2>&1 || true
+
 CURRENT_REV="$(current_revision)"
 cd "$REPO_ROOT" || exit 1
 

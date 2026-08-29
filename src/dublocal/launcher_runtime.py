@@ -6,11 +6,11 @@ from pathlib import Path
 from platformdirs import user_cache_dir
 
 from .adaptive_audio import install_adaptive_audio_refinement
-from .job_cache import prune_job_cache
 from .job_control import install_shutdown_hooks, shutdown_all
 from .language_extensions import install_language_extensions
 from .m53 import install_runtime_refinements
 from .shareable_burn import install_shareable_burn_refinement
+from .storage_cleanup import prune_stale_jobs_only, run_automatic_housekeeping
 from .transcription_v053 import install_transcription_refinements
 from . import tts_provider_refinement
 from .tts_runtime_compat import install_russian_runtime_compat
@@ -42,12 +42,14 @@ install_authenticated_web_policy()
 
 from . import product_ui
 from .course_import_ui import install_course_import_ui
+from .storage_cleanup_ui import install_storage_cleanup_ui
 from .cancellation_ui import install_cancellation_ui
 
-# Course/website import extends only the source/acquisition boundary. Install it before
-# cancellation so the existing Stop lifecycle wraps YouTube, local and course queues in
-# exactly the same way.
+# Course/website import extends only the source/acquisition boundary. Storage cleanup
+# then wraps the resulting unified queue/settings surface, and cancellation remains the
+# outer lifecycle wrapper for YouTube, local and course jobs alike.
 install_course_import_ui(product_ui)
+install_storage_cleanup_ui(product_ui)
 install_cancellation_ui(product_ui)
 MATRIX_CSS = product_ui.MATRIX_CSS
 build_app = product_ui.build_app
@@ -73,9 +75,10 @@ def main() -> None:
     inbrowser = _env_bool("DUBLOCAL_INBROWSER", True)
     install_shutdown_hooks()
 
-    # Generated SRT/WAV/intermediate media live in the macOS cache, not the repo or
-    # user documents. Prune stale/oversized jobs before a new session starts.
-    prune_job_cache()
+    # Central housekeeping owns temporary jobs, translation cache aging, old course
+    # manifests, repair backups and safely-identifiable obsolete browser revisions.
+    # Models, sign-in sessions and finished outputs are protected by design.
+    run_automatic_housekeeping()
 
     # Keep the established lightweight mixer as the universal fallback. The adaptive
     # renderer swaps in vocal separation only for the current render when requested or
@@ -97,6 +100,12 @@ def main() -> None:
         # Launcher stop/restart and normal interpreter shutdown must never leave
         # llama.cpp, Kokoro/Russian TTS, whisper.cpp, Demucs or ffmpeg children alive.
         shutdown_all()
+        # Normal shutdown is another safe point to remove only stale (>24 h) jobs.
+        # Current-session outputs remain available until their normal cache age.
+        try:
+            prune_stale_jobs_only()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
