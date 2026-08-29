@@ -128,9 +128,24 @@ EOF
   -format UDZO \
   "$DMG" >/dev/null
 
-/usr/bin/hdiutil verify "$DMG" >/dev/null
 [[ -s "$DMG" ]] || { echo "DMG was not created." >&2; exit 1; }
 
+# On hosted macOS the diskimages helper can briefly keep a just-created image busy.
+# Retry only the verification operation; a genuinely corrupt image still fails hard
+# after the bounded retry window.
+verify_dmg() {
+  local attempt
+  /bin/sync
+  for attempt in 1 2 3 4 5; do
+    if /usr/bin/hdiutil verify "$DMG" >/dev/null 2>&1; then
+      return 0
+    fi
+    /bin/sleep "$attempt"
+  done
+  /usr/bin/hdiutil verify "$DMG"
+}
+
+verify_dmg
 /usr/bin/shasum -a 256 "$DMG" > "$CHECKSUM"
 
 printf 'Built unsigned beta package:\n  %s\n' "$DMG"
