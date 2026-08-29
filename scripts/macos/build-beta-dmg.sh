@@ -14,7 +14,7 @@ VERSION="$(/usr/bin/sed -n 's/^version = "\([^"]*\)"/\1/p' pyproject.toml | /usr
 [[ -n "$VERSION" ]] || { echo "Could not read DubLocal version from pyproject.toml." >&2; exit 1; }
 
 BUILD_SHA="${DUBLOCAL_BUILD_SHA:-$(/usr/bin/git rev-parse HEAD)}"
-[[ "$BUILD_SHA" == [0-9a-f]## ]] || { echo "Invalid build SHA: $BUILD_SHA" >&2; exit 1; }
+[[ "$BUILD_SHA" =~ '^[0-9a-f]{7,40}$' ]] || { echo "Invalid build SHA: $BUILD_SHA" >&2; exit 1; }
 
 BUILD_ROOT="$REPO_ROOT/build/macos-beta"
 APP="$BUILD_ROOT/DubLocal.app"
@@ -24,12 +24,13 @@ ICON_FILE="$BUILD_ROOT/DubLocal.icns"
 STAGE="$BUILD_ROOT/dmg-root"
 DIST="$REPO_ROOT/dist"
 DMG="$DIST/DubLocal-${VERSION}-macOS-unsigned.dmg"
+CHECKSUM="$DMG.sha256"
 ICON_SVG="$REPO_ROOT/assets/macos/DubLocal.svg"
 BOOTSTRAP="$REPO_ROOT/scripts/macos/beta-bootstrap.sh"
 
 /bin/rm -rf "$BUILD_ROOT"
 /bin/mkdir -p "$BUILD_ROOT" "$DIST" "$ICON_RENDER" "$ICONSET" "$STAGE"
-/bin/rm -f "$DMG"
+/bin/rm -f "$DMG" "$CHECKSUM"
 
 [[ -f "$ICON_SVG" ]] || { echo "Missing app icon source: $ICON_SVG" >&2; exit 1; }
 [[ -f "$BOOTSTRAP" ]] || { echo "Missing beta bootstrap: $BOOTSTRAP" >&2; exit 1; }
@@ -129,5 +130,8 @@ EOF
 /usr/bin/hdiutil verify "$DMG" >/dev/null
 [[ -s "$DMG" ]] || { echo "DMG was not created." >&2; exit 1; }
 
+/usr/bin/shasum -a 256 "$DMG" > "$CHECKSUM"
+
 printf 'Built unsigned beta package:\n  %s\n' "$DMG"
+printf 'Checksum:\n  %s\n' "$CHECKSUM"
 printf 'Version: %s\nRevision: %s\n' "$VERSION" "$BUILD_SHA"
