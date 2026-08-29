@@ -1,176 +1,140 @@
 <p align="center">
-  <img src="assets/macos/DubLocal.svg" alt="DubLocal logo" width="132">
+  <img src="assets/macos/DubLocal.svg" alt="DubLocal — local subtitles, translation and dubbing" width="150">
 </p>
 
 <h1 align="center">DubLocal_</h1>
 
 <p align="center">
-  Local subtitles, contextual translation, AI voice-over and track-aware media export for macOS.<br>
-  Processing stays on your Mac.
+  <strong>Turn a video into subtitles, a translation and a local AI voice-over — without sending the media to a dubbing service.</strong>
 </p>
 
 <p align="center">
-  <strong>Current beta: v0.6.0b1 · Magic Flow</strong><br>
-  macOS 13+ · Apple Silicon and Intel · Apache-2.0
+  <a href="https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b1/DubLocal-0.6.0b1-macOS-unsigned.dmg"><img alt="Download DubLocal for macOS" src="https://img.shields.io/badge/Download-macOS%20Beta-111827?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b1"><img alt="View GitHub release" src="https://img.shields.io/badge/GitHub-v0.6.0b1-2f81f7?style=for-the-badge&logo=github&logoColor=white"></a>
 </p>
 
----
+<p align="center">
+  <sub><strong>macOS 13+.</strong> Open the DMG, drag DubLocal to Applications, then use <em>Open Anyway</em> once if macOS blocks the unsigned beta.</sub>
+</p>
 
-DubLocal turns a YouTube link, local media file, or legitimately accessible authenticated course/lesson into subtitles, translated subtitles, local AI voice-over, or a finished multi-track media file. It is designed to offer a simple consumer workflow without hiding the detailed controls needed for difficult material.
+<p align="center">
+  <img alt="Version 0.6.0b1" src="https://img.shields.io/badge/version-0.6.0b1-4d8dff">
+  <img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-6c7a89">
+  <img alt="Local first" src="https://img.shields.io/badge/processing-local--first-19b5a5">
+  <img alt="No cloud dubbing" src="https://img.shields.io/badge/cloud%20dubbing-none-19b5a5">
+  <a href="https://github.com/ArrowSK/dublocal/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ArrowSK/dublocal/actions/workflows/ci.yml/badge.svg"></a>
+</p>
 
-**0.6.0b1 is the first packaged macOS beta.** It is available as a conventional drag-to-Applications DMG with the DubLocal app icon and remains intentionally unsigned/not notarized for this first beta. The packaged app keeps a managed official Git checkout so the existing safe in-app updater and automatic restart path continue to work. See `docs/BETA_INSTALLATION.md` for first-launch Gatekeeper instructions and uninstall details.
+DubLocal is a local-first macOS application for people who want to understand, translate or re-voice video without turning the job into a collection of command-line tools. Give it a YouTube link, local media file, or a supported authenticated lesson; choose what you want back; DubLocal builds the processing route and keeps the heavy work on your Mac.
 
-## Magic Flow — the normal way to use DubLocal
+> **Current state:** **v0.6.0b1** is the first packaged macOS beta. The DMG is intentionally unsigned and not notarized. Models remain optional downloads, finished outputs stay ordinary user files, and the packaged app keeps the existing safe in-app updater instead of introducing a second update system.
 
-The top of **Main** is now a compact one-action workflow:
+## Install on macOS
+
+Use the **Download** button above or open the [v0.6.0b1 release](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b1).
+
+1. Download `DubLocal-0.6.0b1-macOS-unsigned.dmg`.
+2. Open the DMG and drag **DubLocal.app** to **Applications**.
+3. Control-click/right-click **DubLocal.app** and choose **Open** the first time.
+4. If macOS still blocks it, go to **System Settings → Privacy & Security → Open Anyway**.
+5. Let first-run setup finish. DubLocal prepares its private local environment and opens in your browser.
+
+Do not disable Gatekeeper globally. The extra first-launch step exists only because this beta does not yet carry an Apple Developer ID signature.
+
+The first setup needs an internet connection for the application environment and any optional components you choose. Large AI models are **not** bundled into the DMG.
+
+For the slightly longer version, including uninstall and first-run requirements, see **[Beta installation](docs/BETA_INSTALLATION.md)**.
+
+## The normal workflow: Magic Flow
+
+For most jobs, open **Main → Simple**.
+
+```text
+YouTube / local file / course lesson
+                ↓
+       choose output language
+                ↓
+  subtitles · translation · voice-over
+                ↓
+        optional finished media
+```
+
+Magic Flow is deliberately small. You choose the source, confirm you have legitimate access and the right or legal authority to process it, select an output language and tick the results you want. DubLocal resolves the required intermediate steps itself.
+
+A typical complete job is simply:
 
 1. choose **YouTube**, **Local file**, or **Course / Website**;
-2. paste the link, select local files, or sign in and select course lessons;
-3. confirm that you have legitimate access and the right or legal authority to process the media;
-4. choose the **output language**;
-5. tick what you want: **Subtitles**, **Translate**, **Voice-over**, **Output media file**;
-6. click **Run Magic Flow**.
+2. choose the target language;
+3. leave **Subtitles**, **Translate**, **Voice-over** and **Media file** selected;
+4. click **Run Magic Flow**.
 
-DubLocal resolves prerequisites automatically. For example, asking for a dubbed output also creates the subtitle timeline and translation needed to generate that dub.
+The queue is sequential, so a laptop is not asked to run several large speech/translation jobs at the same time.
 
-### Course / Website sources
+## What DubLocal can do today
 
-Authenticated courses are a source type, not a second dubbing pipeline. DubLocal opens a dedicated local Chromium profile for sign-in, discovers supported lessons, acquires ordinary authorised non-DRM media into the temporary job cache, and then hands that local media to the same Magic Flow used everywhere else.
+| Area | What you get |
+| --- | --- |
+| Sources | YouTube videos/playlists/channels, local audio/video, supported authenticated non-DRM course lessons |
+| Subtitles | Existing text captions or local `whisper.cpp` transcription; SRT/VTT/TXT output |
+| Translation | Local contextual Qwen3 translation with hardware-aware model/context choices |
+| Voice-over | Kokoro and vetted local-language providers with automatic vocal-range matching where supported |
+| Audio | Lightweight dialogue mixing everywhere; optional local Demucs separation for music-heavy material |
+| Export | MKV, compatible MP4/shareable MP4, selectable audio/subtitle tracks, subtitle-only packages |
+| Queueing | Multiple local files, YouTube collections and course lessons processed one at a time |
+| Storage | Automatic stale-job housekeeping plus **Settings → Storage & Cleanup** |
+| Updates | In-app update from official `main` with guarded restart/repair behavior |
 
-The first adapter is **Domestika**, with a generic authenticated-video fallback for straightforward sites. Multi-lesson courses run sequentially, preserve successful outputs when one lesson fails, and persist a small resume manifest so completed lessons are not processed again after a restart.
+## Simple when you want it, detailed when you need it
 
-DubLocal never asks for the website password and does not bypass DRM. Settings → **Authenticated Websites** prepares the optional browser runtime and clears local website sessions. See `docs/AUTHENTICATED_WEBSITES.md` for the security and provider architecture.
+**Simple** is the consumer workflow. It keeps advanced choices under **More options** and avoids making you understand the whole pipeline before getting a result.
 
-### What “Auto choose” does
-
-Magic Flow does not blindly pick the smallest or fastest route. It prefers, in order:
-
-1. creator/embedded text subtitles when available;
-2. an already-installed **Accurate · Large v3 Turbo Q5** local Whisper model;
-3. existing automatic captions;
-4. another already-installed local Whisper model.
-
-It never silently downloads a large AI model. If no safe subtitle route is ready, Magic Flow tells you exactly what to prepare in **Settings → Model Manager**.
-
-### More options — medium complexity
-
-The default Magic Flow remains compact. Open **More options** only when needed:
-
-- subtitle source: Auto / prefer existing / force local transcription;
-- keep the original audio as a separate selectable track;
-- output container: **MKV recommended**, ordinary MP4, or Shareable MP4 where applicable;
-- video quality: Original/best, 2160p, 1440p, 1080p, 720p or 480p;
-- compact audio/voice/sharing controls for single-voice and optional subtitle burn-in behavior.
-
-### Detailed workflow — advanced control
-
-The original stage-by-stage workflow remains below Magic Flow:
+**Advanced** exposes the same engines stage by stage:
 
 **Source → Subtitles → Translate → Voice-over → Export**
 
-Use it when you want to inspect tracks, choose a particular Whisper model, review translation output, choose voices manually, or control export details stage by step. **Course / Website** is available there for a direct single-lesson URL; full course selection remains in Simple so the detailed pipeline is not duplicated.
+Use Advanced when you want to inspect subtitle tracks, force local transcription, choose a particular model or voice, review intermediate text, or control export details manually. It is not a second implementation; it is a more explicit view of the same processing path.
 
-## What works now
+## A few useful design choices
 
-| Stage | What DubLocal does |
-| --- | --- |
-| Source | YouTube, local video/audio, or authenticated Course / Website; provider acquisition normalizes to local media |
-| Subtitles | Existing text captions or local `whisper.cpp`; SRT/VTT/TXT download |
-| Translation | Hardware-aware Qwen3 4B/8B contextual translation; optional legacy OPUS |
-| Voice | Kokoro plus vetted local-language providers; caption cues stay silent; automatic lower/higher vocal-range matching |
-| Timing | Native TTS speed adjustment only where a generated line genuinely overflows its subtitle window |
-| Mixing | Lightweight dialogue mix everywhere; optional local Demucs vocal/accompaniment separation for music-heavy material |
-| Export | Replace/add dub audio, subtitle-only package, selectable subtitle streams, stream-copy by default, optional shareable MP4 |
+### DubLocal does not silently download large models
 
-## Auto language really means Auto
+If a required local model is missing, the app tells you what to prepare in **Settings → Model Manager**. A normal subtitle job should not suddenly begin a multi-gigabyte download without asking.
 
-Local Whisper language detection is carried into translation. If **Translate → From = Auto** remains selected:
+### “Auto” tries to make a sensible decision
 
-- DubLocal uses the language already detected by local transcription when available;
-- otherwise contextual Qwen performs a lightweight subtitle-language identification inside the same runtime session before translating.
+For subtitles, the recommended route generally prefers good creator/embedded text, but it can prefer an already-installed stronger local Whisper model over poor automatic captions. Detected transcription language is carried into contextual translation when possible.
 
-Legacy OPUS still requires a known source language because it has no equivalent contextual detector.
+### Original media is preserved where practical
 
-## Translation: Recommended for this Mac
+For local/acquired media, **Original** quality keeps the source video stream without unnecessary recoding when the chosen container permits it. For YouTube, a lower quality acts as a download ceiling rather than forcing every final output through another encode.
 
-DubLocal scales the local model and llama.cpp context allocation to the hardware:
+### MKV is the comfortable default for multi-track output
 
-| Mac class | Default profile |
-| --- | --- |
-| Apple Silicon <12 GB | Qwen3 4B · single pass · 8k input cap |
-| Apple Silicon 12–23 GB | Qwen3 8B · single pass · 16k input cap |
-| Apple Silicon 24 GB+ | Qwen3 8B · senior review · up to 24k |
-| Intel <24 GB | Qwen3 4B · smaller context |
-| Intel 24 GB+ | Qwen3 8B · single pass · reduced context |
+DubLocal can keep original audio, add a dubbed track and retain selectable subtitle streams. MKV handles that combination more naturally than MP4, so it is the recommended container for full multi-track jobs.
 
-An 8 GB M1 is therefore a supported design target, not an afterthought.
+### Authenticated websites are treated as sources, not a bypass system
 
-Contextual translation uses nearby dialogue, wider programme context and prior accepted translations. The prompt/review handles discourse reference and gender where the source supports it, idioms and phraseology by meaning/register, metaphors, recurring terminology, slang, jokes and profanity. Subtitle IDs/timestamps and output script are validated before an SRT is written.
+DubLocal can open a dedicated local Chromium profile for supported sites. You sign in directly on the site; DubLocal does not ask for the password. Ordinary authorised non-DRM lesson media can then enter the normal local pipeline. Protected DRM/encrypted streams are refused rather than circumvented.
 
-Standalone tags such as `[MUSIC]` remain structural subtitle data. They are not translated as dialogue and are never read aloud.
+See **[Authenticated websites](docs/AUTHENTICATED_WEBSITES.md)** for the exact boundary.
 
-## Transcription reliability
+## Local-first means the processing stays local
 
-Whisper can fail in opposite directions: invent speech or miss real words. DubLocal deliberately does not solve one by globally loosening the decoder and reopening the other.
+Speech recognition, translation, TTS and media processing are designed to run locally once their required models/runtime assets are installed. DubLocal does not require a cloud dubbing service for the pipeline itself.
 
-The current local path combines:
+Network access is still used where it is naturally required: downloading a YouTube source, obtaining optional models/runtimes, checking GitHub for updates, or signing into an authenticated source website.
 
-- optional Silero VAD for compatible ordinary-speech jobs;
-- no rolling text context for the Accurate music profile;
-- detection and isolated re-decoding of pathological repetition storms;
-- suppression of severe unrecoverable ghost regions rather than trusting them;
-- targeted bounded rechecks of suspicious sparse/gap regions;
-- agreement/recovery guards that reject neighbour echoes and low-confidence repairs.
-
-On Apple Silicon below 12 GiB, extra recovery remains capped so this does not become a hidden second full-file transcription pass.
-
-## Voice-over
-
-**Auto · match original vocal range** is the normal choice. DubLocal analyses the source acoustically and can switch between lower/higher compatible voice presets per subtitle segment while keeping one TTS runtime loaded where the provider supports that behavior.
-
-This is vocal-range matching, not speaker identity or gender-identity classification.
-
-Caption cues remain useful in SRT/VTT but are removed from the temporary speech timeline:
+Temporary working files live under:
 
 ```text
-[MUSIC]          → silence
-[LAUGHS] Hello   → speaks “Hello”
+~/Library/Caches/DubLocal/jobs/
 ```
 
-## Timing and soundtrack balance
+DubLocal prunes stale/oversized work automatically. Models, authenticated sessions and finished outputs are treated as persistent data and are protected from **Clean temporary files**.
 
-Each generated line targets its own subtitle window. Native Kokoro timing treats that window as a maximum: a line that already fits keeps its selected natural speed; only genuine overflow is regenerated faster, with a bounded correction pass when useful. Subtitle timestamps themselves are not rewritten by TTS timing.
+## Output stays understandable
 
-Consumer media usually contains a married soundtrack rather than a dialogue-free M&E stem. DubLocal therefore has two local paths:
-
-- a lightweight mixer that remains the universal fallback and keeps a stable reduced programme bed with stronger suppression during dubbed dialogue/singing windows;
-- optional local Demucs vocal/accompaniment separation for music-heavy material, with hardware-aware profiles and automatic fallback to the lightweight mixer if separation is unavailable or fails.
-
-## Export modes
-
-**Replace primary audio** creates a DubLocal mix as the default audio stream.
-
-**Add dubbed audio as second track** keeps original audio streams untouched and appends DubLocal as another selectable stream.
-
-**Package original + subtitles · no dub** keeps the original audio and adds the current source/transcribed subtitle without adding translated audio.
-
-Magic Flow can also package original + translated subtitle tracks without a dub when translation and media output are selected but voice-over is not.
-
-Generated subtitles remain selectable tracks by default in compatible players such as VLC. Shareable MP4 can optionally burn the intended subtitle track permanently into the picture for messaging-app compatibility; this is an explicit choice rather than the normal export behavior.
-
-## Video quality and recoding
-
-**Original / best available** is the default.
-
-For YouTube, a quality choice acts as a source-resolution ceiling before download; the final video is then stream-copied when compatible.
-
-For local and acquired authenticated media, **Original** keeps the source video without unnecessary re-encoding where the selected container permits it. Selecting a lower resolution explicitly opts into the established macOS encoding path.
-
-**MKV is recommended** for multi-track output. MP4 and Shareable MP4 are available for their compatible stream combinations.
-
-## Meaningful output names
-
-User-facing outputs derive from the loaded title or filename, for example:
+Finished files use the source title and target language rather than internal job IDs, for example:
 
 ```text
 Movie Name.en.srt
@@ -179,7 +143,7 @@ Movie Name.dub.es.mkv
 Movie Name.subtitles.es.mkv
 ```
 
-Course outputs retain lesson order and are grouped by provider/course, for example:
+Course material is grouped by provider/course and keeps lesson order:
 
 ```text
 ~/Movies/DubLocal/Domestika/French Watercolour/
@@ -188,23 +152,34 @@ Course outputs retain lesson order and are grouped by provider/course, for examp
   01 - Introduction.dub.en.mkv
 ```
 
-Internal work files remain disposable cache artifacts rather than cluttering normal folders.
+Internal work files remain disposable cache data instead of appearing beside every finished export.
 
-## Temporary data
+## Start here
 
-Working jobs, including temporary authenticated source media, live under:
+If you want to **use DubLocal**, download the beta at the top of this page and then read the **[User Guide](docs/USER_GUIDE.md)** only when you need more than Magic Flow.
 
-```text
-~/Library/Caches/DubLocal/jobs/
-```
+If something goes wrong, start with **[Troubleshooting](docs/TROUBLESHOOTING.md)** rather than deleting caches or reinstalling models at random.
 
-Normal launch removes stale/oversized job data according to DubLocal's cache policy. Persistent AI models, shared Hugging Face assets, authenticated browser profiles and small course-resume manifests are not treated as temporary job files.
+If you want to understand how the project is built, use the **[Documentation hub](docs/README.md)** and continue into architecture/audio/model notes from there.
 
-## Install
+## Documentation
 
-For beta users, use the unsigned `DubLocal-0.6.0b1-macOS-unsigned.dmg`, drag **DubLocal.app** to Applications, then follow `docs/BETA_INSTALLATION.md` for the one-time Gatekeeper step. The app icon and in-app header use the same established DubLocal logo.
+| Guide | What it is for |
+| --- | --- |
+| [Documentation hub](docs/README.md) | Friendly map of the user, setup and developer documentation |
+| [Beta installation](docs/BETA_INSTALLATION.md) | DMG install, first launch, Gatekeeper, updates and uninstall |
+| [User Guide](docs/USER_GUIDE.md) | Magic Flow, Advanced mode, models, sources, outputs and day-to-day use |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Start here when a launch, model, source, transcription, voice or export step fails |
+| [Storage & Cleanup](docs/STORAGE_CLEANUP.md) | What DubLocal stores and what automatic/manual cleanup may delete |
+| [Authenticated websites](docs/AUTHENTICATED_WEBSITES.md) | Local sign-in sessions, course acquisition and DRM boundary |
+| [TTS providers](docs/TTS_PROVIDERS.md) | Voice providers, language coverage and custom-provider rules |
+| [Architecture](docs/ARCHITECTURE.md) | Main modules, trust boundaries and processing pipeline |
+| [Audio architecture](docs/AUDIO_ARCHITECTURE.md) | Mixing, timing and optional source separation |
+| [Production readiness](docs/PRODUCTION_READINESS.md) | Current hardening/validation status |
 
-For development from source:
+## Building from source
+
+For development rather than normal installation:
 
 ```bash
 git clone https://github.com/ArrowSK/dublocal.git
@@ -212,6 +187,10 @@ cd dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-The source installer creates native launchers under `~/Applications`. The packaged beta instead keeps its managed checkout under `~/Library/Application Support/DubLocal/app` so the same updater can safely fast-forward official `main`.
+The source installer creates launchers under `~/Applications`. The packaged beta instead owns a managed checkout under `~/Library/Application Support/DubLocal/app`, which lets the same guarded updater keep the installed beta current.
 
-See `docs/BETA_INSTALLATION.md`, `docs/INSTALLATION.md`, `docs/USER_GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/AUTHENTICATED_WEBSITES.md` and `docs/TROUBLESHOOTING.md` for details.
+See **[Installation from source](docs/INSTALLATION.md)** for the development path.
+
+## Licence
+
+DubLocal application code is licensed under **Apache-2.0**. AI models, model weights and third-party runtime components may carry separate licences; see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) and [MODEL_LICENSES.json](MODEL_LICENSES.json).
