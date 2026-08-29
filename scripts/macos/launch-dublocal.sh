@@ -129,6 +129,22 @@ EOF
 }
 
 REQUESTED_ACTION="${DUBLOCAL_LAUNCH_ACTION:-}"
+RESTART_STAGE="${DUBLOCAL_RESTART_STAGE:-}"
+
+# An in-app updater may still be running old Python code when this newly-updated
+# launcher is invoked. DubLocal's backend shutdown intentionally kills descendant
+# helpers, so a restart process that remains a child of that backend would die with
+# it. Detach one extra launcher stage before sending SIGTERM. The brief delay gives
+# the first-stage shell time to exit and the detached child time to be re-parented by
+# macOS, making this self-healing even for the update that introduces the fix.
+if [[ "$REQUESTED_ACTION" == "restart" && "$RESTART_STAGE" != "detached" ]]; then
+  (
+    /bin/sleep 0.25
+    DUBLOCAL_RESTART_STAGE=detached DUBLOCAL_LAUNCH_ACTION=restart /bin/zsh "$0"
+  ) </dev/null >>"$LOG_FILE" 2>&1 &!
+  exit 0
+fi
+
 if [[ "$REQUESTED_ACTION" == "restart" ]]; then
   ACTION="Stop All & Launch"
 elif [[ "$REQUESTED_ACTION" == "open" ]]; then
