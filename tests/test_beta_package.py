@@ -66,14 +66,28 @@ def test_beta_builder_creates_branded_unsigned_dmg() -> None:
     assert "Do not disable Gatekeeper globally" in script
 
 
-def test_beta_workflow_builds_on_real_macos_runner_and_uploads_dmg() -> None:
+def test_beta_workflow_builds_on_real_macos_runner_and_publishes_release() -> None:
     workflow = _text(".github/workflows/beta-macos.yml")
 
     assert "runs-on: macos-14" in workflow
+    assert "contents: write" in workflow
     assert "zsh scripts/macos/build-beta-dmg.sh" in workflow
     assert "actions/upload-artifact@v4" in workflow
     assert "dist/*.dmg" in workflow
     assert "dist/*.sha256" in workflow
+    assert "gh release view" in workflow
+    assert "gh release create" in workflow
+    assert "--prerelease" in workflow
+    assert "docs/RELEASE_NOTES_0.6.0b1.md" in workflow
+
+
+def test_readme_has_prominent_versioned_beta_download() -> None:
+    readme = _text("README.md")
+
+    assert "style=for-the-badge" in readme
+    assert "releases/download/v0.6.0b1/DubLocal-0.6.0b1-macOS-unsigned.dmg" in readme
+    assert "releases/tag/v0.6.0b1" in readme
+    assert "docs/README.md" in readme
 
 
 def test_beta_package_version_matches_python_package() -> None:
