@@ -1,6 +1,8 @@
 # DubLocal user guide
 
-**Current development build: v0.6.0.dev0 — Magic Flow UX**
+**Current beta: v0.6.0b1 — first packaged macOS beta**
+
+For the unsigned DMG installation and one-time Gatekeeper steps, see `BETA_INSTALLATION.md`.
 
 DubLocal keeps the normal experience and the full manual toolset separate.
 
@@ -9,7 +11,7 @@ Under **Main** there are two modes:
 1. **Simple** — the default for normal use. It contains Magic Flow only.
 2. **Advanced** — the complete stage-by-stage workflow for difficult jobs, overrides and debugging.
 
-Settings remains separate for updates, model management and local resources.
+Settings remains separate for updates, model management, authenticated websites, storage/cleanup and local resources.
 
 # Simple — recommended
 
@@ -19,16 +21,17 @@ Magic Flow asks only for the source, rights confirmation, output language and de
 
 ## Step 1 · Source
 
-Choose **YouTube** or **Local file**.
+Choose **YouTube**, **Local file**, or **Course / Website**.
 
-- YouTube: paste the URL.
-- Local: choose the media file.
+- YouTube: paste a video, playlist, or channel URL.
+- Local: choose one or more media files.
+- Course / Website: paste a legitimately accessible course/lesson URL, sign in through DubLocal's dedicated local browser when required, inspect the lessons, then select the ones to process.
+
+Course / Website is an acquisition source only. Once a lesson is acquired as ordinary authorised non-DRM media, it enters the same Magic Flow pipeline as a local file.
 
 ## Step 2 · Rights
 
-Tick:
-
-**I have the right or legal authority to process this media**
+Tick the confirmation that you have legitimate access and the right/legal authority to process the content for your intended use.
 
 DubLocal will not start the processing pipeline without this confirmation.
 
@@ -36,16 +39,16 @@ DubLocal will not start the processing pipeline without this confirmation.
 
 Choose the language you want to receive.
 
-This is the target for translation and, when supported by Kokoro, voice-over.
+This is the target for translation and, when a compatible provider exists, voice-over.
 
 ## Step 4 · Choose outputs
 
-Magic Flow exposes four simple checkboxes:
+Magic Flow exposes four simple choices:
 
 - **Subtitles**
 - **Translate**
 - **Voice-over**
-- **Output media file**
+- **Media file**
 
 All are selected by default for a complete dubbed output.
 
@@ -55,7 +58,7 @@ You do not have to understand pipeline dependencies. For example, if Voice-over 
 
 Click **Run Magic Flow**.
 
-The persistent status shows the route DubLocal selected, progress/ETA where measurable, and the detected source language.
+The persistent status shows the route DubLocal selected, progress/ETA where measurable, and the detected source language. Multi-file, YouTube collection and course jobs run sequentially rather than loading several heavy models/jobs in parallel.
 
 The **Results** section stays collapsed while processing so there is one clear progress surface instead of several output widgets showing duplicate loading states. Open Results when you want the finished files.
 
@@ -92,6 +95,7 @@ This gives you the DubLocal mix plus the untouched original audio as another pla
 
 - **MKV · recommended** — safest for multiple audio/subtitle tracks.
 - **MP4** — available for compatible stream combinations.
+- **Shareable MP4** where applicable — can explicitly burn the intended subtitle track for messaging-app compatibility.
 
 ## Video quality
 
@@ -102,9 +106,17 @@ This gives you the DubLocal mix plus the untouched original audio as another pla
 - 720p max
 - 480p max
 
-For a local file, Original means video stream-copy: no recoding merely because subtitles/audio changed.
+For a local/acquired file, Original means video stream-copy where the selected container permits it: no recoding merely because subtitles/audio changed.
 
 For YouTube, a lower quality acts as a source-resolution ceiling before download.
+
+# Course / Website details
+
+DubLocal uses its own local Chromium profile for authenticated sites. You type credentials directly into the website; DubLocal does not ask for the password. Sessions remain local and can be cleared from **Settings → Authenticated Websites**.
+
+Course jobs support lesson selection, sequential processing, per-lesson failure isolation and resume state. Completed lessons are not processed again when resuming the same course. Finished course outputs are organized under `~/Movies/DubLocal/<Provider>/<Course>/` by default.
+
+Protected DRM/encrypted streams are refused rather than bypassed. If a platform provides a legitimate downloadable local copy, that local file can be processed normally.
 
 # Advanced — manual control
 
@@ -114,13 +126,13 @@ The complete workflow is:
 
 **1 Source → 2 Subtitles → 3 Translate → 4 Voice-over → 5 Export**
 
-The individual stages remain collapsible. Advanced preserves the same controls and behavior as the previous detailed workflow; moving it into its own tab is a presentation change, not a feature reduction.
+The individual stages remain collapsible. Advanced preserves the same processing engines as Simple.
 
 ## 1 · Source
 
-Choose YouTube or Local file and click **Load source**.
+Choose YouTube, Local file, or a direct Course / Website lesson and click **Load source**.
 
-A persistent card confirms title, duration and useful subtitle inventory.
+A persistent card confirms title, duration and useful subtitle inventory. Full course lesson selection belongs in Simple; Advanced accepts one direct authenticated lesson at a time so it does not duplicate the course queue manager.
 
 YouTube inspection does not download the full video at this stage. Local files are inspected with ffprobe.
 
@@ -191,9 +203,9 @@ Standalone tags such as `[MUSIC]` stay unchanged. Translation output is checked 
 
 ### Auto voice — default
 
-**Auto · match original vocal range** performs lightweight acoustic analysis and can switch between lower/higher Kokoro voice presets per subtitle segment.
+**Auto · match original vocal range** performs lightweight acoustic analysis and can switch between lower/higher compatible voice presets per subtitle segment.
 
-It does not load two TTS models. One Kokoro pipeline stays loaded while voice presets change.
+It does not load two TTS models. One provider pipeline stays loaded while compatible voice presets change.
 
 This is acoustic range matching, not speaker identification or a claim about identity/gender.
 
@@ -208,11 +220,9 @@ The actual subtitle file remains intact, but the temporary TTS timeline removes 
 
 ### Timing
 
-DubLocal fits speech timing during Kokoro generation rather than broadly stretching the finished waveform afterward.
+DubLocal fits speech timing during TTS generation rather than broadly stretching the finished waveform afterward.
 
-For each spoken subtitle line, DubLocal generates a natural pilot, measures its real duration against the subtitle window, then regenerates materially mismatched lines with Kokoro's native speed control. A limited correction pass can be used when needed. The same Kokoro worker/pipeline remains loaded, so this improves timing without adding another model-sized memory cost.
-
-Extreme mismatch is reported rather than forcing severely robotic speech. Subtitle timestamps themselves are not rewritten.
+For each spoken subtitle line, DubLocal generates a natural pilot, measures its real duration against the subtitle window, then regenerates materially mismatched lines with native speed control where supported. A limited correction pass can be used when needed. Extreme mismatch is reported rather than forcing severely robotic speech. Subtitle timestamps themselves are not rewritten.
 
 ## 5 · Export
 
@@ -230,13 +240,11 @@ Use this when you want the original media with source/transcribed subtitles but 
 
 ### Subtitle tracks
 
-Normal dubbed export includes generated original + translated subtitles as selectable tracks when both are available. Nothing is burned into the video.
+Normal dubbed export includes generated original + translated subtitles as selectable tracks when both are available. Shareable MP4 can optionally burn one subtitle track only when explicitly selected.
 
 ### Soundtrack level
 
-The original programme is kept at a stable reduced bed rather than jumping back to full volume between dub lines. It is attenuated further inside source subtitle dialogue/singing windows, followed by gentle compression/limiting.
-
-This is lightweight DSP. DubLocal does not claim to produce a true dialogue-free M&E stem from a married consumer soundtrack.
+The lightweight mixer keeps the original programme at a stable reduced bed and attenuates it further inside source subtitle dialogue/singing windows. Optional local Demucs vocal/accompaniment separation can be prepared for music-heavy material; failure falls back to the lightweight path rather than blocking the job.
 
 # Output names
 
@@ -249,19 +257,41 @@ Movie Name.dub.es.mkv
 Movie Name.subtitles.es.mkv
 ```
 
+Course jobs also keep lesson ordering in their names.
+
 # Settings
 
 ## Updates
 
-Check, install and restart into newer official `main` revisions. Repair can restore a locally modified/broken checkout without requiring a manual reinstall.
+In 0.6.0b1, **Update DubLocal** checks the official `main` checkout, installs safe fast-forwards/managed repairs, and schedules an automatic restart. Local commits, divergent Git history and unexpected upstreams remain protected.
 
 ## Model Manager
 
-Install/remove/verify optional Whisper and contextual-translation models and prepare Kokoro.
+Install/remove/verify optional Whisper and contextual-translation models and prepare supported TTS providers.
+
+## Authenticated Websites
+
+Prepare the dedicated Chromium runtime and clear stored local website sessions.
+
+## Storage & Cleanup
+
+Shows temporary jobs, translation cache, models, runtimes, browser data, logs, resume data and finished-output usage. **Clean temporary files** cannot delete installed models, authenticated sessions or finished outputs.
 
 ## Local Resources
 
 Shows reused FFmpeg/ffprobe, whisper.cpp, Hugging Face cache and compatible external runtimes.
+
+# Beta app and first launch
+
+The 0.6.0b1 DMG installs a normal **DubLocal.app** using the established logo. The browser UI now shows the same mark in the header so the Finder/Dock identity and the product surface are consistent.
+
+The packaged app maintains its program checkout under:
+
+```text
+~/Library/Application Support/DubLocal/app
+```
+
+See `BETA_INSTALLATION.md` before deleting application-support data: models, sessions, caches and finished outputs have different retention/uninstall semantics.
 
 # Temporary files
 
