@@ -1,22 +1,39 @@
 # Installing DubLocal on macOS
 
-**Current development build: v0.6.0.dev0 — Magic Flow UX**
+**Current beta: v0.6.0b1 — first packaged macOS beta**
 
-DubLocal currently runs from a Git checkout, but after first setup ordinary use is through the native **DubLocal.app** launcher. Updates, repair and optional models are managed inside the app.
+DubLocal now has two supported installation paths: the new unsigned beta DMG for normal users, and the existing Git/source launcher flow for development. Both ultimately keep a normal managed Git checkout so the same safe updater and restart logic is used.
 
-There is no packaged DMG/GitHub Release yet.
+For the packaged beta, see `BETA_INSTALLATION.md` for the complete first-launch and Gatekeeper instructions.
 
 ## Requirements
 
 - macOS 13+
 - Apple Silicon or Intel
-- Python 3.11+; the installer can bootstrap a compatible Python
-- FFmpeg/ffprobe
+- Python 3.11–3.13; the beta/source bootstrap can use or prepare a compatible Python
+- FFmpeg/ffprobe for normal media processing
 - optional whisper.cpp, llama.cpp and AI model weights depending on the features you use
 
 DubLocal is designed to remain usable on M1-class Macs. Model recommendations and contextual allocations scale to memory rather than assuming a recent high-RAM machine.
 
-## First installation
+## Beta installation — recommended for testers
+
+1. Open `DubLocal-0.6.0b1-macOS-unsigned.dmg`.
+2. Drag **DubLocal.app** to **Applications**.
+3. Because 0.6.0b1 is intentionally unsigned/not notarized, Control-click/right-click the app and choose **Open** on first launch.
+4. If macOS still blocks it, use **System Settings → Privacy & Security → Open Anyway** for DubLocal. Do not disable Gatekeeper globally.
+
+The packaged app prepares its managed checkout under:
+
+```text
+~/Library/Application Support/DubLocal/app
+```
+
+It pins a new installation to the exact revision used to build the DMG, then continues tracking official `main` so **Update DubLocal** can use the same established fast-forward/repair policy.
+
+The beta package does not bundle large AI models or authenticated-site browser state. These remain opt-in/local resources.
+
+## Development/source installation
 
 ```bash
 git clone https://github.com/ArrowSK/dublocal.git
@@ -24,29 +41,29 @@ cd dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-The installer creates:
+The source installer creates:
 
 ```text
 ~/Applications/DubLocal.app
 ~/Applications/Stop DubLocal.app
 ```
 
-The installer can offer Homebrew installation for required native tools. Heavy optional AI models are not silently bundled or downloaded.
+The source installer can offer Homebrew installation for required native tools. Heavy optional AI models are not silently bundled or downloaded.
 
 ## First launch
 
 Open **DubLocal.app**. The top of Main is **Magic Flow**, which is the recommended starting point:
 
-1. choose YouTube or Local file;
-2. provide the link/file;
-3. confirm rights/legal authority;
+1. choose YouTube, Local file, or Course / Website;
+2. provide the link/file or inspect the authenticated course;
+3. confirm legitimate access and rights/legal authority;
 4. choose output language;
 5. choose the outputs you want;
 6. run Magic Flow.
 
 Magic Flow uses resources that are already installed. If it needs a local model that is not ready, it stops with a clear Model Manager instruction rather than downloading hundreds of megabytes without asking.
 
-The detailed Source → Subtitles → Translate → Voice-over → Export workflow remains below Magic Flow.
+The detailed Source → Subtitles → Translate → Voice-over → Export workflow remains available in Advanced.
 
 ## Reuse-first policy
 
@@ -92,13 +109,13 @@ Kokoro does not support every translation language. Magic Flow will still produc
 
 ## In-app updates
 
-Use:
+For the 0.6.0b1 beta, use:
 
-**Settings → Updates → Check for updates → Install update → Restart DubLocal**
+**Settings → Updates → Update DubLocal**
 
-The updater compares the current checkout/running revision to official `main`, not just the displayed development version.
+The updater compares the current checkout/running revision to official `main`, not just the displayed version. Clean installations fast-forward normally. Managed program-file drift can be backed up and repaired. Local commits, a different branch/upstream, and diverged Git history remain protected.
 
-If local files have drifted, use **Repair installation** rather than deleting the repository or virtual environment manually.
+When an update changes the running code, DubLocal schedules the established detached restart path and should reopen automatically.
 
 ## Temporary files
 
@@ -108,12 +125,13 @@ Working job data lives under:
 ~/Library/Caches/DubLocal/jobs/
 ```
 
-Normal launch removes jobs older than 24 hours and caps temporary job data at 4 GiB. Persistent AI models and shared Hugging Face assets are not deleted by this cleanup.
+Normal launch removes jobs older than 24 hours and caps temporary job data at 4 GiB. Settings → **Storage & Cleanup** additionally reports storage categories and exposes a safe temporary cleanup action. Persistent AI models, authenticated sessions, managed runtimes and finished outputs are protected.
 
 ## M1-class compatibility
 
-Current reliability and UX work does not add another heavy mandatory model:
+Current reliability, packaging and UX work does not add another heavy mandatory model:
 
+- the 0.6.0b1 DMG contains the small launcher/bootstrap rather than bundled AI weights;
 - timing and soundtrack balance are FFmpeg DSP;
 - subtitle packaging is remuxing;
 - targeted ASR recovery reuses the selected Whisper model only for short suspicious ranges;
