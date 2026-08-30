@@ -1,20 +1,20 @@
-# Install DubLocal 0.6.0b4 on macOS
+# Install DubLocal 0.6.0b5 on macOS
 
-DubLocal 0.6.0b4 is the current packaged macOS beta. Installation is the familiar Mac pattern: download a DMG, drag the app to Applications, open it.
+DubLocal 0.6.0b5 is the current packaged macOS beta. Installation is the familiar Mac pattern: download a DMG, drag the app to Applications, open it.
 
 The only unusual part is the first-launch security prompt. This beta is intentionally **unsigned and not notarized**, so macOS will ask you to approve it once.
 
 ## Download
 
-**[Download DubLocal 0.6.0b4 for macOS](https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b4/DubLocal-0.6.0b4-macOS-unsigned.dmg)**
+**[Download DubLocal 0.6.0b5 for macOS](https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b5/DubLocal-0.6.0b5-macOS-unsigned.dmg)**
 
-Release page: [v0.6.0b4](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b4)
+Release page: [v0.6.0b5](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b5)
 
 A SHA-256 checksum is published beside the DMG on the release page.
 
 ## Install in five steps
 
-1. Open `DubLocal-0.6.0b4-macOS-unsigned.dmg`.
+1. Open `DubLocal-0.6.0b5-macOS-unsigned.dmg`.
 2. Drag **DubLocal.app** onto **Applications**.
 3. Open Applications, Control-click/right-click **DubLocal.app**, and choose **Open**.
 4. Confirm that you want to open it. If macOS still blocks the app, go to **System Settings → Privacy & Security → Open Anyway**.
@@ -69,7 +69,7 @@ If Git is missing, the app can ask macOS to start the Command Line Tools install
 
 The current beta creates its private environment from a compatible local Python. When Homebrew is available, DubLocal can offer to install Python 3.11 if no compatible interpreter is found.
 
-A later fully bundled runtime can remove this beta dependency; 0.6.0b4 does not pretend it is bundled when it is not.
+A later fully bundled runtime can remove this beta dependency; 0.6.0b5 does not pretend it is bundled when it is not.
 
 ### FFmpeg
 
@@ -77,11 +77,23 @@ FFmpeg/ffprobe are required for normal audio/video processing. DubLocal can stil
 
 If Homebrew is present, first launch can offer to install normal FFmpeg.
 
-There is one extra requirement for **Burn subtitles into Shareable MP4**: the FFmpeg binary doing that export must contain the `subtitles` filter backed by libass. Not every macOS FFmpeg build includes it. Beta 4 checks the capability rather than assuming that any `ffmpeg` executable can render SRT text.
+There is one extra requirement for **Burn subtitles into Shareable MP4**: the FFmpeg binary doing that export must contain the `subtitles` filter backed by libass. Not every macOS FFmpeg build includes it. DubLocal checks the capability rather than assuming that any `ffmpeg` executable can render SRT text.
 
 If normal FFmpeg does not provide subtitle rendering, packaged setup/update can offer to install Homebrew `ffmpeg-full` alongside it. `ffmpeg-full` is used only when the burn-in path needs it; DubLocal does not uninstall or replace the normal FFmpeg used by the rest of the pipeline.
 
 You can decline that optional install. Ordinary media processing, standalone SRT files and selectable subtitle tracks continue to work; only burned-in subtitle export remains unavailable until a subtitle-capable FFmpeg is present.
+
+## Output profiles
+
+Beta 5 adds persistent **Settings → Output profiles**. MKV, MP4 and Shareable MP4 each have their own **Auto / Original / High / Balanced / Compact** setting.
+
+The default Auto behavior is format-aware:
+
+- **MKV:** preserve source video whenever practical;
+- **MP4:** Balanced compatible output, up to 1080p;
+- **Shareable MP4:** Compact output, up to 720p.
+
+The Standard workflow stays compact. If you open **Options**, **Resolution limit** can still impose a lower maximum resolution for one job. Compression itself comes from the saved per-format profile.
 
 ## Models are opt-in
 
@@ -99,7 +111,7 @@ Use:
 
 The updater only manages the expected official `main` checkout. It refuses to rewrite an unexpected remote, a divergent history or local commits it cannot safely preserve.
 
-For the packaged beta, an update re-enters the app bootstrap before restart. That lets the private Python environment absorb dependency changes before the new backend starts. Beta 4 also uses this update pass to check whether burned-in subtitle export has a subtitle-capable FFmpeg and, when needed, offer the optional side-by-side `ffmpeg-full` package.
+For the packaged beta, an update re-enters the app bootstrap before restart. That lets the private Python environment absorb dependency changes before the new backend starts. The update pass also checks whether burned-in subtitle export has a subtitle-capable FFmpeg and, when needed, can offer the optional side-by-side `ffmpeg-full` package.
 
 The restart is automatic when an update requires one.
 
@@ -110,6 +122,8 @@ Replacing `DubLocal.app` does not erase models or finished work.
 The app bundle, managed program checkout, models, caches, browser sessions and finished outputs are deliberately separate things.
 
 Use **Settings → Storage & Cleanup** to see the major categories. **Clean temporary files** is restricted so it cannot delete installed models, authenticated website sessions or finished user outputs.
+
+Output-profile preferences are normal application settings; replacing the app bundle does not reset them.
 
 For the exact storage boundaries, see [Storage & Cleanup](STORAGE_CLEANUP.md).
 

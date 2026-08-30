@@ -2,11 +2,25 @@
 
 DubLocal is still in active development. Versions below describe development/beta builds from `main`.
 
-> **Current beta:** `v0.6.0b4` — **subtitle burn-in reliability update**
+> **Current beta:** `v0.6.0b5` — **format-aware output profiles and production UI**
 >
-> Beta 4 keeps beta 3's adaptive long-form translation and fixes Shareable MP4 subtitle rendering on Macs whose normal FFmpeg build lacks the libass-backed `subtitles` filter. Normal in-app updates continue to track official `main`.
+> Beta 5 replaces the oversized one-size-fits-all export ladder with persistent per-format Auto/Original/High/Balanced/Compact profiles and updates the primary product workflow terminology. Normal in-app updates continue to track official `main`.
 
-## v0.6.0b4 — Subtitle burn-in reliability — current
+## v0.6.0b5 — Format-aware output profiles and production UI — current
+
+- Added persistent **Settings → Output profiles** for MKV, MP4 and Shareable MP4.
+- Added **Auto**, **Original**, **High**, **Balanced** and **Compact** profiles with format-specific Auto behavior rather than one global compromise.
+- MKV Auto resolves to Original/preservation behavior; MP4 Auto resolves to Balanced up to 1080p; Shareable MP4 Auto resolves to Compact up to 720p.
+- Replaced the old 480p Shareable target of 2.5 Mbps video + 192 kbps audio with a compact Auto target of 500 kbps H.264 + 96 kbps AAC, about 4.5 MB/minute.
+- Burned and selectable Shareable MP4 outputs now use the same saved profile policy.
+- MP4/Shareable output can re-encode when source codec, pixel format, resolution or bitrate would defeat the selected profile, while already-efficient compatible streams can still be copied.
+- Explicit per-job resolution remains an additional ceiling rather than being confused with compression quality.
+- Renamed the primary product surface from **Magic Flow** to **Standard workflow**, **Simple** to **Standard**, and **Run Magic Flow** to **Start Processing**.
+- Tightened related production labels: **Outputs**, **Options**, **Output files**, **Resolution limit**, and **Audio & delivery**.
+- Kept internal compatibility names stable where a mechanical rename would create migration risk.
+- Added regression coverage for format-specific Auto behavior, 480p/720p compact sizing, MKV preservation, MP4 compatibility/size re-encoding, saved overrides and production UI terminology.
+
+## v0.6.0b4 — Subtitle burn-in reliability
 
 - Detects whether the exact FFmpeg binary used for burn-in exposes the `subtitles` filter before encoding begins.
 - Uses normal FFmpeg when it supports subtitle rendering and otherwise looks for the side-by-side, keg-only Homebrew `ffmpeg-full` binary.

@@ -23,7 +23,7 @@ def _config_strings(value) -> list[str]:
     return []
 
 
-def test_product_ui_builds_with_current_simple_advanced_settings(monkeypatch) -> None:
+def test_product_ui_builds_with_current_standard_advanced_settings(monkeypatch) -> None:
     monkeypatch.setattr(
         ui,
         "model_setup_state",
@@ -40,12 +40,12 @@ def test_product_ui_builds_with_current_simple_advanced_settings(monkeypatch) ->
         demo = ui.build_app()
         strings = _config_strings(demo.config)
         assert "Main" in strings
-        assert "Simple" in strings
+        assert "Standard" in strings
         assert "Advanced" in strings
         assert "Settings" in strings
         assert "Model Setup" in strings
         assert "Model Manager" in strings
-        assert "Run Magic Flow" in strings
+        assert "Start Processing" in strings
         assert "Update DubLocal" in strings
         assert "Local TTS providers · Russian & custom models" in strings
         assert "Vocal separation · music-aware dubbing" in strings

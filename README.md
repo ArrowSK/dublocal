@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b4/DubLocal-0.6.0b4-macOS-unsigned.dmg"><img alt="Download DubLocal for macOS" src="https://img.shields.io/badge/Download-macOS%20Beta-111827?style=for-the-badge&logo=apple&logoColor=white"></a>
-  <a href="https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b4"><img alt="View GitHub release" src="https://img.shields.io/badge/GitHub-v0.6.0b4-2f81f7?style=for-the-badge&logo=github&logoColor=white"></a>
+  <a href="https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b5/DubLocal-0.6.0b5-macOS-unsigned.dmg"><img alt="Download DubLocal for macOS" src="https://img.shields.io/badge/Download-macOS%20Beta-111827?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b5"><img alt="View GitHub release" src="https://img.shields.io/badge/GitHub-v0.6.0b5-2f81f7?style=for-the-badge&logo=github&logoColor=white"></a>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 0.6.0b4" src="https://img.shields.io/badge/version-0.6.0b4-4d8dff">
+  <img alt="Version 0.6.0b5" src="https://img.shields.io/badge/version-0.6.0b5-4d8dff">
   <img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-6c7a89">
   <img alt="Local first" src="https://img.shields.io/badge/processing-local--first-19b5a5">
   <img alt="No cloud dubbing" src="https://img.shields.io/badge/cloud%20dubbing-none-19b5a5">
@@ -27,13 +27,13 @@
 
 DubLocal is a local-first macOS application for people who want to understand, translate or re-voice video without turning the job into a collection of command-line tools. Give it a YouTube link, local media file, or a supported authenticated lesson; choose what you want back; DubLocal builds the processing route and keeps the heavy work on your Mac.
 
-> **Current state:** **v0.6.0b4** is the current packaged macOS beta. It keeps beta 3's adaptive long-form contextual translation and fixes burned Shareable MP4 export on Macs whose normal FFmpeg build does not include subtitle rendering. The DMG remains intentionally unsigned and not notarized. Models remain optional downloads, finished outputs stay ordinary user files, and the packaged app keeps the existing safe in-app updater instead of introducing a second update system.
+> **Current state:** **v0.6.0b5** is the current packaged macOS beta. Beta 5 adds format-aware output profiles, realistic compact Shareable MP4 sizing and production-facing workflow terminology while retaining beta 3's adaptive long-form translation and beta 4's subtitle-capable FFmpeg handling. The DMG remains intentionally unsigned and not notarized. Models remain optional downloads, finished outputs stay ordinary user files, and the packaged app keeps the existing safe in-app updater instead of introducing a second update system.
 
 ## Install on macOS
 
-Use the **Download** button above or open the [v0.6.0b4 release](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b4).
+Use the **Download** button above or open the [v0.6.0b5 release](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b5).
 
-1. Download `DubLocal-0.6.0b4-macOS-unsigned.dmg`.
+1. Download `DubLocal-0.6.0b5-macOS-unsigned.dmg`.
 2. Open the DMG and drag **DubLocal.app** to **Applications**.
 3. Control-click/right-click **DubLocal.app** and choose **Open** the first time.
 4. If macOS still blocks it, go to **System Settings → Privacy & Security → Open Anyway**.
@@ -45,9 +45,9 @@ The first setup needs an internet connection for the application environment and
 
 For the slightly longer version, including uninstall and first-run requirements, see **[Beta installation](docs/BETA_INSTALLATION.md)**.
 
-## The normal workflow: Magic Flow
+## The normal workflow
 
-For most jobs, open **Main → Simple**.
+For most jobs, open **Main → Standard**.
 
 ```text
 YouTube / local file / course lesson
@@ -59,14 +59,14 @@ YouTube / local file / course lesson
         optional finished media
 ```
 
-Magic Flow is deliberately small. You choose the source, confirm you have legitimate access and the right or legal authority to process it, select an output language and tick the results you want. DubLocal resolves the required intermediate steps itself.
+The **Standard workflow** is deliberately compact. You choose the source, confirm you have legitimate access and the right or legal authority to process it, select an output language and choose the outputs you want. DubLocal resolves the required intermediate steps itself.
 
 A typical complete job is simply:
 
 1. choose **YouTube**, **Local file**, or **Course / Website**;
 2. choose the target language;
 3. leave **Subtitles**, **Translate**, **Voice-over** and **Media file** selected;
-4. click **Run Magic Flow**.
+4. click **Start Processing**.
 
 The queue is sequential, so a laptop is not asked to run several large speech/translation jobs at the same time.
 
@@ -79,14 +79,14 @@ The queue is sequential, so a laptop is not asked to run several large speech/tr
 | Translation | Local contextual Qwen3 translation with hardware-aware context, adaptive fast/safe batching and strict subtitle alignment recovery |
 | Voice-over | Kokoro and vetted local-language providers with automatic vocal-range matching where supported |
 | Audio | Lightweight dialogue mixing everywhere; optional local Demucs separation for music-heavy material |
-| Export | MKV, compatible MP4/shareable MP4, selectable or burned subtitle output, selectable audio tracks |
+| Export | MKV, MP4 and Shareable MP4 with format-aware Auto/Original/High/Balanced/Compact output profiles, selectable or burned subtitles and selectable audio tracks |
 | Queueing | Multiple local files, YouTube collections and course lessons processed one at a time |
 | Storage | Automatic stale-job housekeeping plus **Settings → Storage & Cleanup** |
 | Updates | In-app update from official `main` with guarded restart/repair behavior |
 
-## Simple when you want it, detailed when you need it
+## Standard when you want it, Advanced when you need it
 
-**Simple** is the consumer workflow. It keeps advanced choices under **More options** and avoids making you understand the whole pipeline before getting a result.
+**Standard** is the normal consumer workflow. Optional controls sit under **Options**, so the main path does not require understanding the whole processing pipeline before getting a result.
 
 **Advanced** exposes the same engines stage by stage:
 
@@ -96,6 +96,20 @@ Use Advanced when you want to inspect subtitle tracks, force local transcription
 
 ## A few useful design choices
 
+### Output profiles are format-aware
+
+Open **Settings → Output profiles** to choose a persistent profile separately for **MKV**, **MP4** and **Shareable MP4**. Each can use **Auto**, **Original**, **High**, **Balanced** or **Compact**.
+
+Auto intentionally means different things for different jobs:
+
+- **MKV Auto → Original**: preserve the source video whenever practical.
+- **MP4 Auto → Balanced**: compatible H.264-oriented output up to 1080p, re-encoding when the source is incompatible or materially larger than the target.
+- **Shareable MP4 Auto → Compact**: up to 720p with a sharing-oriented bitrate; burned subtitles use the same profile.
+
+The Standard workflow still exposes an optional **Resolution limit** under Options. That is an additional ceiling, not a second compression policy.
+
+At 480p, Shareable Auto now targets roughly **500 kbps video + 96 kbps audio**, or about **4.5 MB per minute**. The previous beta used 2.5 Mbps video + 192 kbps audio at 480p, which could make a short clip unexpectedly exceed 100 MB.
+
 ### DubLocal does not silently download large models
 
 If a required local model is missing, the app tells you what to prepare in **Settings → Model Manager**. A normal subtitle job should not suddenly begin a multi-gigabyte download without asking.
@@ -103,6 +117,8 @@ If a required local model is missing, the app tells you what to prepare in **Set
 ### “Auto” tries to make a sensible decision
 
 For subtitles, the recommended route generally prefers good creator/embedded text, but it can prefer an already-installed stronger local Whisper model over poor automatic captions. Detected transcription language is carried into contextual translation when possible.
+
+For media output, Auto is format-aware rather than a single global quality setting. It also avoids a needless re-encode when an existing compatible stream already fits the selected target.
 
 ### Translation adapts instead of choosing between “fast” and “safe” globally
 
@@ -112,11 +128,11 @@ That means clean long-form speech avoids repeatedly re-processing the same sever
 
 ### Burned subtitles use an FFmpeg build that can actually render them
 
-Normal media work can use the regular FFmpeg installation. Burned Shareable MP4 output additionally needs FFmpeg's libass-backed `subtitles` filter. Beta 4 checks this before starting the encode and can use a side-by-side Homebrew `ffmpeg-full` build when the normal binary lacks the filter. It no longer retries an H.264 encoder when the real problem is a missing video filter.
+Normal media work can use the regular FFmpeg installation. Burned Shareable MP4 output additionally needs FFmpeg's libass-backed `subtitles` filter. DubLocal checks this before starting the encode and can use a side-by-side Homebrew `ffmpeg-full` build when the normal binary lacks the filter. It no longer retries an H.264 encoder when the real problem is a missing video filter.
 
 ### Original media is preserved where practical
 
-For local/acquired media, **Original** quality keeps the source video stream without unnecessary recoding when the chosen container permits it. For YouTube, a lower quality acts as a download ceiling rather than forcing every final output through another encode.
+MKV Auto and the explicit **Original** profile keep the source video stream without unnecessary recoding when possible. An explicit lower Resolution limit still wins when you actually want a smaller frame size.
 
 ### MKV is the comfortable default for multi-track output
 
@@ -166,7 +182,7 @@ Internal work files remain disposable cache data instead of appearing beside eve
 
 ## Start here
 
-If you want to **use DubLocal**, download the beta at the top of this page and then read the **[User Guide](docs/USER_GUIDE.md)** only when you need more than Magic Flow.
+If you want to **use DubLocal**, download the beta at the top of this page and then read the **[User Guide](docs/USER_GUIDE.md)** only when you need more than the Standard workflow.
 
 If something goes wrong, start with **[Troubleshooting](docs/TROUBLESHOOTING.md)** rather than deleting caches or reinstalling models at random.
 
@@ -178,7 +194,7 @@ If you want to understand how the project is built, use the **[Documentation hub
 | --- | --- |
 | [Documentation hub](docs/README.md) | Friendly map of the user, setup and developer documentation |
 | [Beta installation](docs/BETA_INSTALLATION.md) | DMG install, first launch, Gatekeeper, updates and uninstall |
-| [User Guide](docs/USER_GUIDE.md) | Magic Flow, Advanced mode, models, sources, outputs and day-to-day use |
+| [User Guide](docs/USER_GUIDE.md) | Standard workflow, Advanced mode, models, sources, outputs and day-to-day use |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Start here when a launch, model, source, transcription, voice or export step fails |
 | [Storage & Cleanup](docs/STORAGE_CLEANUP.md) | What DubLocal stores and what automatic/manual cleanup may delete |
 | [Authenticated websites](docs/AUTHENTICATED_WEBSITES.md) | Local sign-in sessions, course acquisition and DRM boundary |

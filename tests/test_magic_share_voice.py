@@ -134,5 +134,5 @@ def test_production_ui_exposes_shareable_output_and_audio_voice_group():
     rendered = str(app.get_config_file())
 
     assert "MP4 · Shareable · WhatsApp / Telegram · H.264 + AAC" in rendered
-    assert "Audio, voice & sharing" in rendered
+    assert "Audio & delivery" in rendered
     assert "Single voice for the whole item · best overall match" in rendered
