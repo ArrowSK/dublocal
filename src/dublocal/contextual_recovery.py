@@ -10,7 +10,14 @@ from .timeline import Segment
 from .translation_quality import clean_generated_text
 
 _CODE_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
-_ID_LINE_RE = re.compile(r"^\s*\[?(\d+)\]?\s*(?::|[-–—])\s*(.+?)\s*$")
+# Qwen/llama.cpp occasionally follows the requested ordering but varies the visual ID
+# syntax. Every accepted form still carries an explicit numeric subtitle ID; we never
+# guess an ID from free-form prose.
+_ID_LINE_RE = re.compile(
+    r"^\s*(?:[-*•]\s*)?(?:\[?\s*(?:id\s*)?(\d+)\s*\]?)"
+    r"(?:\s*(?::|[-–—.)])\s*|\s+)(.+?)\s*$",
+    re.IGNORECASE,
+)
 _CONTAINER_KEYS = ("translations", "items", "results", "data", "output")
 _TRANSLATION_PREFIX_RE = re.compile(
     r"^\s*(?:final\s+translation|translation|translated\s+text|answer|result|перевод|переведенный\s+текст)\s*:\s*",
@@ -109,12 +116,71 @@ def _all_candidate_items(raw: str) -> list[dict[str, Any]]:
     return items
 
 
+def _ordered_positional_output(
+    raw: str,
+    target_segments: Sequence[Segment],
+) -> dict[int, str]:
+    """Accept ID-less output only when alignment is mathematically unambiguous.
+
+    Some Qwen builds occasionally return exactly one translated line per requested
+    subtitle but omit the numeric protocol markers. We may preserve that response only
+    when the number of clean output lines exactly equals the number of requested
+    segments and there are no explicit/contradictory IDs. Anything else remains a hard
+    recovery failure rather than risking a shifted SRT.
+    """
+
+    if not target_segments:
+        return {}
+
+    for payload in _candidate_payloads(raw):
+        if (
+            isinstance(payload, list)
+            and len(payload) == len(target_segments)
+            and all(isinstance(item, str) and clean_generated_text(item) for item in payload)
+        ):
+            return {
+                segment.index: clean_generated_text(str(item))
+                for segment, item in zip(target_segments, payload, strict=True)
+            }
+
+    text = clean_generated_text(raw)
+    fenced = _CODE_FENCE_RE.fullmatch(text)
+    if fenced:
+        text = fenced.group(1).strip()
+
+    lines: list[str] = []
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip().rstrip(",")
+        if not stripped or stripped in {"```", "```text", "```json"}:
+            continue
+        folded = stripped.casefold()
+        if any(marker in folded for marker in _RUNTIME_NOISE_MARKERS):
+            continue
+        if _TRANSLATION_HEADER_RE.fullmatch(stripped):
+            continue
+        if _ID_LINE_RE.match(stripped):
+            # Explicit IDs are handled by recover_partial_output. Do not mix an
+            # order-based fallback with an incomplete/contradictory explicit protocol.
+            return {}
+        stripped = re.sub(r"^\s*[-*•]\s+", "", stripped).strip().strip('"“”')
+        if stripped:
+            lines.append(stripped)
+
+    if len(lines) != len(target_segments):
+        return {}
+    return {
+        segment.index: line
+        for segment, line in zip(target_segments, lines, strict=True)
+    }
+
+
 def recover_partial_output(raw: str, target_segments: Sequence[Segment]) -> dict[int, str]:
     """Return unambiguous translations for expected IDs present in model output."""
 
     expected = {segment.index for segment in target_segments}
+    items = _all_candidate_items(raw)
     values: dict[int, list[str]] = {}
-    for item in _all_candidate_items(raw):
+    for item in items:
         try:
             index = int(item["id"])
             text = clean_generated_text(str(item["text"]))
@@ -129,14 +195,20 @@ def recover_partial_output(raw: str, target_segments: Sequence[Segment]) -> dict
         unique = list(dict.fromkeys(candidates))
         if len(unique) == 1:
             recovered[index] = unique[0]
-    return recovered
+
+    # If the model emitted any explicit IDs, preserve only those unambiguous IDs. A
+    # positional fallback must never reinterpret a partially numbered response.
+    if items:
+        return recovered
+    return _ordered_positional_output(raw, target_segments)
 
 
 def recover_chunk_output(raw: str, target_segments: Sequence[Segment]) -> list[str]:
     """Parse model output while keeping subtitle alignment strict.
 
-    The current preferred protocol is one line per subtitle: ``[ID] - text``.
-    JSON remains accepted for compatibility with earlier DubLocal builds.
+    The preferred protocol is one line per subtitle: ``[ID] - text``. JSON remains
+    accepted for compatibility, and a complete ID-less line list is accepted only when
+    its line count exactly matches the requested subtitle count.
     """
 
     first_error: DubLocalError | None = None
@@ -166,6 +238,11 @@ def recover_chunk_output(raw: str, target_segments: Sequence[Segment]) -> list[s
             )
         except DubLocalError:
             pass
+
+    partial = recover_partial_output(raw, target_segments)
+    expected = [segment.index for segment in target_segments]
+    if len(partial) == len(expected) and all(index in partial for index in expected):
+        return [partial[index] for index in expected]
 
     raise first_error or DubLocalError(
         "Contextual translator returned output that could not be recovered into aligned subtitle data."
@@ -223,38 +300,38 @@ def build_missing_recovery_prompt(
     target_language_label: str,
     prior_output: str,
 ) -> str:
-    """Recover every missing subtitle in one compact model call.
-
-    The previous implementation made one expensive model call per missing subtitle.
-    This prompt keeps chunk-local context and already recovered translations while
-    asking for all missing IDs at once.
-    """
+    """Recover missing subtitles in one compact, low-distraction model call."""
 
     missing_ids = ", ".join(str(segment.index) for segment in missing_segments)
-    source_lines = "\n".join(f"[{segment.index}] {segment.text}" for segment in target_segments)
+    # Feeding the complete source chunk again was counterproductive for highly
+    # fragmented YouTube captions: the model could start translating context instead of
+    # the missing lines. Recovery therefore contains only the source lines it must emit.
+    missing_source_lines = "\n".join(
+        f"[{segment.index}] {segment.text}" for segment in missing_segments
+    )
     recovered_lines = "\n".join(
         f"[{segment.index}] {recovered[segment.index]}"
         for segment in target_segments
         if segment.index in recovered
     )
     prior = clean_generated_text(prior_output)
-    if len(prior) > 3_000:
-        prior = prior[-3_000:]
+    if len(prior) > 1_600:
+        prior = prior[-1_600:]
     return (
         "/no_think\n"
         "MISSING SUBTITLE RECOVERY — repair all missing IDs in ONE response.\n"
-        + f"Missing IDs: {missing_ids}.\n"
+        + f"Missing IDs ({len(missing_segments)}): {missing_ids}.\n"
         + f"Translate only those missing IDs into natural {target_language_label}.\n"
         + "Return EXACTLY one line per missing ID in this form: [ID] - translated text\n"
         + "Return no other subtitle IDs, JSON, Markdown, headings, explanations or alternatives.\n"
-        + "Keep meaning, names, tone and profanity faithful; preserve speaker/reference consistency from the supplied chunk context.\n\n"
-        + "COMPACT ORIGINAL CONTEXT — reference only:\n"
-        + _compact_recovery_context(original_context_prompt, max_chars=2_800)
-        + "\n\nSOURCE CHUNK — reference only:\n"
-        + source_lines
-        + "\n\nALREADY RECOVERED TRANSLATIONS — preserve continuity, do not output:\n"
+        + "Keep meaning, names, tone and profanity faithful; preserve speaker/reference consistency from the supplied context.\n\n"
+        + "MISSING SOURCE LINES — translate every line below exactly once:\n"
+        + missing_source_lines
+        + "\n\nRECENT CHUNK CONTEXT — reference only, do not output:\n"
+        + _compact_recovery_context(original_context_prompt, max_chars=1_800)
+        + "\n\nALREADY RECOVERED TRANSLATIONS — continuity reference only, do not output:\n"
         + (recovered_lines if recovered_lines else "(none)")
-        + "\n\nPREVIOUS MODEL OUTPUT — reference only:\n"
+        + "\n\nPREVIOUS MODEL OUTPUT — formatting reference only:\n"
         + prior
         + "\n"
     )

@@ -60,6 +60,12 @@ jobs:
           PY
           )"
           TAG="v${VERSION}"
+          NOTES="docs/RELEASE_NOTES_${VERSION}.md"
+
+          if [[ ! -f "$NOTES" ]]; then
+            echo "Missing release notes for ${VERSION}: ${NOTES}" >&2
+            exit 1
+          fi
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "GitHub release $TAG already exists; leaving its published assets immutable."
@@ -71,5 +77,5 @@ jobs:
             dist/*.sha256 \
             --target "$GITHUB_SHA" \
             --title "DubLocal ${VERSION} — macOS beta" \
-            --notes-file docs/RELEASE_NOTES_0.6.0b1.md \
+            --notes-file "$NOTES" \
             --prerelease

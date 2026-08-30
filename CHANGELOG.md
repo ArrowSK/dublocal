@@ -2,11 +2,21 @@
 
 DubLocal is still in active development. Versions below describe development/beta builds from `main`.
 
-> **Current beta:** `v0.6.0b1` — **first packaged macOS beta**
+> **Current beta:** `v0.6.0b2` — **contextual translation reliability update**
 >
-> Beta 1 is built as an unsigned/not-notarized drag-to-Applications DMG. Normal in-app updates continue to track official `main`.
+> Beta 2 keeps the unsigned/not-notarized drag-to-Applications package and hardens translation of fragmented automatic captions. Normal in-app updates continue to track official `main`.
 
-## v0.6.0b1 — First packaged macOS beta — current
+## v0.6.0b2 — Contextual translation reliability — current
+
+- Reduced contextual translation output batches from the beta-1 36–48-line optimization to moderate sizes, with a 12-line cap for highly fragmented subtitle timelines.
+- Kept programme-wide and nearby context independent from output batch size, so the reliability fix does not turn contextual translation into isolated line-by-line translation.
+- Added safe recovery for common Qwen numbering variants such as `1. text` and `ID 2: text`.
+- Added exact positional recovery only when an ID-less response contains exactly one clean output line for every requested subtitle; ambiguous mappings are still refused.
+- Focused missing-ID recovery on the source lines actually missing instead of resending the whole chunk as translation targets.
+- Bumped contextual prompt/cache versioning so old cached translations do not mix with the new policy.
+- Published the fix as a separate beta package rather than silently replacing the beta-1 DMG.
+
+## v0.6.0b1 — First packaged macOS beta
 
 ### macOS beta package
 

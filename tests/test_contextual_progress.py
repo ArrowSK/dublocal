@@ -72,7 +72,7 @@ def test_translate_chunk_recovers_missing_ids_in_one_batch():
     assert result == ["Привет.", "Как дела?"]
     assert len(runtime.prompts) == 3
     assert "MISSING SUBTITLE RECOVERY" in runtime.prompts[2]
-    assert "Missing IDs: 2" in runtime.prompts[2]
+    assert "Missing IDs (1): 2" in runtime.prompts[2]
     assert "original prompt with programme context" in runtime.prompts[2]
 
 
@@ -98,7 +98,7 @@ def test_many_missing_subtitles_do_not_trigger_one_model_call_per_line():
 
     assert result == [f"Translation {index}." for index in range(1, 11)]
     assert len(runtime.prompts) == 2
-    assert "Missing IDs: 4, 5, 6, 7, 8, 9, 10" in runtime.prompts[1]
+    assert "Missing IDs (7): 4, 5, 6, 7, 8, 9, 10" in runtime.prompts[1]
 
 
 def test_wrong_script_is_recovered_instead_of_written():
@@ -120,7 +120,7 @@ def test_wrong_script_is_recovered_instead_of_written():
     )
     assert result == ["Привет.", "Где моё сердце?"]
     assert len(runtime.prompts) == 2
-    assert "Missing IDs: 2" in runtime.prompts[1]
+    assert "Missing IDs (1): 2" in runtime.prompts[1]
 
 
 def test_auto_language_parser_accepts_code_label_and_json():

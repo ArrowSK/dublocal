@@ -21,19 +21,36 @@ def _segments(count: int, step_ms: int = 10_000) -> list[Segment]:
     ]
 
 
-def test_short_song_uses_one_large_chunk_instead_of_many_model_reloads():
-    segments = _segments(36, step_ms=10_000)  # six minutes
+def test_short_sparse_media_uses_moderate_chunks_for_output_reliability():
+    segments = _segments(36, step_ms=10_000)  # six minutes, low subtitle density
     plan = context_plan(segments)
-    assert plan.chunk_segments == 48
-    assert len(segments) <= plan.chunk_segments
+    assert plan.chunk_segments == 24
+    assert plan.chunk_segments < 36
+
+
+def test_fragmented_auto_caption_timeline_uses_small_alignment_chunks():
+    # 480 one-second-ish captions over eight minutes mirrors the kind of fragmented
+    # automatic-caption timeline that previously produced 10 very large 48-line chunks.
+    segments = [
+        Segment(
+            index=index + 1,
+            start_ms=index * 1000,
+            end_ms=(index + 1) * 1000,
+            text=f"Caption fragment {index + 1}",
+        )
+        for index in range(480)
+    ]
+    plan = context_plan(segments)
+    assert plan.chunk_segments == 12
+    assert len(segments) // plan.chunk_segments == 40
 
 
 def test_longer_media_gets_more_context_but_bounded_chunk_sizes():
     short = context_plan(_segments(30, step_ms=10_000))
     feature = context_plan(_segments(540, step_ms=10_000))
     assert feature.input_budget_tokens > short.input_budget_tokens
-    assert short.chunk_segments == 48
-    assert feature.chunk_segments == 28
+    assert short.chunk_segments == 24
+    assert feature.chunk_segments == 16
 
 
 def test_prompt_protects_tags_and_uses_faithful_line_protocol():

@@ -15,22 +15,42 @@ from .translation_quality import is_protected_caption_tag, target_language_guida
 
 # Bump whenever the translation/review instructions or context semantics change in a
 # way that could alter output. The persistent translation cache includes this value.
-CONTEXTUAL_PROMPT_VERSION = "2026-08-28.3"
+CONTEXTUAL_PROMPT_VERSION = "2026-08-30.1"
 
 
 def context_plan(segments: Sequence[Segment]) -> ContextPlan:
-    """Plan fewer model calls for short media while keeping long-form context bounded."""
+    """Keep translation chunks small enough for reliable subtitle-ID alignment.
+
+    YouTube automatic captions can be extremely fragmented: a short video may contain
+    hundreds of one- or two-second subtitle segments. Large 36–48 line chunks were
+    faster when Qwen followed the line protocol perfectly, but a single formatting
+    lapse then left dozens of IDs for recovery. Prefer moderate chunks normally and
+    reduce them further when the subtitle timeline is dense. Programme context still
+    scales independently, so smaller output batches do not throw away long-form
+    translation context.
+    """
 
     duration_ms = max((segment.end_ms for segment in segments), default=0)
     minutes = duration_ms / 60_000.0
     if minutes <= 10:
-        chunk_segments = 48
-    elif minutes <= 30:
-        chunk_segments = 36
-    elif minutes <= 90:
-        chunk_segments = 28
-    else:
         chunk_segments = 24
+    elif minutes <= 30:
+        chunk_segments = 20
+    else:
+        chunk_segments = 16
+
+    dialogue = [
+        segment
+        for segment in segments
+        if segment.text.strip() and not is_protected_caption_tag(segment.text)
+    ]
+    effective_minutes = max(minutes, 1.0 / 60.0)
+    segments_per_minute = len(dialogue) / effective_minutes
+    if segments_per_minute >= 30:
+        chunk_segments = min(chunk_segments, 12)
+    elif segments_per_minute >= 20:
+        chunk_segments = min(chunk_segments, 16)
+
     return ContextPlan(
         duration_ms=duration_ms,
         input_budget_tokens=context_budget_for_duration(duration_ms),
