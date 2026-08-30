@@ -5,16 +5,29 @@ from pathlib import Path
 
 from platformdirs import user_cache_dir
 
+# Output policy must be installed before shareable_burn imports/captures the stable
+# Magic Flow export functions. This keeps one format-aware profile policy underneath
+# normal MP4/MKV, Shareable MP4 and burned-subtitle export.
+from .output_profile_runtime import (
+    install_output_profile_runtime,
+    install_shareable_burn_profile_runtime,
+)
+
+install_output_profile_runtime()
+
+from . import shareable_burn
 from .adaptive_audio import install_adaptive_audio_refinement
 from .job_control import install_shutdown_hooks, shutdown_all
+from .language_utils import normalize_language_code  # noqa: F401 - imported by runtime layers
 from .language_extensions import install_language_extensions
 from .m53 import install_runtime_refinements
-from .shareable_burn import install_shareable_burn_refinement
 from .storage_cleanup import prune_stale_jobs_only, run_automatic_housekeeping
 from .transcription_v053 import install_transcription_refinements
 from . import tts_provider_refinement
 from .tts_runtime_compat import install_russian_runtime_compat
 from .v060_refinements import install_audio_balance_refinement
+
+install_shareable_burn_profile_runtime(shareable_burn)
 
 # Kokoro 0.9.x currently requires Python <3.13. DubLocal itself may run on
 # Python 3.13, so Russian TTS gets a compatible isolated 3.11/3.12 runtime
@@ -31,7 +44,7 @@ install_transcription_refinements()
 install_native_timing_refinement()
 install_adaptive_audio_refinement()
 install_language_extensions()
-install_shareable_burn_refinement()
+shareable_burn.install_shareable_burn_refinement()
 
 from .authenticated_web_policy import install_authenticated_web_policy
 
@@ -42,18 +55,22 @@ install_authenticated_web_policy()
 
 from . import product_ui
 from .beta_branding import install_beta_branding
+from .commercial_ui import install_commercial_ui
 from .course_import_ui import install_course_import_ui
 from .storage_cleanup_ui import install_storage_cleanup_ui
 from .cancellation_ui import install_cancellation_ui
+from .output_profiles_ui import install_output_profiles_ui
 
 # Course/website import extends only the source/acquisition boundary. Storage cleanup
-# then wraps the resulting unified queue/settings surface. The beta branding adds the
-# established logo without redesigning controls, and cancellation remains the outer
-# lifecycle wrapper for YouTube, local and course jobs alike.
+# and output profiles extend Settings, beta branding preserves product identity, and
+# cancellation remains the lifecycle wrapper. Commercial copy is the final UI layer so
+# internal compatibility names can remain stable without leaking into the product.
 install_course_import_ui(product_ui)
 install_storage_cleanup_ui(product_ui)
+install_output_profiles_ui(product_ui)
 install_beta_branding(product_ui)
 install_cancellation_ui(product_ui)
+install_commercial_ui(product_ui)
 MATRIX_CSS = product_ui.MATRIX_CSS
 build_app = product_ui.build_app
 
@@ -85,7 +102,7 @@ def main() -> None:
 
     # Keep the established lightweight mixer as the universal fallback. The adaptive
     # renderer swaps in vocal separation only for the current render when requested or
-    # when Simple/Auto strongly identifies music and the optional runtime is prepared.
+    # when Standard/Auto strongly identifies music and the optional runtime is prepared.
     install_audio_balance_refinement()
     install_runtime_refinements()
 
