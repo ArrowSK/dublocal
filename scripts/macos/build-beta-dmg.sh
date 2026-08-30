@@ -12,6 +12,7 @@ cd "$REPO_ROOT"
 
 VERSION="$(/usr/bin/sed -n 's/^version = "\([^"]*\)"/\1/p' pyproject.toml | /usr/bin/head -n 1)"
 [[ -n "$VERSION" ]] || { echo "Could not read DubLocal version from pyproject.toml." >&2; exit 1; }
+BASE_VERSION="${VERSION%%b*}"
 
 BUILD_SHA="${DUBLOCAL_BUILD_SHA:-$(/usr/bin/git rev-parse HEAD)}"
 [[ "$BUILD_SHA" =~ '^[0-9a-f]{7,40}$' ]] || { echo "Invalid build SHA: $BUILD_SHA" >&2; exit 1; }
@@ -85,20 +86,20 @@ set_plist() {
 set_plist CFBundleName string DubLocal
 set_plist CFBundleDisplayName string DubLocal
 set_plist CFBundleIdentifier string io.github.arrowsk.dublocal
-set_plist CFBundleShortVersionString string "${VERSION%b1}"
-set_plist CFBundleVersion string 601
+set_plist CFBundleShortVersionString string "$BASE_VERSION"
+set_plist CFBundleVersion string 602
 set_plist LSMinimumSystemVersion string 13.0
 set_plist NSHighResolutionCapable bool true
 set_plist LSMultipleInstancesProhibited bool true
 /usr/bin/plutil -lint "$PLIST" >/dev/null
 /usr/bin/touch "$APP"
 
-# osacompile currently creates an ad-hoc signed applet on hosted/current macOS. Beta 1
-# is intentionally unsigned, so explicitly strip that generated signature after all
-# bundle mutations and then verify that no signature remains.
+# osacompile currently creates an ad-hoc signed applet on hosted/current macOS. The
+# beta is intentionally unsigned, so explicitly strip that generated signature after
+# all bundle mutations and then verify that no signature remains.
 /usr/bin/codesign --remove-signature "$APP" >/dev/null 2>&1 || true
 if /usr/bin/codesign -dv "$APP" >/dev/null 2>&1; then
-  echo "DubLocal.app unexpectedly still has a code signature; beta 1 must remain unsigned." >&2
+  echo "DubLocal.app unexpectedly still has a code signature; this beta must remain unsigned." >&2
   exit 1
 fi
 
