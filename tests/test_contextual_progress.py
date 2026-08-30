@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
 import dublocal.contextual_progress as contextual_progress
-from dublocal.timeline import Segment, parse_srt
+from dublocal.timeline import Segment, parse_srt, segments_to_srt
 from dublocal.translation import TranslatedSegment
 from dublocal.translation_cache import CachedTranslation
 
@@ -121,6 +122,36 @@ def test_wrong_script_is_recovered_instead_of_written():
     assert result == ["Привет.", "Где моё сердце?"]
     assert len(runtime.prompts) == 2
     assert "Missing IDs (1): 2" in runtime.prompts[1]
+
+
+def test_recovery_reuses_failed_fast_attempt_without_duplicate_generation():
+    runtime = FakeRuntime(["[1] - Привет.\n[2] - Как дела?"])
+    initial = "[1] - Привет."
+    result = contextual_progress._translate_chunk_with_recovery(
+        runtime,
+        "context",
+        _targets(),
+        "ru",
+        max_output_tokens=512,
+        chunk_number=1,
+        total_chunks=1,
+        progress_callback=None,
+        initial_raw=initial,
+    )
+    assert result == ["Привет.", "Как дела?"]
+    assert len(runtime.prompts) == 1
+    assert "MISSING SUBTITLE RECOVERY" in runtime.prompts[0]
+
+
+def test_adaptive_batch_state_halves_on_failure_and_regrows_after_clean_runs():
+    state = contextual_progress._AdaptiveBatchState(current=48, maximum=48)
+    assert state.shrink(48)
+    assert state.current == 24
+    state.mark_success(recovered=False)
+    assert state.current == 24
+    state.mark_success(recovered=False)
+    assert state.current == 48
+    assert state.split_count == 1
 
 
 def test_auto_language_parser_accepts_code_label_and_json():
@@ -315,3 +346,110 @@ def test_successful_contextual_translation_is_saved_after_validation(monkeypatch
     assert saved["source_language"] == "en"
     assert saved["target_language"] == "ru"
     assert saved["translated"][0].translated_text == "Привет."
+
+
+def _write_dense_srt(path: Path, count: int) -> None:
+    segments = [
+        Segment(index=index, start_ms=(index - 1) * 1200, end_ms=index * 1200, text=f"Línea {index}.")
+        for index in range(1, count + 1)
+    ]
+    path.write_text(segments_to_srt(segments), encoding="utf-8")
+
+
+def _target_ids(prompt: str) -> list[int]:
+    if "TARGET LINES — translate these and only these:" not in prompt:
+        return []
+    section = prompt.split("TARGET LINES — translate these and only these:", 1)[1]
+    return [
+        int(match.group(1))
+        for line in section.splitlines()
+        if (match := re.match(r"\[(\d+)\]\s", line.strip()))
+    ]
+
+
+def _install_adaptive_runtime_mocks(monkeypatch, runtime_type) -> None:
+    monkeypatch.setattr(contextual_progress, "ContextualRuntime", runtime_type)
+    monkeypatch.setattr(contextual_progress, "load_translation_cache", lambda *args, **kwargs: None)
+    monkeypatch.setattr(contextual_progress, "save_translation_cache", lambda *args, **kwargs: None)
+    monkeypatch.setattr(contextual_progress, "_llama_command", lambda: ["llama-cli"])
+    monkeypatch.setattr(contextual_progress, "contextual_model_valid", lambda key: key == "8b")
+    monkeypatch.setattr(
+        contextual_progress,
+        "active_recommendation",
+        lambda: SimpleNamespace(model_key="8b", review=False, context_cap_tokens=16384),
+    )
+
+
+def test_clean_movie_scale_translation_uses_48_line_fast_batches(monkeypatch, tmp_path: Path):
+    source = tmp_path / "dense.srt"
+    _write_dense_srt(source, 96)
+
+    class Runtime:
+        mode = "fake-server"
+        batch_sizes: list[int] = []
+
+        def __init__(self, model_key: str = "8b", context_tokens: int | None = None):
+            assert model_key == "8b"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def generate(self, prompt: str, *, max_output_tokens: int) -> str:
+            ids = _target_ids(prompt)
+            Runtime.batch_sizes.append(len(ids))
+            return "\n".join(f"[{index}] - Translation {index}." for index in ids)
+
+    _install_adaptive_runtime_mocks(monkeypatch, Runtime)
+    result = contextual_progress.translate_srt_contextual_with_progress(
+        source,
+        "es",
+        "en",
+        review=False,
+    )
+
+    assert len(result.segments) == 96
+    assert Runtime.batch_sizes == [48, 48]
+    assert "adaptive batches 48" in result.route
+
+
+def test_failed_large_batch_splits_only_that_section_then_regrows(monkeypatch, tmp_path: Path):
+    source = tmp_path / "dense.srt"
+    _write_dense_srt(source, 96)
+
+    class Runtime:
+        mode = "fake-server"
+        batch_sizes: list[int] = []
+        prompts: list[str] = []
+
+        def __init__(self, model_key: str = "8b", context_tokens: int | None = None):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def generate(self, prompt: str, *, max_output_tokens: int) -> str:
+            Runtime.prompts.append(prompt)
+            ids = _target_ids(prompt)
+            Runtime.batch_sizes.append(len(ids))
+            if len(ids) == 48 and ids and ids[0] == 1:
+                ids = ids[:3]
+            return "\n".join(f"[{index}] - Translation {index}." for index in ids)
+
+    _install_adaptive_runtime_mocks(monkeypatch, Runtime)
+    result = contextual_progress.translate_srt_contextual_with_progress(
+        source,
+        "es",
+        "en",
+        review=False,
+    )
+
+    assert len(result.segments) == 96
+    assert Runtime.batch_sizes == [48, 24, 24, 48]
+    assert not any("MISSING SUBTITLE RECOVERY" in prompt for prompt in Runtime.prompts)
+    assert "1 safe split" in result.route
