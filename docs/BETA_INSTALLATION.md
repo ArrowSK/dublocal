@@ -75,7 +75,13 @@ A later fully bundled runtime can remove this beta dependency; 0.6.0b3 does not 
 
 FFmpeg/ffprobe are required for normal audio/video processing. DubLocal can still open without them so the missing resource is visible in **Settings → Local Resources**.
 
-If Homebrew is present, first launch can offer to install FFmpeg.
+If Homebrew is present, first launch can offer to install normal FFmpeg.
+
+There is one extra requirement for **Burn subtitles into Shareable MP4**: the FFmpeg binary doing that export must contain the `subtitles` filter backed by libass. Not every macOS FFmpeg build includes it. Beta 3 checks the capability rather than assuming that any `ffmpeg` executable can render SRT text.
+
+If normal FFmpeg does not provide subtitle rendering, packaged setup/update can offer to install Homebrew `ffmpeg-full` alongside it. `ffmpeg-full` is used only when the burn-in path needs it; DubLocal does not uninstall or replace the normal FFmpeg used by the rest of the pipeline.
+
+You can decline that optional install. Ordinary media processing, standalone SRT files and selectable subtitle tracks continue to work; only burned-in subtitle export remains unavailable until a subtitle-capable FFmpeg is present.
 
 ## Models are opt-in
 
@@ -93,7 +99,7 @@ Use:
 
 The updater only manages the expected official `main` checkout. It refuses to rewrite an unexpected remote, a divergent history or local commits it cannot safely preserve.
 
-For the packaged beta, an update re-enters the app bootstrap before restart. That lets the private Python environment absorb dependency changes before the new backend starts.
+For the packaged beta, an update re-enters the app bootstrap before restart. That lets the private Python environment absorb dependency changes before the new backend starts. It also lets a release introduce an optional local runtime capability, such as the subtitle-capable FFmpeg check in beta 3, without changing finished outputs or installed AI models.
 
 The restart is automatic when an update requires one.
 
