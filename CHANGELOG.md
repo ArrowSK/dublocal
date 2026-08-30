@@ -2,11 +2,22 @@
 
 DubLocal is still in active development. Versions below describe development/beta builds from `main`.
 
-> **Current beta:** `v0.6.0b2` — **contextual translation reliability update**
+> **Current beta:** `v0.6.0b3` — **adaptive long-form translation update**
 >
-> Beta 2 keeps the unsigned/not-notarized drag-to-Applications package and hardens translation of fragmented automatic captions. Normal in-app updates continue to track official `main`.
+> Beta 3 restores large fast batches for clean material while keeping beta 2's strict alignment safeguards. Normal in-app updates continue to track official `main`.
 
-## v0.6.0b2 — Contextual translation reliability — current
+## v0.6.0b3 — Adaptive long-form translation — current
+
+- Added an optimistic fast path: Qwen3 8B starts with up to 48 subtitle lines per model call and Qwen3 4B with up to 36.
+- A failed large batch is not sent through expensive whole-batch recovery. DubLocal retries only that section at half size, down to the established 12-line safety floor.
+- After two clean smaller batches, the batch size grows again automatically, so one difficult section does not slow the rest of a movie.
+- The failed fast response is reused when the 12-line recovery floor is reached instead of spending another identical model call.
+- Programme-wide/nearby context remains independent from output batch size, preserving contextual translation while reducing repeated prompt-prefill work.
+- Progress messages now show subtitles completed and the next adaptive batch ceiling.
+- Translation cache policy was changed so beta-2 cache entries are not mixed with the new adaptive execution strategy.
+- Added regression tests proving a clean 96-subtitle timeline completes in two 48-line calls and that a bad 48-line section falls back 48→24, stabilizes, then grows back to 48.
+
+## v0.6.0b2 — Contextual translation reliability
 
 - Reduced contextual translation output batches from the beta-1 36–48-line optimization to moderate sizes, with a 12-line cap for highly fragmented subtitle timelines.
 - Kept programme-wide and nearby context independent from output batch size, so the reliability fix does not turn contextual translation into isolated line-by-line translation.
