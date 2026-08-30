@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import dublocal.m51 as m51
+import dublocal.magic_flow as magic
 
 
 def _probe_payload(*, audio_count: int = 1, subtitle_count: int = 0, height: int = 2160):
@@ -104,7 +105,11 @@ def test_local_lower_quality_explicitly_uses_videotoolbox(monkeypatch, tmp_path:
         seen["command"] = command
         Path(command[-1]).write_bytes(b"output")
 
+    # The production output-profile wrapper shares the Standard workflow's encoder
+    # fallback helper, while the original remux path calls m51 directly. Stub both so
+    # this regression remains deterministic regardless of earlier runtime-install tests.
     monkeypatch.setattr(m51.m5, "_run_ffmpeg_progress", fake_run)
+    monkeypatch.setattr(magic, "_run_ffmpeg_progress", fake_run)
     result = m51.remux_dubbed_media(
         source,
         mixed,
