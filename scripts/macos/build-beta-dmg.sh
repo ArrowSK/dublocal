@@ -87,7 +87,7 @@ set_plist CFBundleName string DubLocal
 set_plist CFBundleDisplayName string DubLocal
 set_plist CFBundleIdentifier string io.github.arrowsk.dublocal
 set_plist CFBundleShortVersionString string "$BASE_VERSION"
-set_plist CFBundleVersion string 603
+set_plist CFBundleVersion string 605
 set_plist LSMinimumSystemVersion string 13.0
 set_plist NSHighResolutionCapable bool true
 set_plist LSMultipleInstancesProhibited bool true
