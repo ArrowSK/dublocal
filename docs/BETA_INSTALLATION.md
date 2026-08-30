@@ -1,20 +1,20 @@
-# Install DubLocal 0.6.0b5 on macOS
+# Install DubLocal 0.6.0b6 on macOS
 
-DubLocal 0.6.0b5 is the current packaged macOS beta. Installation is the familiar Mac pattern: download a DMG, drag the app to Applications, open it.
+DubLocal 0.6.0b6 is the current packaged macOS beta. Installation is the familiar Mac pattern: download a DMG, drag the app to Applications, open it.
 
 The only unusual part is the first-launch security prompt. This beta is intentionally **unsigned and not notarized**, so macOS will ask you to approve it once.
 
 ## Download
 
-**[Download DubLocal 0.6.0b5 for macOS](https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b5/DubLocal-0.6.0b5-macOS-unsigned.dmg)**
+**[Download DubLocal 0.6.0b6 for macOS](https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b6/DubLocal-0.6.0b6-macOS-unsigned.dmg)**
 
-Release page: [v0.6.0b5](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b5)
+Release page: [v0.6.0b6](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b6)
 
 A SHA-256 checksum is published beside the DMG on the release page.
 
 ## Install in five steps
 
-1. Open `DubLocal-0.6.0b5-macOS-unsigned.dmg`.
+1. Open `DubLocal-0.6.0b6-macOS-unsigned.dmg`.
 2. Drag **DubLocal.app** onto **Applications**.
 3. Open Applications, Control-click/right-click **DubLocal.app**, and choose **Open**.
 4. Confirm that you want to open it. If macOS still blocks the app, go to **System Settings → Privacy & Security → Open Anyway**.
@@ -69,7 +69,7 @@ If Git is missing, the app can ask macOS to start the Command Line Tools install
 
 The current beta creates its private environment from a compatible local Python. When Homebrew is available, DubLocal can offer to install Python 3.11 if no compatible interpreter is found.
 
-A later fully bundled runtime can remove this beta dependency; 0.6.0b5 does not pretend it is bundled when it is not.
+A later fully bundled runtime can remove this beta dependency; 0.6.0b6 does not pretend it is bundled when it is not.
 
 ### FFmpeg
 
@@ -85,7 +85,7 @@ You can decline that optional install. Ordinary media processing, standalone SRT
 
 ## Output profiles
 
-Beta 5 adds persistent **Settings → Output profiles**. MKV, MP4 and Shareable MP4 each have their own **Auto / Original / High / Balanced / Compact** setting.
+DubLocal has persistent **Settings → Output profiles**. MKV, MP4 and Shareable MP4 each have their own **Auto / Original / High / Balanced / Compact** setting.
 
 The default Auto behavior is format-aware:
 
@@ -94,6 +94,14 @@ The default Auto behavior is format-aware:
 - **Shareable MP4:** Compact output, up to 720p.
 
 The Standard workflow stays compact. If you open **Options**, **Resolution limit** can still impose a lower maximum resolution for one job. Compression itself comes from the saved per-format profile.
+
+## Translation performance in beta 6
+
+Beta 6 keeps the same hardware-selected Qwen model and translation-quality rules. For unusually fragmented caption timelines, it can process more very short subtitle fragments in one optimistic model call, while strict subtitle-ID validation and the existing half-size fallback remain in charge of safety.
+
+Short programmes also allocate llama.cpp context from the amount of programme context the prompt can actually use rather than reserving the full hardware ceiling. If the installed llama.cpp server advertises prompt-chunk cache reuse, DubLocal enables a conservative reuse threshold automatically; older runtimes continue without it.
+
+No extra setup or quality toggle is required for these optimizations.
 
 ## Models are opt-in
 

@@ -2,11 +2,20 @@
 
 DubLocal is still in active development. Versions below describe development/beta builds from `main`.
 
-> **Current beta:** `v0.6.0b5` — **format-aware output profiles and production UI**
+> **Current beta:** `v0.6.0b6` — **contextual translation performance**
 >
-> Beta 5 replaces the oversized one-size-fits-all export ladder with persistent per-format Auto/Original/High/Balanced/Compact profiles and updates the primary product workflow terminology. Normal in-app updates continue to track official `main`.
+> Beta 6 reduces avoidable Qwen prompt/KV work on highly fragmented caption timelines without changing the selected translation model, prompt, subtitle-ID validation, recovery, voice generation or output-quality policy. Normal in-app updates continue to track official `main`.
 
-## v0.6.0b5 — Format-aware output profiles and production UI — current
+## v0.6.0b6 — Contextual translation performance — current
+
+- Added fragmentation-aware optimistic translation batches: normal sentence-sized subtitles keep the established 48/36 limits, while very dense short-caption timelines can begin at 96 lines on Qwen3 8B or 72 on 4B.
+- Kept the existing adaptive safety ladder: any larger attempt that fails strict alignment is retried at half size until the established 12-line floor and bounded recovery path take over.
+- Runtime context allocation now follows the programme context budget actually used by the prompt, plus existing generation/headroom, instead of reserving a much larger KV cache simply because the hardware recommendation allows it.
+- Added conditional llama.cpp `--cache-reuse 64` support detection. Older runtimes keep the established server command unchanged.
+- Kept the same hardware-selected Qwen model, prompt text, sampling, review policy, target-language validation and refusal to write ambiguously aligned SRT output.
+- Added regression coverage for dense/normal batch selection, programme-context allocation, conditional prompt reuse and restoration of compatibility state after each translation call.
+
+## v0.6.0b5 — Format-aware output profiles and production UI
 
 - Added persistent **Settings → Output profiles** for MKV, MP4 and Shareable MP4.
 - Added **Auto**, **Original**, **High**, **Balanced** and **Compact** profiles with format-specific Auto behavior rather than one global compromise.
