@@ -36,6 +36,17 @@ def test_beta_bootstrap_takes_over_after_setup_or_packaged_update() -> None:
     assert 'DUBLOCAL_LAUNCH_ACTION="$LAUNCH_ACTION"' in script
 
 
+def test_beta_bootstrap_repairs_ffmpeg_when_subtitle_rendering_is_missing() -> None:
+    script = _text("scripts/macos/beta-bootstrap.sh")
+
+    assert "ffmpeg_has_subtitle_filter()" in script
+    assert "-filters" in script
+    assert "subtitles" in script
+    assert "repair_ffmpeg_with_brew()" in script
+    assert "brew reinstall ffmpeg" in script
+    assert "brew install ffmpeg" in script
+
+
 def test_packaged_updater_reenters_bootstrap_before_restart() -> None:
     update = _text("src/dublocal/normal_update.py")
 
