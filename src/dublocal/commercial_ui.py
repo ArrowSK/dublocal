@@ -69,6 +69,18 @@ def install_commercial_ui(product_ui) -> None:
 
     product_ui._run_batch_magic_ui = run_with_product_copy
 
+    # Local-file selection updates the main action button after the Blocks tree has
+    # already been built. Keep that dynamic path on the same product terminology too;
+    # otherwise selecting/clearing files would visibly resurrect "Run Magic Flow".
+    original_local_queue_status = product_ui._local_queue_status
+
+    def local_queue_status_with_product_copy(files: Any):
+        status, button = original_local_queue_status(files)
+        value = _copy(getattr(button, "value", None) or "Start Processing")
+        return _copy(status), gr.Button(value=value)
+
+    product_ui._local_queue_status = local_queue_status_with_product_copy
+
     original_build = product_ui.build_app
 
     def build_app_commercial():
