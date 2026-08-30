@@ -62,10 +62,10 @@ If a platform exposes an authorised ordinary download, DubLocal prefers that pat
 
 The provider registry has two layers:
 
-- **Domestika** adapter: course/lesson discovery plus the generic authenticated acquisition machinery.
-- **Generic authenticated website** fallback: one normal authenticated video/audio page when ordinary unprotected media can be discovered.
+- **Built-in site-specific adapters** can add course/lesson discovery while still using the generic authenticated acquisition machinery.
+- **Generic authenticated website** fallback handles one normal authenticated video/audio page when ordinary unprotected media can be discovered.
 
-Specific adapters are application code shipped through normal DubLocal updates. DubLocal does not download executable scraper plugins from arbitrary repositories.
+Public documentation intentionally keeps course-platform examples provider-neutral. Specific adapters are application code shipped through normal DubLocal updates; DubLocal does not download executable scraper plugins from arbitrary repositories.
 
 A site changing its HTML/player can break an adapter without breaking the media pipeline. That failure should be reported as a source/import problem, not as a transcription/translation/TTS failure.
 
@@ -100,7 +100,7 @@ The first implementation supports:
 
 - dedicated authenticated browser profile;
 - generic authenticated website acquisition;
-- Domestika course/lesson discovery;
+- built-in site-specific course/lesson discovery where an adapter is available;
 - single lesson and multi-lesson queues;
 - lesson multiselect;
 - sequential processing;
