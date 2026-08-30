@@ -1,6 +1,6 @@
 """DubLocal package."""
 
-__version__ = "0.6.0b4"
+__version__ = "0.6.0b5"
 
 # Install transcription safety guards before UI modules import transcription symbols.
 # The guard keeps local Whisper fail-safe behavior consistent for the launcher, CLI
