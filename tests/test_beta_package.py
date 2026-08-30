@@ -93,6 +93,11 @@ def test_beta_workflow_builds_on_real_macos_runner_and_publishes_release() -> No
     assert 'NOTES="docs/RELEASE_NOTES_${VERSION}.md"' in workflow
 
 
+def test_public_course_docs_stay_provider_neutral() -> None:
+    assert "Domestika" not in _text("README.md")
+    assert "Domestika" not in _text("docs/AUTHENTICATED_WEBSITES.md")
+
+
 def test_readme_has_prominent_versioned_beta_download() -> None:
     metadata = tomllib.loads(_text("pyproject.toml"))
     version = metadata["project"]["version"]
