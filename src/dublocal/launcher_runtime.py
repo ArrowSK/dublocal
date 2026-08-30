@@ -6,6 +6,13 @@ from pathlib import Path
 
 from platformdirs import user_cache_dir
 
+# Install the contextual-translation performance layer before output-profile/runtime
+# modules import the Standard workflow by value. It keeps the same model, validation,
+# recovery and review semantics while reducing avoidable prompt/KV work.
+from .translation_performance import install_translation_performance_refinement
+
+install_translation_performance_refinement()
+
 # Output policy must be installed before shareable_burn imports/captures the stable
 # Standard workflow export functions. This keeps one format-aware profile policy
 # underneath normal MP4/MKV, Shareable MP4 and burned-subtitle export.
