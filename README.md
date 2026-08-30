@@ -79,7 +79,7 @@ The queue is sequential, so a laptop is not asked to run several large speech/tr
 | Translation | Local contextual Qwen3 translation with hardware-aware context, adaptive fast/safe batching and strict subtitle alignment recovery |
 | Voice-over | Kokoro and vetted local-language providers with automatic vocal-range matching where supported |
 | Audio | Lightweight dialogue mixing everywhere; optional local Demucs separation for music-heavy material |
-| Export | MKV, compatible MP4/shareable MP4, selectable audio/subtitle tracks, subtitle-only packages |
+| Export | MKV, compatible MP4, compact shareable H.264/AAC MP4, selectable audio/subtitle tracks, subtitle-only packages |
 | Queueing | Multiple local files, YouTube collections and course lessons processed one at a time |
 | Storage | Automatic stale-job housekeeping plus **Settings → Storage & Cleanup** |
 | Updates | In-app update from official `main` with guarded restart/repair behavior |
@@ -112,7 +112,9 @@ That means clean long-form speech avoids repeatedly re-processing the same sever
 
 ### Original media is preserved where practical
 
-For local/acquired media, **Original** quality keeps the source video stream without unnecessary recoding when the chosen container permits it. For YouTube, a lower quality acts as a download ceiling rather than forcing every final output through another encode.
+For local/acquired media, **Original** quality keeps the source video stream without unnecessary recoding when the chosen archival container permits it. For YouTube, a lower quality acts as a download ceiling rather than forcing every final output through another encode.
+
+**Shareable MP4 is deliberately different:** it is a compact delivery copy, so its video is re-encoded to a bounded H.264 bitrate instead of blindly copying a large source stream. The default/source share preset also caps sources above 1080p at 1080p; explicit higher quality choices remain available.
 
 ### MKV is the comfortable default for multi-track output
 
@@ -149,10 +151,10 @@ Movie Name.dub.es.mkv
 Movie Name.subtitles.es.mkv
 ```
 
-Course material is grouped by provider/course and keeps lesson order:
+Course material is grouped by provider/course and keeps lesson order without advertising a particular course platform:
 
 ```text
-~/Movies/DubLocal/Domestika/French Watercolour/
+~/Movies/DubLocal/<Provider>/<Course>/
   01 - Introduction.fr.srt
   01 - Introduction.en.srt
   01 - Introduction.dub.en.mkv

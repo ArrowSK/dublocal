@@ -36,6 +36,17 @@ def test_beta_bootstrap_takes_over_after_setup_or_packaged_update() -> None:
     assert 'DUBLOCAL_LAUNCH_ACTION="$LAUNCH_ACTION"' in script
 
 
+def test_beta_bootstrap_repairs_ffmpeg_when_subtitle_rendering_is_missing() -> None:
+    script = _text("scripts/macos/beta-bootstrap.sh")
+
+    assert "ffmpeg_has_subtitle_filter()" in script
+    assert "-filters" in script
+    assert "subtitles" in script
+    assert "repair_ffmpeg_with_brew()" in script
+    assert "brew reinstall ffmpeg" in script
+    assert "brew install ffmpeg" in script
+
+
 def test_packaged_updater_reenters_bootstrap_before_restart() -> None:
     update = _text("src/dublocal/normal_update.py")
 
@@ -80,6 +91,11 @@ def test_beta_workflow_builds_on_real_macos_runner_and_publishes_release() -> No
     assert "gh release create" in workflow
     assert "--prerelease" in workflow
     assert 'NOTES="docs/RELEASE_NOTES_${VERSION}.md"' in workflow
+
+
+def test_public_course_docs_stay_provider_neutral() -> None:
+    assert "Domestika" not in _text("README.md")
+    assert "Domestika" not in _text("docs/AUTHENTICATED_WEBSITES.md")
 
 
 def test_readme_has_prominent_versioned_beta_download() -> None:

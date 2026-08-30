@@ -172,16 +172,55 @@ ensure_environment() {
   printf '%s\n' "$current_revision" > "$SETUP_MARKER"
 }
 
+ffmpeg_has_subtitle_filter() {
+  local binary="$1"
+  [[ -n "$binary" && -x "$binary" ]] || return 1
+  "$binary" -hide_banner -filters 2>/dev/null \
+    | /usr/bin/grep -Eq '(^|[[:space:]])subtitles([[:space:]]|$)'
+}
+
+repair_ffmpeg_with_brew() {
+  if brew list --versions ffmpeg >/dev/null 2>&1; then
+    brew reinstall ffmpeg
+  else
+    brew install ffmpeg
+  fi
+}
+
 check_ffmpeg() {
-  if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
+  local ffmpeg_path ffprobe_path
+  ffmpeg_path="$(command -v ffmpeg 2>/dev/null || true)"
+  ffprobe_path="$(command -v ffprobe 2>/dev/null || true)"
+
+  if [[ -n "$ffmpeg_path" && -n "$ffprobe_path" ]] && ffmpeg_has_subtitle_filter "$ffmpeg_path"; then
     return 0
   fi
+
   if command -v brew >/dev/null 2>&1; then
-    if ask_yes_no "FFmpeg is required for normal video/audio processing. Install it with Homebrew now? You can choose Not now and still open DubLocal."; then
-      brew install ffmpeg || show_message "FFmpeg installation did not complete. DubLocal will still open, but media processing will remain unavailable until FFmpeg is installed."
+    if [[ -z "$ffmpeg_path" || -z "$ffprobe_path" ]]; then
+      if ask_yes_no "FFmpeg is required for normal video/audio processing. Install it with Homebrew now? You can choose Not now and still open DubLocal."; then
+        repair_ffmpeg_with_brew \
+          || show_message "FFmpeg installation did not complete. DubLocal will still open, but media processing will remain unavailable until FFmpeg is installed."
+      fi
+    else
+      if ask_yes_no "FFmpeg is installed, but this build cannot render subtitles into video. Repair FFmpeg with Homebrew now? This is required only for burned-in subtitles."; then
+        repair_ffmpeg_with_brew \
+          || show_message "FFmpeg repair did not complete. DubLocal will still open; standalone subtitles and normal media processing remain available."
+      fi
     fi
-  else
+
+    ffmpeg_path="$(command -v ffmpeg 2>/dev/null || true)"
+    ffprobe_path="$(command -v ffprobe 2>/dev/null || true)"
+    if [[ -n "$ffmpeg_path" && -n "$ffprobe_path" ]] && ! ffmpeg_has_subtitle_filter "$ffmpeg_path"; then
+      show_message "FFmpeg is available, but subtitle rendering support is still missing. DubLocal can continue to create standalone SRT files, but burned-in subtitles will stay unavailable until FFmpeg is replaced with a build that includes the subtitles filter."
+    fi
+    return 0
+  fi
+
+  if [[ -z "$ffmpeg_path" || -z "$ffprobe_path" ]]; then
     show_message "FFmpeg was not found. DubLocal will open, but normal video/audio processing needs FFmpeg. Install FFmpeg later and reopen the app."
+  elif ! ffmpeg_has_subtitle_filter "$ffmpeg_path"; then
+    show_message "FFmpeg is installed, but this build cannot render subtitles into video. DubLocal will open and standalone SRT files still work; burned-in subtitles require an FFmpeg build with the subtitles filter."
   fi
 }
 
