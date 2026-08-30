@@ -2,11 +2,21 @@
 
 DubLocal is still in active development. Versions below describe development/beta builds from `main`.
 
-> **Current beta:** `v0.6.0b3` — **adaptive long-form translation update**
+> **Current beta:** `v0.6.0b4` — **subtitle burn-in reliability update**
 >
-> Beta 3 restores large fast batches for clean material while keeping beta 2's strict alignment safeguards. Normal in-app updates continue to track official `main`.
+> Beta 4 keeps beta 3's adaptive long-form translation and fixes Shareable MP4 subtitle rendering on Macs whose normal FFmpeg build lacks the libass-backed `subtitles` filter. Normal in-app updates continue to track official `main`.
 
-## v0.6.0b3 — Adaptive long-form translation — current
+## v0.6.0b4 — Subtitle burn-in reliability — current
+
+- Detects whether the exact FFmpeg binary used for burn-in exposes the `subtitles` filter before encoding begins.
+- Uses normal FFmpeg when it supports subtitle rendering and otherwise looks for the side-by-side, keg-only Homebrew `ffmpeg-full` binary.
+- Packaged setup/update can offer `ffmpeg-full` without uninstalling or replacing core FFmpeg.
+- Keeps the VideoToolbox → `libx264` retry for genuine H.264 encoder failures.
+- A missing `subtitles` filter no longer triggers a pointless second encode with a different H.264 codec.
+- Preserves the standalone SRT and reports the actual missing capability when no subtitle-capable FFmpeg is available.
+- Added regression coverage for normal/full FFmpeg selection, missing-filter refusal, encoder fallback and the reported `Filter not found` path.
+
+## v0.6.0b3 — Adaptive long-form translation
 
 - Added an optimistic fast path: Qwen3 8B starts with up to 48 subtitle lines per model call and Qwen3 4B with up to 36.
 - A failed large batch is not sent through expensive whole-batch recovery. DubLocal retries only that section at half size, down to the established 12-line safety floor.

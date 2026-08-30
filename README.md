@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b3/DubLocal-0.6.0b3-macOS-unsigned.dmg"><img alt="Download DubLocal for macOS" src="https://img.shields.io/badge/Download-macOS%20Beta-111827?style=for-the-badge&logo=apple&logoColor=white"></a>
-  <a href="https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b3"><img alt="View GitHub release" src="https://img.shields.io/badge/GitHub-v0.6.0b3-2f81f7?style=for-the-badge&logo=github&logoColor=white"></a>
+  <a href="https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b4/DubLocal-0.6.0b4-macOS-unsigned.dmg"><img alt="Download DubLocal for macOS" src="https://img.shields.io/badge/Download-macOS%20Beta-111827?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b4"><img alt="View GitHub release" src="https://img.shields.io/badge/GitHub-v0.6.0b4-2f81f7?style=for-the-badge&logo=github&logoColor=white"></a>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 0.6.0b3" src="https://img.shields.io/badge/version-0.6.0b3-4d8dff">
+  <img alt="Version 0.6.0b4" src="https://img.shields.io/badge/version-0.6.0b4-4d8dff">
   <img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-6c7a89">
   <img alt="Local first" src="https://img.shields.io/badge/processing-local--first-19b5a5">
   <img alt="No cloud dubbing" src="https://img.shields.io/badge/cloud%20dubbing-none-19b5a5">
@@ -27,13 +27,13 @@
 
 DubLocal is a local-first macOS application for people who want to understand, translate or re-voice video without turning the job into a collection of command-line tools. Give it a YouTube link, local media file, or a supported authenticated lesson; choose what you want back; DubLocal builds the processing route and keeps the heavy work on your Mac.
 
-> **Current state:** **v0.6.0b3** is the current packaged macOS beta. Beta 3 makes contextual translation scale better from short clips to long-form material by using large clean batches and automatically shrinking only sections that fail strict subtitle alignment. The DMG remains intentionally unsigned and not notarized. Models remain optional downloads, finished outputs stay ordinary user files, and the packaged app keeps the existing safe in-app updater instead of introducing a second update system.
+> **Current state:** **v0.6.0b4** is the current packaged macOS beta. It keeps beta 3's adaptive long-form contextual translation and fixes burned Shareable MP4 export on Macs whose normal FFmpeg build does not include subtitle rendering. The DMG remains intentionally unsigned and not notarized. Models remain optional downloads, finished outputs stay ordinary user files, and the packaged app keeps the existing safe in-app updater instead of introducing a second update system.
 
 ## Install on macOS
 
-Use the **Download** button above or open the [v0.6.0b3 release](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b3).
+Use the **Download** button above or open the [v0.6.0b4 release](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b4).
 
-1. Download `DubLocal-0.6.0b3-macOS-unsigned.dmg`.
+1. Download `DubLocal-0.6.0b4-macOS-unsigned.dmg`.
 2. Open the DMG and drag **DubLocal.app** to **Applications**.
 3. Control-click/right-click **DubLocal.app** and choose **Open** the first time.
 4. If macOS still blocks it, go to **System Settings → Privacy & Security → Open Anyway**.
@@ -79,7 +79,7 @@ The queue is sequential, so a laptop is not asked to run several large speech/tr
 | Translation | Local contextual Qwen3 translation with hardware-aware context, adaptive fast/safe batching and strict subtitle alignment recovery |
 | Voice-over | Kokoro and vetted local-language providers with automatic vocal-range matching where supported |
 | Audio | Lightweight dialogue mixing everywhere; optional local Demucs separation for music-heavy material |
-| Export | MKV, compatible MP4/shareable MP4, selectable audio/subtitle tracks, subtitle-only packages |
+| Export | MKV, compatible MP4/shareable MP4, selectable or burned subtitle output, selectable audio tracks |
 | Queueing | Multiple local files, YouTube collections and course lessons processed one at a time |
 | Storage | Automatic stale-job housekeeping plus **Settings → Storage & Cleanup** |
 | Updates | In-app update from official `main` with guarded restart/repair behavior |
@@ -109,6 +109,10 @@ For subtitles, the recommended route generally prefers good creator/embedded tex
 Contextual Qwen translation keeps the same programme and nearby context, but beta 3 no longer forces every timeline through the conservative 12-line batches introduced in beta 2. Qwen3 8B starts with up to 48 subtitle lines per model call (36 on 4B). If strict ID/script validation fails, only that section is retried at half size. The floor remains 12 lines, where the bounded recovery logic takes over. After two clean smaller batches, DubLocal grows the batch size again.
 
 That means clean long-form speech avoids repeatedly re-processing the same several-thousand-token context dozens of times, while difficult YouTube auto-captions can still fall back safely. DubLocal still refuses to write an SRT when alignment cannot be established without guessing.
+
+### Burned subtitles use an FFmpeg build that can actually render them
+
+Normal media work can use the regular FFmpeg installation. Burned Shareable MP4 output additionally needs FFmpeg's libass-backed `subtitles` filter. Beta 4 checks this before starting the encode and can use a side-by-side Homebrew `ffmpeg-full` build when the normal binary lacks the filter. It no longer retries an H.264 encoder when the real problem is a missing video filter.
 
 ### Original media is preserved where practical
 
