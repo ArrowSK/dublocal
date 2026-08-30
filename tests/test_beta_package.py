@@ -46,6 +46,19 @@ def test_packaged_updater_reenters_bootstrap_before_restart() -> None:
     assert 'restart = _restart_command(root)' in update
 
 
+def test_beta_bootstrap_can_prepare_subtitle_capable_ffmpeg_without_replacing_core() -> None:
+    script = _text("scripts/macos/beta-bootstrap.sh")
+
+    assert "ffmpeg_has_subtitles()" in script
+    assert "subtitle_ffmpeg_available()" in script
+    assert "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg" in script
+    assert "/usr/local/opt/ffmpeg-full/bin/ffmpeg" in script
+    assert "brew install ffmpeg-full" in script
+    assert '[[ "$SETUP_CHANGED" != "1" ]]' in script
+    assert "brew uninstall ffmpeg" not in script
+    assert "burned Shareable MP4" in script
+
+
 def test_beta_builder_creates_branded_unsigned_dmg() -> None:
     script = _text("scripts/macos/build-beta-dmg.sh")
 
