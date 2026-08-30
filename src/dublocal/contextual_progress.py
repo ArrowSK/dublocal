@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -46,6 +46,42 @@ from .translation_quality import is_protected_caption_tag, validate_translation_
 
 
 ProgressCallback = Callable[[float, str], None]
+
+_ADAPTIVE_BATCH_MIN = 12
+_ADAPTIVE_BATCH_MAX_4B = 36
+_ADAPTIVE_BATCH_MAX_8B = 48
+_ADAPTIVE_CACHE_POLICY = "adaptive-2026-08-30.1"
+
+
+@dataclass(slots=True)
+class _AdaptiveBatchState:
+    """Optimistically use large batches, shrinking only after an alignment failure."""
+
+    current: int
+    maximum: int
+    minimum: int = _ADAPTIVE_BATCH_MIN
+    clean_streak: int = 0
+    split_count: int = 0
+
+    def shrink(self, attempted_span: int) -> bool:
+        if attempted_span <= self.minimum:
+            return False
+        smaller = max(self.minimum, attempted_span // 2)
+        if smaller >= attempted_span:
+            return False
+        self.current = min(self.current, smaller)
+        self.clean_streak = 0
+        self.split_count += 1
+        return True
+
+    def mark_success(self, *, recovered: bool) -> None:
+        if recovered:
+            self.clean_streak = 0
+            return
+        self.clean_streak += 1
+        if self.clean_streak >= 2 and self.current < self.maximum:
+            self.current = min(self.maximum, self.current * 2)
+            self.clean_streak = 0
 
 
 def _validated_chunk(
@@ -230,16 +266,19 @@ def _translate_chunk_with_recovery(
     chunk_number: int,
     total_chunks: int,
     progress_callback: ProgressCallback | None,
+    initial_raw: str | None = None,
 ) -> list[str]:
     """Translate one chunk and repair malformed output with bounded model calls.
 
-    Recovery used to make one full-context model call for every missing subtitle. A
-    malformed 48-line chunk could therefore turn into dozens of expensive calls. Keep
-    strict validation, but recover all missing IDs together and reserve one compact
-    single-line retry only for the final stubborn ID.
+    Adaptive translation normally gives large batches one cheap strict attempt first.
+    When the batch has already reached the safe floor, ``initial_raw`` lets this
+    recovery path reuse that response instead of spending another identical model call.
     """
 
-    raw = runtime.generate(prompt, max_output_tokens=max_output_tokens)
+    raw = initial_raw if initial_raw is not None else runtime.generate(
+        prompt,
+        max_output_tokens=max_output_tokens,
+    )
     try:
         return _validated_chunk(
             recover_chunk_output(raw, target_segments),
@@ -269,14 +308,11 @@ def _translate_chunk_with_recovery(
     absorb(raw, target_segments)
     last_output = raw
 
-    # If the primary response contained no usable aligned IDs, make one whole-chunk
-    # format repair. If it contained useful IDs, keep them and go directly to a compact
-    # missing-ID batch instead of translating the whole chunk again.
     if not recovered:
         if progress_callback:
             progress_callback(
                 max(0.02, min(0.88, (chunk_number - 0.4) / max(1, total_chunks) * 0.80 + 0.02)),
-                f"Repairing output format for chunk {chunk_number}/{total_chunks}",
+                f"Repairing output format for batch {chunk_number}/{total_chunks}",
             )
         repaired = runtime.generate(
             build_format_repair_prompt(raw, target_segments, target_label),
@@ -294,8 +330,6 @@ def _translate_chunk_with_recovery(
 
     missing = [segment for segment in target_segments if segment.index not in recovered]
 
-    # At most two compact batch retries, regardless of how many subtitle IDs are
-    # missing. This is the main performance guard for malformed model responses.
     for attempt in range(1, 3):
         if not missing:
             break
@@ -321,9 +355,6 @@ def _translate_chunk_with_recovery(
         absorb(recovery_output, missing)
         missing = [segment for segment in target_segments if segment.index not in recovered]
 
-    # If one ID remains, first try to interpret the last batch response more
-    # permissively. Only if that still fails do one final compact single-line model
-    # call. Never enter an unbounded per-subtitle loop.
     if len(missing) == 1:
         segment = missing[0]
         try:
@@ -361,7 +392,7 @@ def _translate_chunk_with_recovery(
         still_missing = [segment.index for segment in missing]
         raise DubLocalError(
             "Contextual translator could not recover all required subtitle IDs "
-            f"for chunk {chunk_number}/{total_chunks} after bounded batch recovery "
+            f"for batch {chunk_number}/{total_chunks} after bounded batch recovery "
             f"(missing={still_missing[:8]}). DubLocal stopped instead of writing a corrupted SRT."
         )
 
@@ -457,6 +488,14 @@ def translate_srt_contextual_with_progress(
     if plan.input_budget_tokens > selected_context_cap:
         plan = replace(plan, input_budget_tokens=selected_context_cap)
 
+    adaptive_max_batch = (
+        _ADAPTIVE_BATCH_MAX_8B if selected_model_key == "8b" else _ADAPTIVE_BATCH_MAX_4B
+    )
+    batch_state = _AdaptiveBatchState(
+        current=adaptive_max_batch,
+        maximum=adaptive_max_batch,
+    )
+
     cache_key = translation_cache_key(
         source_srt_text,
         requested_source_language=requested_source,
@@ -466,9 +505,9 @@ def translate_srt_contextual_with_progress(
         model_sha256=str(spec.metadata.get("sha256") or ""),
         review=selected_review,
         context_cap_tokens=selected_context_cap,
-        chunk_segments=plan.chunk_segments,
+        chunk_segments=adaptive_max_batch,
         input_budget_tokens=plan.input_budget_tokens,
-        prompt_version=CONTEXTUAL_PROMPT_VERSION,
+        prompt_version=f"{CONTEXTUAL_PROMPT_VERSION}+{_ADAPTIVE_CACHE_POLICY}",
     )
     cached = _validated_cached_translation(
         load_translation_cache(cache_key, segments, target_language=target),
@@ -492,34 +531,33 @@ def translate_srt_contextual_with_progress(
             route=route,
         )
 
-    # A verified cache hit above is intentionally usable even if llama.cpp or the
-    # model is temporarily unavailable. A cache miss still requires the exact model.
     if not _llama_command() or not contextual_model_valid(selected_model_key):
         raise ContextualTranslationMissingError(
             f"{spec.label} contextual translation is not prepared. Open Settings → Model Manager → Contextual translation and click Prepare / verify."
         )
 
-    starts = list(range(0, len(segments), plan.chunk_segments))
-    total_chunks = max(1, len(starts))
     translated: list[TranslatedSegment] = []
     protected_count = sum(1 for segment in segments if is_protected_caption_tag(segment.text))
     needs_model = protected_count < len(segments) or source_is_auto
     runtime_mode = "not needed"
+    initial_batches = max(1, (len(segments) + adaptive_max_batch - 1) // adaptive_max_batch)
 
     if progress_callback:
         progress_callback(
             0.02,
-            f"Preparing {total_chunks} contextual chunk(s) · {protected_count} protected tag(s)",
+            f"Preparing adaptive translation · up to {adaptive_max_batch} subtitles per batch · {protected_count} protected tag(s)",
         )
 
     runtime: ContextualRuntime | None = None
+    committed_batch_sizes: list[int] = []
+    completed_batches = 0
     try:
         if needs_model:
             if progress_callback:
                 pass_name = " + review" if selected_review else ""
                 progress_callback(
                     0.03,
-                    f"Loading {spec.label}{pass_name} once for this translation",
+                    f"Loading {spec.label}{pass_name} once for this translation · about {initial_batches} fast batch(es) if alignment stays clean",
                 )
             runtime = ContextualRuntime(
                 model_key=selected_model_key,
@@ -542,13 +580,21 @@ def translate_srt_contextual_with_progress(
                     f"Detected {TRANSLATION_LANGUAGES[source]['label']} · starting translation",
                 )
 
-        for chunk_number, start in enumerate(starts, start=1):
-            end = min(len(segments), start + plan.chunk_segments)
+        start = 0
+        while start < len(segments):
+            attempt_span = min(batch_state.current, len(segments) - start)
+            end = start + attempt_span
             target_segments = segments[start:end]
             model_targets = [
                 segment for segment in target_segments if not is_protected_caption_tag(segment.text)
             ]
             translated_map: dict[int, str] = {}
+            used_recovery = False
+            batch_number = completed_batches + 1
+            estimated_total = completed_batches + max(
+                1,
+                (len(segments) - start + batch_state.current - 1) // batch_state.current,
+            )
 
             if model_targets:
                 assert runtime is not None
@@ -563,16 +609,36 @@ def translate_srt_contextual_with_progress(
                 )
                 target_text = "\n".join(segment.text for segment in model_targets)
                 max_output_tokens = max(512, estimate_tokens(target_text) * 2 + 256)
-                draft = _translate_chunk_with_recovery(
-                    runtime,
-                    prompt,
-                    model_targets,
-                    target,
-                    max_output_tokens=max_output_tokens,
-                    chunk_number=chunk_number,
-                    total_chunks=total_chunks,
-                    progress_callback=progress_callback,
-                )
+
+                primary_raw = runtime.generate(prompt, max_output_tokens=max_output_tokens)
+                try:
+                    draft = _validated_chunk(
+                        recover_chunk_output(primary_raw, model_targets),
+                        model_targets,
+                        target,
+                    )
+                except DubLocalError:
+                    if len(model_targets) > batch_state.minimum and batch_state.shrink(attempt_span):
+                        if progress_callback:
+                            progress_callback(
+                                min(0.94, start / max(1, len(segments)) * 0.90 + 0.04),
+                                f"Large batch did not align cleanly · retrying this section as {batch_state.current} subtitles instead of {attempt_span}",
+                            )
+                        continue
+
+                    used_recovery = True
+                    draft = _translate_chunk_with_recovery(
+                        runtime,
+                        prompt,
+                        model_targets,
+                        target,
+                        max_output_tokens=max_output_tokens,
+                        chunk_number=batch_number,
+                        total_chunks=estimated_total,
+                        progress_callback=progress_callback,
+                        initial_raw=primary_raw,
+                    )
+
                 chunk = (
                     _review_chunk(
                         runtime,
@@ -581,8 +647,8 @@ def translate_srt_contextual_with_progress(
                         draft,
                         target,
                         max_output_tokens=max_output_tokens,
-                        chunk_number=chunk_number,
-                        total_chunks=total_chunks,
+                        chunk_number=batch_number,
+                        total_chunks=estimated_total,
                         progress_callback=progress_callback,
                     )
                     if selected_review
@@ -609,14 +675,20 @@ def translate_srt_contextual_with_progress(
                     )
                 )
 
+            committed_batch_sizes.append(attempt_span)
+            start = end
+            completed_batches += 1
+            batch_state.mark_success(recovered=used_recovery)
+
             if progress_callback:
+                status = (
+                    f"Translated + reviewed {start}/{len(segments)} subtitles"
+                    if selected_review
+                    else f"Translated {start}/{len(segments)} subtitles"
+                )
                 progress_callback(
-                    min(0.97, chunk_number / total_chunks * 0.92 + 0.04),
-                    (
-                        f"Translated + reviewed chunk {chunk_number}/{total_chunks}"
-                        if selected_review
-                        else f"Translated chunk {chunk_number}/{total_chunks}"
-                    ),
+                    min(0.97, start / max(1, len(segments)) * 0.92 + 0.04),
+                    f"{status} · next batch up to {batch_state.current}",
                 )
     finally:
         if runtime is not None:
@@ -626,10 +698,24 @@ def translate_srt_contextual_with_progress(
     if progress_callback:
         progress_callback(1.0, "Contextual translation complete")
 
+    active_sizes = [size for size in committed_batch_sizes if size > 0]
+    if active_sizes:
+        smallest_batch = min(active_sizes)
+        largest_batch = max(active_sizes)
+        batch_route = (
+            f"adaptive batches {smallest_batch}–{largest_batch}"
+            if smallest_batch != largest_batch
+            else f"adaptive batches {largest_batch}"
+        )
+    else:
+        batch_route = "adaptive batches not needed"
+    if batch_state.split_count:
+        batch_route += f" · {batch_state.split_count} safe split{'s' if batch_state.split_count != 1 else ''}"
+
     route = (
         f"{spec.label} {'+ review' if selected_review else 'single pass'} · "
         f"{TRANSLATION_LANGUAGES[source]['label']} → {TRANSLATION_LANGUAGES[target]['label']} · "
-        f"{plan.input_budget_tokens}-token input · {runtime_mode}"
+        f"{plan.input_budget_tokens}-token input · {batch_route} · {runtime_mode}"
     )
     save_translation_cache(
         cache_key,
