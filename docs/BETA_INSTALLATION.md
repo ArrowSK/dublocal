@@ -1,20 +1,20 @@
-# Install DubLocal 0.6.0b1 on macOS
+# Install DubLocal 0.6.0b2 on macOS
 
-DubLocal 0.6.0b1 is the first packaged macOS beta. Installation is the familiar Mac pattern: download a DMG, drag the app to Applications, open it.
+DubLocal 0.6.0b2 is the current packaged macOS beta. Installation is the familiar Mac pattern: download a DMG, drag the app to Applications, open it.
 
 The only unusual part is the first-launch security prompt. This beta is intentionally **unsigned and not notarized**, so macOS will ask you to approve it once.
 
 ## Download
 
-**[Download DubLocal 0.6.0b1 for macOS](https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b1/DubLocal-0.6.0b1-macOS-unsigned.dmg)**
+**[Download DubLocal 0.6.0b2 for macOS](https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b2/DubLocal-0.6.0b2-macOS-unsigned.dmg)**
 
-Release page: [v0.6.0b1](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b1)
+Release page: [v0.6.0b2](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b2)
 
 A SHA-256 checksum is published beside the DMG on the release page.
 
 ## Install in five steps
 
-1. Open `DubLocal-0.6.0b1-macOS-unsigned.dmg`.
+1. Open `DubLocal-0.6.0b2-macOS-unsigned.dmg`.
 2. Drag **DubLocal.app** onto **Applications**.
 3. Open Applications, Control-click/right-click **DubLocal.app**, and choose **Open**.
 4. Confirm that you want to open it. If macOS still blocks the app, go to **System Settings → Privacy & Security → Open Anyway**.
@@ -69,7 +69,7 @@ If Git is missing, the app can ask macOS to start the Command Line Tools install
 
 The current beta creates its private environment from a compatible local Python. When Homebrew is available, DubLocal can offer to install Python 3.11 if no compatible interpreter is found.
 
-A later fully bundled runtime can remove this first-beta dependency; 0.6.0b1 does not pretend it is bundled when it is not.
+A later fully bundled runtime can remove this beta dependency; 0.6.0b2 does not pretend it is bundled when it is not.
 
 ### FFmpeg
 
