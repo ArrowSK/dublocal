@@ -29,13 +29,14 @@ def test_quality_model_is_official_pinned_and_permissive():
     assert QUALITY_CONTEXT_MODEL["license"] == "Apache-2.0"
 
 
-def test_short_song_is_planned_as_one_context_chunk():
+def test_short_song_keeps_context_but_uses_resilient_output_chunks():
     segments = [_segment(index, f"Lyric line {index}") for index in range(1, 35)]
-    # Keep the final timestamp within ten minutes.
+    # Keep the final timestamp within ten minutes. Programme context remains shared,
+    # while output is intentionally split so one formatting error cannot strand 34 IDs.
     segments[-1] = Segment(index=34, start_ms=330_000, end_ms=360_000, text="Last lyric")
     plan = context_plan(segments)
-    assert plan.chunk_segments == 48
-    assert len(segments) <= plan.chunk_segments
+    assert plan.chunk_segments == 24
+    assert len(segments) > plan.chunk_segments
 
 
 def test_caption_tags_are_structural_not_translation_text():
