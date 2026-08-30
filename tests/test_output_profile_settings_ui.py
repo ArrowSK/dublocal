@@ -9,8 +9,8 @@ def test_output_profile_settings_offer_each_format_and_auto_profiles():
 
     assert "Output profiles" in rendered
     assert "Auto · format-aware" in rendered
-    assert '"label":"MKV"' in rendered
-    assert '"label":"MP4"' in rendered
-    assert '"label":"Shareable MP4"' in rendered
+    assert "'label': 'MKV'" in rendered
+    assert "'label': 'MP4'" in rendered
+    assert "'label': 'Shareable MP4'" in rendered
     assert "Compact · sharing / storage" in rendered
     assert "Balanced · good quality / smaller file" in rendered
