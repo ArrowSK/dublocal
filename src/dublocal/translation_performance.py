@@ -125,14 +125,23 @@ def translate_srt_contextual_optimized(
 
     recommendation = contextual_progress.active_recommendation()
     selected_model_key = model_key or recommendation.model_key
+
+    # Only tune DubLocal's native llama.cpp runtime. Tests, library callers and future
+    # custom runtimes may deliberately replace ContextualRuntime and can have different
+    # context/batch semantics; preserving that hook is part of the compatibility contract.
+    native_runtime = contextual_progress.ContextualRuntime is _BaseContextualRuntime
     selected_context_cap = context_cap_tokens
-    if selected_context_cap is None and segments:
+    if selected_context_cap is None and segments and native_runtime:
         selected_context_cap = effective_context_cap(
             segments,
             recommendation.context_cap_tokens,
         )
 
-    selected_batch_max = adaptive_batch_max(selected_model_key, segments) if segments else None
+    selected_batch_max = (
+        adaptive_batch_max(selected_model_key, segments)
+        if segments and native_runtime
+        else None
+    )
 
     # The UI queue is single-job, but protect library/direct callers too because the
     # established translator reads these compatibility constants at call time.
@@ -145,7 +154,8 @@ def translate_srt_contextual_optimized(
                 contextual_progress._ADAPTIVE_BATCH_MAX_8B = selected_batch_max
             else:
                 contextual_progress._ADAPTIVE_BATCH_MAX_4B = selected_batch_max
-        contextual_progress.ContextualRuntime = CachedContextualRuntime
+        if native_runtime:
+            contextual_progress.ContextualRuntime = CachedContextualRuntime
         try:
             return _ORIGINAL_TRANSLATE(
                 subtitle_path,
