@@ -8,6 +8,7 @@ Start with the job in front of you:
 | --- | --- |
 | Install the macOS beta | [Beta installation](BETA_INSTALLATION.md) |
 | Dub, translate or subtitle a video | [User Guide](USER_GUIDE.md) |
+| Choose sensible file size/quality by format | [Output profiles](OUTPUT_PROFILES.md) |
 | Fix something that is not working | [Troubleshooting](TROUBLESHOOTING.md) |
 | Understand what is taking disk space | [Storage & Cleanup](STORAGE_CLEANUP.md) |
 | Use a signed-in course/website | [Authenticated websites](AUTHENTICATED_WEBSITES.md) |
@@ -22,7 +23,11 @@ The short, practical path from DMG to a running DubLocal. It explains the one-ti
 
 ### [User Guide](USER_GUIDE.md)
 
-Use this when Magic Flow is not self-explanatory or when you want to understand Simple vs Advanced mode, subtitle selection, local translation, voice-over, media export and course jobs.
+Use this when the Standard workflow is not self-explanatory or when you want to understand Standard vs Advanced mode, subtitle selection, local translation, voice-over, media export and course jobs.
+
+### [Output profiles](OUTPUT_PROFILES.md)
+
+Explains the persistent Auto/Original/High/Balanced/Compact profiles for MKV, MP4 and Shareable MP4, the current size targets, and how the per-job Resolution limit interacts with them.
 
 ### [Troubleshooting](TROUBLESHOOTING.md)
 
@@ -64,7 +69,7 @@ What has been hardened already and what still counts as beta/validation work.
 
 ### [UX notes](UX_NOTES.md)
 
-The reasoning behind Simple/Advanced separation and the application's current interaction model.
+The reasoning behind Standard/Advanced separation and the application's current interaction model.
 
 ## Historical / implementation notes
 
