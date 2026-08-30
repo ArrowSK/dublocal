@@ -54,6 +54,7 @@ def test_beta_builder_creates_branded_unsigned_dmg() -> None:
     assert "/usr/bin/osacompile -o" in script
     assert "io.github.arrowsk.dublocal" in script
     assert "CFBundleShortVersionString" in script
+    assert 'BASE_VERSION="${VERSION%%b*}"' in script
     assert "/usr/bin/codesign --remove-signature" in script
     assert "/usr/bin/codesign -dv" in script
     assert "/usr/bin/hdiutil create" in script
@@ -78,15 +79,17 @@ def test_beta_workflow_builds_on_real_macos_runner_and_publishes_release() -> No
     assert "gh release view" in workflow
     assert "gh release create" in workflow
     assert "--prerelease" in workflow
-    assert "docs/RELEASE_NOTES_0.6.0b1.md" in workflow
+    assert 'NOTES="docs/RELEASE_NOTES_${VERSION}.md"' in workflow
 
 
 def test_readme_has_prominent_versioned_beta_download() -> None:
+    metadata = tomllib.loads(_text("pyproject.toml"))
+    version = metadata["project"]["version"]
     readme = _text("README.md")
 
     assert "style=for-the-badge" in readme
-    assert "releases/download/v0.6.0b1/DubLocal-0.6.0b1-macOS-unsigned.dmg" in readme
-    assert "releases/tag/v0.6.0b1" in readme
+    assert f"releases/download/v{version}/DubLocal-{version}-macOS-unsigned.dmg" in readme
+    assert f"releases/tag/v{version}" in readme
     assert "docs/README.md" in readme
 
 
@@ -97,3 +100,4 @@ def test_beta_package_version_matches_python_package() -> None:
 
     assert f'__version__ = "{version}"' in init
     assert version in _text("scripts/macos/beta-bootstrap.sh")
+    assert (ROOT / f"docs/RELEASE_NOTES_{version}.md").is_file()
