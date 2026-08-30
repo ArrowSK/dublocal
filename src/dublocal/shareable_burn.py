@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Iterable
@@ -35,6 +36,94 @@ def _filter_escape(path: Path) -> str:
         .replace("]", "\\]")
         .replace(";", "\\;")
     )
+
+
+def _ffmpeg_has_filter(executable: str, filter_name: str = "subtitles") -> bool:
+    """Return whether this exact FFmpeg binary exposes the requested video filter."""
+
+    try:
+        result = subprocess.run(
+            [executable, "-hide_banner", "-filters"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if result.returncode != 0:
+        return False
+
+    # FFmpeg's filter table is whitespace-delimited and places the filter name in the
+    # second column, e.g. ``T.C subtitles V->V``. Check the token rather than merely
+    # searching the help text for the word "subtitles".
+    for line in (result.stdout + "\n" + result.stderr).splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == filter_name:
+            return True
+    return False
+
+
+def _subtitle_ffmpeg_candidates() -> list[str]:
+    """Return normal FFmpeg first, then known keg-only ffmpeg-full locations."""
+
+    candidates: list[str] = []
+    try:
+        candidates.append(magic_flow._require("ffmpeg"))
+    except DubLocalError:
+        pass
+
+    candidates.extend(
+        [
+            "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg",
+            "/usr/local/opt/ffmpeg-full/bin/ffmpeg",
+        ]
+    )
+
+    # Homebrew can live under a custom prefix. ffmpeg-full is intentionally keg-only,
+    # so it may not be visible through PATH even though it is installed and usable.
+    brew = shutil.which("brew")
+    if brew:
+        try:
+            prefix = subprocess.run(
+                [brew, "--prefix", "ffmpeg-full"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            prefix = None
+        if prefix is not None and prefix.returncode == 0 and prefix.stdout.strip():
+            candidates.append(str(Path(prefix.stdout.strip()) / "bin" / "ffmpeg"))
+
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+
+
+def _burn_ffmpeg() -> str:
+    """Select an FFmpeg binary that can actually render SRT text through libass."""
+
+    candidates = _subtitle_ffmpeg_candidates()
+    for executable in candidates:
+        if _ffmpeg_has_filter(executable, "subtitles"):
+            return executable
+
+    if not candidates:
+        raise DubLocalError(
+            "Subtitle burn-in needs FFmpeg, but DubLocal could not find any FFmpeg binary. "
+            "Reopen DubLocal after preparing FFmpeg; the standalone SRT remains available."
+        )
+    raise DubLocalError(
+        "Subtitle burn-in needs an FFmpeg build with the subtitles/libass filter. "
+        "DubLocal found FFmpeg, but this build cannot render subtitle text. "
+        "Packaged beta users can reopen after updating and accept the optional "
+        "ffmpeg-full setup. The standalone SRT remains available."
+    )
+
+
+def _is_missing_filter_error(exc: Exception) -> bool:
+    message = str(exc).casefold()
+    return "filter not found" in message or "no such filter" in message
 
 
 def _burned_shareable_media(
@@ -76,7 +165,7 @@ def _burned_shareable_media(
     shutil.copy2(subtitle, burn_srt)
     suffix = safe_language_suffix(language)
     output = output_dir / f"{safe_media_stem(info)}.share-burned.{suffix}.mp4"
-    ffmpeg = magic_flow._require("ffmpeg")
+    ffmpeg = _burn_ffmpeg()
 
     filters: list[str] = []
     if scale_height is not None:
@@ -141,6 +230,16 @@ def _burned_shareable_media(
     try:
         run(command, "Burning subtitles into shareable MP4")
     except DubLocalError as exc:
+        # A missing filter is not an encoder problem. Retrying the identical filter
+        # graph with libx264 only wastes another full export attempt and hides the real
+        # dependency issue behind a misleading "software H.264 fallback" error.
+        if _is_missing_filter_error(exc):
+            raise DubLocalError(
+                "The selected FFmpeg build reported that its subtitles/libass filter is unavailable. "
+                "Update/reopen DubLocal and allow the optional ffmpeg-full setup. "
+                "The standalone SRT remains available."
+            ) from exc
+
         fallback = list(command)
         if "h264_videotoolbox" not in fallback:
             raise
@@ -148,6 +247,12 @@ def _burned_shareable_media(
         try:
             run(fallback, "Burning subtitles into shareable MP4 · software H.264 fallback")
         except DubLocalError as fallback_exc:
+            if _is_missing_filter_error(fallback_exc):
+                raise DubLocalError(
+                    "The selected FFmpeg build reported that its subtitles/libass filter is unavailable. "
+                    "Update/reopen DubLocal and allow the optional ffmpeg-full setup. "
+                    "The standalone SRT remains available."
+                ) from fallback_exc
             raise DubLocalError(
                 f"Could not burn subtitles into the shareable H.264/AAC MP4 ({fallback_exc}). "
                 "The standalone SRT remains available."
