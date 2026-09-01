@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b7/DubLocal-0.6.0b7-macOS-unsigned.dmg"><img alt="Download DubLocal for macOS" src="https://img.shields.io/badge/Download-macOS%20Beta-111827?style=for-the-badge&logo=apple&logoColor=white"></a>
-  <a href="https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b7"><img alt="View GitHub release" src="https://img.shields.io/badge/GitHub-v0.6.0b7-2f81f7?style=for-the-badge&logo=github&logoColor=white"></a>
+  <a href="https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b8/DubLocal-0.6.0b8-macOS-unsigned.dmg"><img alt="Download DubLocal for macOS" src="https://img.shields.io/badge/Download-macOS%20Beta-111827?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b8"><img alt="View GitHub release" src="https://img.shields.io/badge/GitHub-v0.6.0b8-2f81f7?style=for-the-badge&logo=github&logoColor=white"></a>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 0.6.0b7" src="https://img.shields.io/badge/version-0.6.0b7-4d8dff">
+  <img alt="Version 0.6.0b8" src="https://img.shields.io/badge/version-0.6.0b8-4d8dff">
   <img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-6c7a89">
   <img alt="Local first" src="https://img.shields.io/badge/processing-local--first-19b5a5">
   <img alt="No cloud dubbing" src="https://img.shields.io/badge/cloud%20dubbing-none-19b5a5">
@@ -27,13 +27,13 @@
 
 DubLocal is a local-first application for people who want to understand, translate or re-voice video without turning the job into a collection of command-line tools. Give it a YouTube link, local media file, or a supported authenticated lesson; choose what you want back; DubLocal builds the processing route and keeps the heavy work local.
 
-> **Current state:** **v0.6.0b7** is the current packaged macOS beta. Beta 7 adds Hungarian voice-over with macOS system-voice Auto selection and a cross-platform Piper fallback, while retaining beta 6's translation-performance work, beta 5's format-aware output profiles and beta 4's subtitle-capable FFmpeg handling. The backend now carries Windows portability tests for the Hungarian provider, but a Windows installer is not published yet. The macOS DMG remains intentionally unsigned and not notarized.
+> **Current state:** **v0.6.0b8** is the current packaged macOS beta. Beta 8 consolidates the active production runtime into explicit services and dependency injection, removes import-time function/class and Gradio-constructor replacement from the running application path, and folds authenticated-source credential/DRM policy into the canonical provider. It retains beta 7's Hungarian voice-over, beta 6's translation-performance work, beta 5's format-aware output profiles and beta 4's subtitle-capable FFmpeg handling. The backend continues to carry Windows portability checks for the Hungarian provider, but a Windows installer is not published yet. The macOS DMG remains intentionally unsigned and not notarized.
 
 ## Install on macOS
 
-Use the **Download** button above or open the [v0.6.0b7 release](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b7).
+Use the **Download** button above or open the [v0.6.0b8 release](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b8).
 
-1. Download `DubLocal-0.6.0b7-macOS-unsigned.dmg`.
+1. Download `DubLocal-0.6.0b8-macOS-unsigned.dmg`.
 2. Open the DMG and drag **DubLocal.app** to **Applications**.
 3. Control-click/right-click **DubLocal.app** and choose **Open** the first time.
 4. If macOS still blocks it, go to **System Settings → Privacy & Security → Open Anyway**.
@@ -155,6 +155,8 @@ DubLocal can keep original audio, add a dubbed track and retain selectable subti
 ### Authenticated websites are treated as sources, not a bypass system
 
 DubLocal can open a dedicated local Chromium profile for supported sites. You sign in directly on the site; DubLocal does not ask for the password. Ordinary authorised non-DRM lesson media can then enter the normal local pipeline. Protected DRM/encrypted streams are refused rather than circumvented.
+
+Signed media URLs are sanitized before errors/resume data are persisted: reusable credential/signing query values are redacted, while ordinary lesson-routing parameters are retained so different lessons are not accidentally collapsed into one resume identity.
 
 See **[Authenticated websites](docs/AUTHENTICATED_WEBSITES.md)** for the exact boundary.
 
