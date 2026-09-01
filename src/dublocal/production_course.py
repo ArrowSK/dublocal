@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from . import authenticated_web as web
-from .authenticated_web_policy import redact_authenticated_error
 from .batch_flow import BatchFlowResult, QueueItem, QueueItemResult
 from .job_control import JobCancelled, cancel_requested, check_cancelled
 from .media import DubLocalError
@@ -16,17 +15,11 @@ def _pending_selection(
     inspection: SourceInspection,
     selected_ids: list[str] | tuple[str, ...] | None,
 ) -> tuple[SourceItem, ...]:
-    states = web._manifest_states(inspection.source_url)
-    if selected_ids is None:
-        candidates = inspection.items
-    else:
-        wanted = {str(value) for value in selected_ids}
-        candidates = tuple(item for item in inspection.items if item.id in wanted)
-    return tuple(item for item in candidates if states.get(item.id) != "done")
+    return web._selected_items(inspection, selected_ids)
 
 
 def _safe_error(value: object) -> str:
-    return redact_authenticated_error(str(value)) or "Authenticated processing failed."
+    return web.redact_authenticated_error(str(value)) or "Authenticated processing failed."
 
 
 def run_course_queue(
