@@ -2,11 +2,23 @@
 
 DubLocal is still in active development. Versions below describe development/beta builds from `main`.
 
-> **Current beta:** `v0.6.0b6` — **contextual translation performance**
+> **Current beta:** `v0.6.0b7` — **cross-platform Hungarian voice-over**
 >
-> Beta 6 reduces avoidable Qwen prompt/KV work on highly fragmented caption timelines without changing the selected translation model, prompt, subtitle-ID validation, recovery, voice generation or output-quality policy. Normal in-app updates continue to track official `main`.
+> Beta 7 adds Hungarian voice-over with macOS system-voice Auto selection and a pinned Piper fallback that also provides the Windows/non-macOS path. Normal in-app updates continue to track official `main`.
 
-## v0.6.0b6 — Contextual translation performance — current
+## v0.6.0b7 — Cross-platform Hungarian voice-over — current
+
+- Added Hungarian as a complete translation → voice-over target in the existing Standard workflow.
+- On macOS, Auto prefers an installed `hu_HU` system voice while keeping Piper voices selectable.
+- On Windows and other platforms, Hungarian uses Piper only; no Apple-only dependency is required by the provider backend.
+- Added Piper Anna, Berta and Imre with pinned voice-repository revision and local model/config integrity verification.
+- Added a dedicated Piper runtime environment so GPL Piper is invoked out of process rather than imported into DubLocal's Apache-2.0 application runtime.
+- Kept preparation explicit: a processing job does not silently install Piper or download a Hungarian voice model.
+- Hungarian synthesis follows the timed-SRT contract and regenerates only materially overflowing lines at a faster native speaking rate.
+- Added provider-neutral voice progress copy and Windows CI portability coverage.
+- Added explicit documentation that macOS system voices are OS-provided and DubLocal does not assert separate commercial/redistribution rights for their output.
+
+## v0.6.0b6 — Contextual translation performance
 
 - Added fragmentation-aware optimistic translation batches: normal sentence-sized subtitles keep the established 48/36 limits, while very dense short-caption timelines can begin at 96 lines on Qwen3 8B or 72 on 4B.
 - Kept the existing adaptive safety ladder: any larger attempt that fails strict alignment is retried at half size until the established 12-line floor and bounded recovery path take over.
