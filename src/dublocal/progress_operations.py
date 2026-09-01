@@ -9,7 +9,8 @@ from typing import Callable
 from platformdirs import user_cache_dir
 
 from .transcription import WHISPER_MODELS, install_whisper_model, whisper_model_path
-from .tts import VoiceTrackResult, generate_voice_track
+from .tts import VoiceTrackResult
+from .voice_engine import generate_voice_track
 
 
 ProgressCallback = Callable[[float, str], None]
