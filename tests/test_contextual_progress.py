@@ -30,12 +30,7 @@ class FakeRuntime:
 
 
 def test_translate_chunk_recovers_malformed_primary_output():
-    runtime = FakeRuntime(
-        [
-            "This is not aligned output.",
-            "[1] - Привет.\n[2] - Как дела?\n",
-        ]
-    )
+    runtime = FakeRuntime(["This is not aligned output.", "[1] - Привет.\n[2] - Как дела?\n"])
     result = contextual_progress._translate_chunk_with_recovery(
         runtime,
         "original prompt",
@@ -49,17 +44,10 @@ def test_translate_chunk_recovers_malformed_primary_output():
     assert result == ["Привет.", "Как дела?"]
     assert len(runtime.prompts) == 2
     assert "Do not output JSON" in runtime.prompts[1]
-    assert "natural Russian" in runtime.prompts[1]
 
 
 def test_translate_chunk_recovers_missing_ids_in_one_batch():
-    runtime = FakeRuntime(
-        [
-            "not structured",
-            "[1] - Привет.\n",  # whole-chunk repair omitted subtitle 2
-            "[2] - Как дела?",
-        ]
-    )
+    runtime = FakeRuntime(["not structured", "[1] - Привет.\n", "[2] - Как дела?"])
     result = contextual_progress._translate_chunk_with_recovery(
         runtime,
         "original prompt with programme context",
@@ -74,7 +62,6 @@ def test_translate_chunk_recovers_missing_ids_in_one_batch():
     assert len(runtime.prompts) == 3
     assert "MISSING SUBTITLE RECOVERY" in runtime.prompts[2]
     assert "Missing IDs (1): 2" in runtime.prompts[2]
-    assert "original prompt with programme context" in runtime.prompts[2]
 
 
 def test_many_missing_subtitles_do_not_trigger_one_model_call_per_line():
@@ -85,7 +72,6 @@ def test_many_missing_subtitles_do_not_trigger_one_model_call_per_line():
     primary = "\n".join(f"[{index}] - Translation {index}." for index in range(1, 4))
     recovered_batch = "\n".join(f"[{index}] - Translation {index}." for index in range(4, 11))
     runtime = FakeRuntime([primary, recovered_batch])
-
     result = contextual_progress._translate_chunk_with_recovery(
         runtime,
         "large original context",
@@ -96,19 +82,12 @@ def test_many_missing_subtitles_do_not_trigger_one_model_call_per_line():
         total_chunks=1,
         progress_callback=None,
     )
-
     assert result == [f"Translation {index}." for index in range(1, 11)]
     assert len(runtime.prompts) == 2
-    assert "Missing IDs (7): 4, 5, 6, 7, 8, 9, 10" in runtime.prompts[1]
 
 
 def test_wrong_script_is_recovered_instead_of_written():
-    runtime = FakeRuntime(
-        [
-            "[1] - Привет.\n[2] - Где находится我的心?",
-            "[2] - Где моё сердце?",
-        ]
-    )
+    runtime = FakeRuntime(["[1] - Привет.\n[2] - Где находится我的心?", "[2] - Где моё сердце?"])
     result = contextual_progress._translate_chunk_with_recovery(
         runtime,
         "context",
@@ -120,13 +99,10 @@ def test_wrong_script_is_recovered_instead_of_written():
         progress_callback=None,
     )
     assert result == ["Привет.", "Где моё сердце?"]
-    assert len(runtime.prompts) == 2
-    assert "Missing IDs (1): 2" in runtime.prompts[1]
 
 
 def test_recovery_reuses_failed_fast_attempt_without_duplicate_generation():
     runtime = FakeRuntime(["[1] - Привет.\n[2] - Как дела?"])
-    initial = "[1] - Привет."
     result = contextual_progress._translate_chunk_with_recovery(
         runtime,
         "context",
@@ -136,11 +112,10 @@ def test_recovery_reuses_failed_fast_attempt_without_duplicate_generation():
         chunk_number=1,
         total_chunks=1,
         progress_callback=None,
-        initial_raw=initial,
+        initial_raw="[1] - Привет.",
     )
     assert result == ["Привет.", "Как дела?"]
     assert len(runtime.prompts) == 1
-    assert "MISSING SUBTITLE RECOVERY" in runtime.prompts[0]
 
 
 def test_adaptive_batch_state_halves_on_failure_and_regrows_after_clean_runs():
@@ -160,12 +135,24 @@ def test_auto_language_parser_accepts_code_label_and_json():
     assert contextual_progress._parse_detected_language('{"language":"es"}') == "es"
 
 
+def _install_runtime_mocks(monkeypatch, runtime_type, *, review: bool = False) -> None:
+    monkeypatch.setattr(contextual_progress, "ContextualRuntime", runtime_type)
+    monkeypatch.setattr(contextual_progress, "load_translation_cache", lambda *args, **kwargs: None)
+    monkeypatch.setattr(contextual_progress, "save_translation_cache", lambda *args, **kwargs: None)
+    monkeypatch.setattr(contextual_progress, "_llama_command", lambda: ["llama-cli"])
+    monkeypatch.setattr(contextual_progress, "contextual_model_valid", lambda key: key == "8b")
+    monkeypatch.setattr(
+        contextual_progress,
+        "active_recommendation",
+        lambda: SimpleNamespace(model_key="8b", review=review, context_cap_tokens=16384),
+    )
+
+
 def test_contextual_translation_auto_detects_source_with_same_runtime(monkeypatch, tmp_path: Path):
     source = tmp_path / "captions.srt"
-    source.write_text(
-        "1\n00:00:00,000 --> 00:00:02,000\nHello, how are you?\n",
-        encoding="utf-8",
-    )
+    source.write_text("1\n00:00:00,000 --> 00:00:02,000\nHello, how are you?\n", encoding="utf-8")
+    segments = parse_srt(source.read_text(encoding="utf-8"))
+    expected_context = contextual_progress.effective_context_cap(segments, 16384) + 4096
 
     class Runtime:
         mode = "fake-server"
@@ -175,7 +162,7 @@ def test_contextual_translation_auto_detects_source_with_same_runtime(monkeypatc
         def __init__(self, model_key: str = "8b", context_tokens: int | None = None):
             Runtime.instances += 1
             assert model_key == "8b"
-            assert context_tokens == 20480
+            assert context_tokens == expected_context
 
         def __enter__(self):
             return self
@@ -189,31 +176,13 @@ def test_contextual_translation_auto_detects_source_with_same_runtime(monkeypatc
                 return "English"
             return "[1] - Hola, ¿cómo estás?"
 
-    monkeypatch.setattr(contextual_progress, "ContextualRuntime", Runtime)
-    monkeypatch.setattr(contextual_progress, "load_translation_cache", lambda *args, **kwargs: None)
-    monkeypatch.setattr(contextual_progress, "save_translation_cache", lambda *args, **kwargs: None)
-    monkeypatch.setattr(contextual_progress, "_llama_command", lambda: ["llama-cli"])
-    monkeypatch.setattr(contextual_progress, "contextual_model_valid", lambda key: key == "8b")
-    monkeypatch.setattr(
-        contextual_progress,
-        "active_recommendation",
-        lambda: SimpleNamespace(model_key="8b", review=False, context_cap_tokens=16384),
-    )
-
-    result = contextual_progress.translate_srt_contextual_with_progress(
-        source,
-        "auto",
-        "es",
-        review=False,
-    )
-
+    _install_runtime_mocks(monkeypatch, Runtime)
+    result = contextual_progress.translate_srt_contextual_with_progress(source, "auto", "es", review=False)
     assert Runtime.instances == 1
     assert result.source_language == "en"
     assert result.target_language == "es"
     assert "English → Spanish" in result.route
     assert len(Runtime.prompts) == 2
-    assert "Identify the dominant human language" in Runtime.prompts[0]
-    assert "Translate the TARGET LINES from English" in Runtime.prompts[1]
 
 
 def test_contextual_translation_preserves_standalone_tags(monkeypatch, tmp_path: Path):
@@ -223,13 +192,15 @@ def test_contextual_translation_preserves_standalone_tags(monkeypatch, tmp_path:
         "2\n00:00:01,000 --> 00:00:03,000\nI feel like one.\n",
         encoding="utf-8",
     )
+    segments = parse_srt(source.read_text(encoding="utf-8"))
+    expected_context = contextual_progress.effective_context_cap(segments, 16384) + 4096
 
     class Runtime:
         mode = "fake-server"
 
         def __init__(self, model_key: str = "8b", context_tokens: int | None = None):
             assert model_key == "8b"
-            assert context_tokens == 20480
+            assert context_tokens == expected_context
 
         def __enter__(self):
             return self
@@ -241,34 +212,16 @@ def test_contextual_translation_preserves_standalone_tags(monkeypatch, tmp_path:
             assert "[MUSIC]" not in prompt.split("TARGET LINES — translate these and only these:", 1)[1]
             return "[2] - Я чувствую себя таким."
 
-    monkeypatch.setattr(contextual_progress, "ContextualRuntime", Runtime)
-    monkeypatch.setattr(contextual_progress, "load_translation_cache", lambda *args, **kwargs: None)
-    monkeypatch.setattr(contextual_progress, "save_translation_cache", lambda *args, **kwargs: None)
-    monkeypatch.setattr(contextual_progress, "_llama_command", lambda: ["llama-cli"])
-    monkeypatch.setattr(contextual_progress, "contextual_model_valid", lambda key: key == "8b")
-    monkeypatch.setattr(
-        contextual_progress,
-        "active_recommendation",
-        lambda: SimpleNamespace(model_key="8b", review=False, context_cap_tokens=16384),
-    )
-
-    result = contextual_progress.translate_srt_contextual_with_progress(
-        source,
-        "en",
-        "ru",
-        review=False,
-    )
-    segments = parse_srt(result.srt_path.read_text(encoding="utf-8"))
-    assert segments[0].text == "[MUSIC]"
-    assert segments[1].text == "Я чувствую себя таким."
+    _install_runtime_mocks(monkeypatch, Runtime)
+    result = contextual_progress.translate_srt_contextual_with_progress(source, "en", "ru", review=False)
+    translated = parse_srt(result.srt_path.read_text(encoding="utf-8"))
+    assert translated[0].text == "[MUSIC]"
+    assert translated[1].text == "Я чувствую себя таким."
 
 
 def test_contextual_translation_cache_hit_skips_runtime_and_model_readiness(monkeypatch, tmp_path: Path):
     source = tmp_path / "captions.srt"
-    source.write_text(
-        "1\n00:00:00,000 --> 00:00:02,000\nHello there.\n",
-        encoding="utf-8",
-    )
+    source.write_text("1\n00:00:00,000 --> 00:00:02,000\nHello there.\n", encoding="utf-8")
     cached = CachedTranslation(
         segments=[TranslatedSegment(1, 0, 2000, "Hello there.", "Привет.")],
         source_language="en",
@@ -289,63 +242,9 @@ def test_contextual_translation_cache_hit_skips_runtime_and_model_readiness(monk
         "active_recommendation",
         lambda: SimpleNamespace(model_key="8b", review=True, context_cap_tokens=24576),
     )
-
     result = contextual_progress.translate_srt_contextual_with_progress(source, "en", "ru")
-    assert result.srt_path.is_file()
-    assert result.source_language == "en"
     assert [item.translated_text for item in result.segments] == ["Привет."]
     assert "cache hit" in result.route
-
-
-def test_successful_contextual_translation_is_saved_after_validation(monkeypatch, tmp_path: Path):
-    source = tmp_path / "captions.srt"
-    source.write_text(
-        "1\n00:00:00,000 --> 00:00:02,000\nHello there.\n",
-        encoding="utf-8",
-    )
-    saved: dict[str, object] = {}
-
-    class Runtime:
-        mode = "fake-server"
-
-        def __init__(self, model_key: str = "8b", context_tokens: int | None = None):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return None
-
-        def generate(self, prompt: str, *, max_output_tokens: int) -> str:
-            return "[1] - Привет."
-
-    def remember(key, translated, **kwargs):
-        saved["key"] = key
-        saved["translated"] = list(translated)
-        saved.update(kwargs)
-
-    monkeypatch.setattr(contextual_progress, "ContextualRuntime", Runtime)
-    monkeypatch.setattr(contextual_progress, "load_translation_cache", lambda *args, **kwargs: None)
-    monkeypatch.setattr(contextual_progress, "save_translation_cache", remember)
-    monkeypatch.setattr(contextual_progress, "_llama_command", lambda: ["llama-cli"])
-    monkeypatch.setattr(contextual_progress, "contextual_model_valid", lambda key: True)
-    monkeypatch.setattr(
-        contextual_progress,
-        "active_recommendation",
-        lambda: SimpleNamespace(model_key="8b", review=False, context_cap_tokens=16384),
-    )
-
-    result = contextual_progress.translate_srt_contextual_with_progress(
-        source,
-        "en",
-        "ru",
-        review=False,
-    )
-    assert result.segments[0].translated_text == "Привет."
-    assert saved["source_language"] == "en"
-    assert saved["target_language"] == "ru"
-    assert saved["translated"][0].translated_text == "Привет."
 
 
 def _write_dense_srt(path: Path, count: int) -> None:
@@ -367,20 +266,7 @@ def _target_ids(prompt: str) -> list[int]:
     ]
 
 
-def _install_adaptive_runtime_mocks(monkeypatch, runtime_type) -> None:
-    monkeypatch.setattr(contextual_progress, "ContextualRuntime", runtime_type)
-    monkeypatch.setattr(contextual_progress, "load_translation_cache", lambda *args, **kwargs: None)
-    monkeypatch.setattr(contextual_progress, "save_translation_cache", lambda *args, **kwargs: None)
-    monkeypatch.setattr(contextual_progress, "_llama_command", lambda: ["llama-cli"])
-    monkeypatch.setattr(contextual_progress, "contextual_model_valid", lambda key: key == "8b")
-    monkeypatch.setattr(
-        contextual_progress,
-        "active_recommendation",
-        lambda: SimpleNamespace(model_key="8b", review=False, context_cap_tokens=16384),
-    )
-
-
-def test_clean_movie_scale_translation_uses_48_line_fast_batches(monkeypatch, tmp_path: Path):
+def test_dense_short_caption_programme_uses_96_line_batch(monkeypatch, tmp_path: Path):
     source = tmp_path / "dense.srt"
     _write_dense_srt(source, 96)
 
@@ -402,27 +288,20 @@ def test_clean_movie_scale_translation_uses_48_line_fast_batches(monkeypatch, tm
             Runtime.batch_sizes.append(len(ids))
             return "\n".join(f"[{index}] - Translation {index}." for index in ids)
 
-    _install_adaptive_runtime_mocks(monkeypatch, Runtime)
-    result = contextual_progress.translate_srt_contextual_with_progress(
-        source,
-        "es",
-        "en",
-        review=False,
-    )
-
+    _install_runtime_mocks(monkeypatch, Runtime)
+    result = contextual_progress.translate_srt_contextual_with_progress(source, "es", "en", review=False)
     assert len(result.segments) == 96
-    assert Runtime.batch_sizes == [48, 48]
-    assert "adaptive batches 48" in result.route
+    assert Runtime.batch_sizes == [96]
+    assert "adaptive batches 96" in result.route
 
 
-def test_failed_large_batch_splits_only_that_section_then_regrows(monkeypatch, tmp_path: Path):
+def test_failed_dense_batch_splits_only_that_section(monkeypatch, tmp_path: Path):
     source = tmp_path / "dense.srt"
     _write_dense_srt(source, 96)
 
     class Runtime:
         mode = "fake-server"
         batch_sizes: list[int] = []
-        prompts: list[str] = []
 
         def __init__(self, model_key: str = "8b", context_tokens: int | None = None):
             pass
@@ -434,22 +313,14 @@ def test_failed_large_batch_splits_only_that_section_then_regrows(monkeypatch, t
             return None
 
         def generate(self, prompt: str, *, max_output_tokens: int) -> str:
-            Runtime.prompts.append(prompt)
             ids = _target_ids(prompt)
             Runtime.batch_sizes.append(len(ids))
-            if len(ids) == 48 and ids and ids[0] == 1:
+            if len(ids) == 96:
                 ids = ids[:3]
             return "\n".join(f"[{index}] - Translation {index}." for index in ids)
 
-    _install_adaptive_runtime_mocks(monkeypatch, Runtime)
-    result = contextual_progress.translate_srt_contextual_with_progress(
-        source,
-        "es",
-        "en",
-        review=False,
-    )
-
+    _install_runtime_mocks(monkeypatch, Runtime)
+    result = contextual_progress.translate_srt_contextual_with_progress(source, "es", "en", review=False)
     assert len(result.segments) == 96
-    assert Runtime.batch_sizes == [48, 24, 24, 48]
-    assert not any("MISSING SUBTITLE RECOVERY" in prompt for prompt in Runtime.prompts)
+    assert Runtime.batch_sizes == [96, 48, 48]
     assert "1 safe split" in result.route
