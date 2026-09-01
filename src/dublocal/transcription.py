@@ -55,8 +55,6 @@ WHISPER_MODELS: dict[str, dict[str, str]] = {
     },
 }
 
-# Official whisper.cpp auxiliary VAD model. It is tiny (~0.9 MiB), MIT licensed,
-# pinned to the upstream conversion commit and checksum-verified before use.
 WHISPER_VAD_MODEL = {
     "name": "Silero VAD v6.2.0",
     "filename": "ggml-silero-v6.2.0.bin",
@@ -71,6 +69,7 @@ WHISPER_VAD_MODEL = {
 }
 
 _PROGRESS_RE = re.compile(r"progress\s*=\s*(\d{1,3})%", re.IGNORECASE)
+_SINGING_FRIENDLY_MODEL = "large-v3-turbo-q5_0"
 
 
 class WhisperEngineMissingError(DubLocalError):
@@ -145,7 +144,7 @@ def install_whisper_model(model_id: str) -> Path:
 
     request = Request(
         metadata["url"],
-        headers={"User-Agent": "DubLocal/0.5 (+https://github.com/ArrowSK/dublocal)"},
+        headers={"User-Agent": "DubLocal/0.6 (+https://github.com/ArrowSK/dublocal)"},
     )
     try:
         with urlopen(request, timeout=60) as response, temporary.open("wb") as output:
@@ -171,12 +170,6 @@ def install_whisper_model(model_id: str) -> Path:
 
 
 def _ensure_whisper_vad_model() -> Path | None:
-    """Best-effort prepare the tiny speech detector used to prevent music/silence hallucinations.
-
-    Local transcription remains usable offline when the auxiliary model has never been
-    downloaded; in that case DubLocal falls back to stricter Whisper decoder thresholds.
-    """
-
     destination = whisper_vad_model_path()
     expected = str(WHISPER_VAD_MODEL["sha256"])
     if destination.is_file():
@@ -189,7 +182,7 @@ def _ensure_whisper_vad_model() -> Path | None:
     temporary.unlink(missing_ok=True)
     request = Request(
         str(WHISPER_VAD_MODEL["url"]),
-        headers={"User-Agent": "DubLocal/0.5 (+https://github.com/ArrowSK/dublocal)"},
+        headers={"User-Agent": "DubLocal/0.6 (+https://github.com/ArrowSK/dublocal)"},
     )
     try:
         with urlopen(request, timeout=20) as response, temporary.open("wb") as output:
@@ -391,8 +384,6 @@ def _detected_language(output_prefix: Path, requested_language: str) -> str:
 
 
 def _run_whisper_with_progress(command: list[str]) -> None:
-    """Run whisper.cpp and expose its own real percentage through tqdm/Gradio."""
-
     try:
         process = subprocess.Popen(
             command,
@@ -437,11 +428,17 @@ def transcribe_source(
     model_id: str = "base",
     language: str = "auto",
 ) -> TranscriptionResult:
+    """Transcribe through the canonical guarded Whisper pipeline.
+
+    VAD fallback, anti-repetition handling and bounded smart recovery are ordinary
+    stages called here directly. No function in the transcription module is replaced
+    during import or while a job is running.
+    """
+
     executable = find_whisper_cli()
     if not executable:
         raise WhisperEngineMissingError(
-            "The local whisper.cpp engine is not installed. Rerun "
-            "`zsh scripts/macos/install-launcher.sh` and allow whisper.cpp installation."
+            "The local whisper.cpp engine is not installed. Rerun the DubLocal installer and allow whisper.cpp installation."
         )
 
     model = whisper_model_path(model_id)
@@ -471,16 +468,17 @@ def transcribe_source(
         "-l",
         requested_language,
         "-pp",
-        # Conservative long-form decoding: keep only a small recent text context and
-        # make the no-speech gate slightly more willing to discard uncertain audio.
         "-mc",
         "64",
         "-nth",
         "0.50",
     ]
 
+    # Accurate/Large-v3-Turbo is also the song/music-video profile. Speech VAD can
+    # reject singing, so that profile runs ungated while the guard switches off rolling
+    # text context and raises the entropy threshold to resist repetition storms.
     vad_used = False
-    if _whisper_supports_vad(executable):
+    if model_id != _SINGING_FRIENDLY_MODEL and _whisper_supports_vad(executable):
         vad_model = _ensure_whisper_vad_model()
         if vad_model is not None:
             command += [
@@ -502,12 +500,12 @@ def transcribe_source(
             ]
             vad_used = True
 
-    # CPU mode is slower but is the safest common denominator on Intel Macs.
-    # Apple Silicon keeps whisper.cpp's Metal acceleration enabled by default.
     if platform.machine().lower() in {"x86_64", "amd64"}:
         command.append("-ng")
 
-    _run_whisper_with_progress(command)
+    from . import transcription_guard as guard
+
+    guard.run_whisper_guarded(command, runner=_run_whisper_with_progress)
 
     srt_path = output_prefix.with_suffix(".srt")
     if not srt_path.is_file() or srt_path.stat().st_size == 0:
@@ -518,14 +516,17 @@ def transcribe_source(
         segments = parse_srt(text)
     except ValueError as exc:
         raise DubLocalError(f"Whisper created an invalid subtitle timeline: {exc}") from exc
-
     if not segments:
         raise DubLocalError("Whisper produced an empty transcription.")
 
-    return TranscriptionResult(
+    result = TranscriptionResult(
         srt_path=srt_path,
         segments=segments,
         model_id=model_id,
         language=_detected_language(output_prefix, requested_language),
         vad_used=vad_used,
     )
+
+    from .transcription_recovery import apply_smart_recovery
+
+    return apply_smart_recovery(result)
