@@ -4,4 +4,4 @@ Importing :mod:`dublocal` must be side-effect free. Production composition belon
 explicit services and the launcher, never in package import hooks.
 """
 
-__version__ = "0.6.0b7"
+__version__ = "0.6.0b8"
