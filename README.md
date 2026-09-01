@@ -9,31 +9,31 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b6/DubLocal-0.6.0b6-macOS-unsigned.dmg"><img alt="Download DubLocal for macOS" src="https://img.shields.io/badge/Download-macOS%20Beta-111827?style=for-the-badge&logo=apple&logoColor=white"></a>
-  <a href="https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b6"><img alt="View GitHub release" src="https://img.shields.io/badge/GitHub-v0.6.0b6-2f81f7?style=for-the-badge&logo=github&logoColor=white"></a>
+  <a href="https://github.com/ArrowSK/dublocal/releases/download/v0.6.0b7/DubLocal-0.6.0b7-macOS-unsigned.dmg"><img alt="Download DubLocal for macOS" src="https://img.shields.io/badge/Download-macOS%20Beta-111827?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b7"><img alt="View GitHub release" src="https://img.shields.io/badge/GitHub-v0.6.0b7-2f81f7?style=for-the-badge&logo=github&logoColor=white"></a>
 </p>
 
 <p align="center">
-  <sub><strong>macOS 13+.</strong> Open the DMG, drag DubLocal to Applications, then use <em>Open Anyway</em> once if macOS blocks the unsigned beta.</sub>
+  <sub><strong>macOS 13+ packaged beta.</strong> Open the DMG, drag DubLocal to Applications, then use <em>Open Anyway</em> once if macOS blocks the unsigned beta.</sub>
 </p>
 
 <p align="center">
-  <img alt="Version 0.6.0b6" src="https://img.shields.io/badge/version-0.6.0b6-4d8dff">
+  <img alt="Version 0.6.0b7" src="https://img.shields.io/badge/version-0.6.0b7-4d8dff">
   <img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-6c7a89">
   <img alt="Local first" src="https://img.shields.io/badge/processing-local--first-19b5a5">
   <img alt="No cloud dubbing" src="https://img.shields.io/badge/cloud%20dubbing-none-19b5a5">
   <a href="https://github.com/ArrowSK/dublocal/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ArrowSK/dublocal/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
-DubLocal is a local-first macOS application for people who want to understand, translate or re-voice video without turning the job into a collection of command-line tools. Give it a YouTube link, local media file, or a supported authenticated lesson; choose what you want back; DubLocal builds the processing route and keeps the heavy work on your Mac.
+DubLocal is a local-first application for people who want to understand, translate or re-voice video without turning the job into a collection of command-line tools. Give it a YouTube link, local media file, or a supported authenticated lesson; choose what you want back; DubLocal builds the processing route and keeps the heavy work local.
 
-> **Current state:** **v0.6.0b6** is the current packaged macOS beta. Beta 6 reduces avoidable contextual-translation work on highly fragmented captions while keeping the same Qwen model, prompt, subtitle-ID validation and recovery policy. It also retains beta 5's format-aware output profiles, beta 4's subtitle-capable FFmpeg handling and beta 3's adaptive translation safety. The DMG remains intentionally unsigned and not notarized. Models remain optional downloads, finished outputs stay ordinary user files, and the packaged app keeps the existing safe in-app updater instead of introducing a second update system.
+> **Current state:** **v0.6.0b7** is the current packaged macOS beta. Beta 7 adds Hungarian voice-over with macOS system-voice Auto selection and a cross-platform Piper fallback, while retaining beta 6's translation-performance work, beta 5's format-aware output profiles and beta 4's subtitle-capable FFmpeg handling. The backend now carries Windows portability tests for the Hungarian provider, but a Windows installer is not published yet. The macOS DMG remains intentionally unsigned and not notarized.
 
 ## Install on macOS
 
-Use the **Download** button above or open the [v0.6.0b6 release](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b6).
+Use the **Download** button above or open the [v0.6.0b7 release](https://github.com/ArrowSK/dublocal/releases/tag/v0.6.0b7).
 
-1. Download `DubLocal-0.6.0b6-macOS-unsigned.dmg`.
+1. Download `DubLocal-0.6.0b7-macOS-unsigned.dmg`.
 2. Open the DMG and drag **DubLocal.app** to **Applications**.
 3. Control-click/right-click **DubLocal.app** and choose **Open** the first time.
 4. If macOS still blocks it, go to **System Settings → Privacy & Security → Open Anyway**.
@@ -77,12 +77,22 @@ The queue is sequential, so a laptop is not asked to run several large speech/tr
 | Sources | YouTube videos/playlists/channels, local audio/video, supported authenticated non-DRM course lessons |
 | Subtitles | Existing text captions or local `whisper.cpp` transcription; SRT/VTT/TXT output |
 | Translation | Local contextual Qwen3 translation with hardware-aware context, fragmentation-aware adaptive batching, prompt reuse where supported and strict subtitle alignment recovery |
-| Voice-over | Kokoro and vetted local-language providers with automatic vocal-range matching where supported |
+| Voice-over | Official Kokoro languages, vetted Russian Kokoro, and Hungarian via macOS system speech or Piper; automatic vocal-range matching where supported |
 | Audio | Lightweight dialogue mixing everywhere; optional local Demucs separation for music-heavy material |
 | Export | MKV, MP4 and Shareable MP4 with format-aware Auto/Original/High/Balanced/Compact output profiles, selectable or burned subtitles and selectable audio tracks |
 | Queueing | Multiple local files, YouTube collections and course lessons processed one at a time |
 | Storage | Automatic stale-job housekeeping plus **Settings → Storage & Cleanup** |
 | Updates | In-app update from official `main` with guarded restart/repair behavior |
+
+## Hungarian voice-over
+
+Hungarian is a normal translation and voice target in the Standard workflow.
+
+**Auto is platform-aware.** On macOS, DubLocal prefers an installed Hungarian (`hu_HU`) system voice and leaves Piper voices available as explicit alternatives. If no Hungarian system voice is installed, Auto falls back to Piper. On Windows and other platforms the Hungarian provider is Piper only, so this feature does not create an Apple-only backend dependency.
+
+The initial Piper voices are **Anna**, **Berta** and **Imre**. Piper preparation is explicit in Model Manager; generation will not silently install its runtime or voice files in the middle of a job. Voice assets are downloaded from a pinned `rhasspy/piper-voices` revision and verified before use. The GPL Piper runtime is kept in an isolated DubLocal-owned virtual environment and invoked out of process rather than imported into the Apache-2.0 application runtime.
+
+macOS system voices are OS-provided resources and are not redistributed by DubLocal. DubLocal does not assert separate commercial or redistribution rights for system-voice output; applicable platform/vendor terms remain relevant.
 
 ## Standard when you want it, Advanced when you need it
 
@@ -108,7 +118,7 @@ Auto intentionally means different things for different jobs:
 
 The Standard workflow still exposes an optional **Resolution limit** under Options. That is an additional ceiling, not a second compression policy.
 
-At 480p, Shareable Auto targets roughly **500 kbps video + 96 kbps audio**, or about **4.5 MB per minute**. The earlier quality-first export used 2.5 Mbps video + 192 kbps audio at 480p, which could make a short clip unexpectedly exceed 100 MB.
+At 480p, Shareable Auto targets roughly **500 kbps video + 96 kbps audio**, or about **4.5 MB per minute**.
 
 ### DubLocal does not silently download large models
 
@@ -120,19 +130,19 @@ For subtitles, the recommended route generally prefers good creator/embedded tex
 
 For media output, Auto is format-aware rather than a single global quality setting. It also avoids a needless re-encode when an existing compatible stream already fits the selected target.
 
+For Hungarian voice-over, Auto is also platform-aware: macOS can use an installed system Hungarian voice, while non-macOS systems use Piper.
+
 ### Translation adapts for both safety and processing cost
 
 Contextual Qwen translation keeps programme-wide, nearby and previously approved translation context while every generated subtitle still has to preserve its ID and pass target-language validation.
 
-Normal sentence-sized subtitles keep the established optimistic limits of up to **48 lines on Qwen3 8B** and **36 on 4B**. Beta 6 recognizes unusually dense timelines made of very short caption fragments and can start those sections at up to **96/72 lines** instead. If an attempt does not align cleanly, only that section is retried at half size until the established **12-line safety floor** and bounded recovery path take over.
-
-For short programmes, the llama.cpp runtime also allocates context from the programme budget the prompt can actually use instead of reserving a much larger KV cache merely because the hardware recommendation permits it. Current llama.cpp builds can additionally use conservative exact prompt-chunk reuse when the installed server exposes that capability; older builds simply keep the established command.
+Normal sentence-sized subtitles keep the established optimistic limits of up to **48 lines on Qwen3 8B** and **36 on 4B**. Highly fragmented timelines made of very short caption fragments can begin at larger batches. If an attempt does not align cleanly, only that section is retried at half size until the established **12-line safety floor** and bounded recovery path take over.
 
 These changes do not select a smaller translation model or skip validation/review for speed. DubLocal still refuses to write an SRT when alignment cannot be established without guessing.
 
 ### Burned subtitles use an FFmpeg build that can actually render them
 
-Normal media work can use the regular FFmpeg installation. Burned Shareable MP4 output additionally needs FFmpeg's libass-backed `subtitles` filter. DubLocal checks this before starting the encode and can use a side-by-side Homebrew `ffmpeg-full` build when the normal binary lacks the filter. It no longer retries an H.264 encoder when the real problem is a missing video filter.
+Normal media work can use the regular FFmpeg installation. Burned Shareable MP4 output additionally needs FFmpeg's libass-backed `subtitles` filter. DubLocal checks this before starting the encode and can use a side-by-side Homebrew `ffmpeg-full` build when the normal binary lacks the filter.
 
 ### Original media is preserved where practical
 
@@ -152,9 +162,9 @@ See **[Authenticated websites](docs/AUTHENTICATED_WEBSITES.md)** for the exact b
 
 Speech recognition, translation, TTS and media processing are designed to run locally once their required models/runtime assets are installed. DubLocal does not require a cloud dubbing service for the pipeline itself.
 
-Network access is still used where it is naturally required: downloading a YouTube source, obtaining optional models/runtimes, checking GitHub for updates, or signing into an authenticated source website.
+Network access is still used where it is naturally required: downloading a source, obtaining optional models/runtimes, checking GitHub for updates, or signing into an authenticated source website.
 
-Temporary working files live under:
+Temporary working files live under the platform's normal DubLocal cache directory. On macOS that is:
 
 ```text
 ~/Library/Caches/DubLocal/jobs/
@@ -168,21 +178,12 @@ Finished files use the source title and target language rather than internal job
 
 ```text
 Movie Name.en.srt
-Movie Name.es.srt
-Movie Name.dub.es.mkv
-Movie Name.subtitles.es.mkv
+Movie Name.hu.srt
+Movie Name.dub.hu.mkv
+Movie Name.subtitles.hu.mkv
 ```
 
-Course material is grouped by provider/course and keeps lesson order:
-
-```text
-~/Movies/DubLocal/Domestika/French Watercolour/
-  01 - Introduction.fr.srt
-  01 - Introduction.en.srt
-  01 - Introduction.dub.en.mkv
-```
-
-Internal work files remain disposable cache data instead of appearing beside every finished export.
+Course material is grouped by provider/course and keeps lesson order.
 
 ## Start here
 
@@ -217,9 +218,9 @@ cd dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-The source installer creates launchers under `~/Applications`. The packaged beta instead owns a managed checkout under `~/Library/Application Support/DubLocal/app`, which lets the same guarded updater keep the installed beta current.
+The source installer currently targets macOS. The Hungarian provider itself has a Windows portability contract and CI coverage, which is groundwork for a later Windows application package rather than a claim that one already ships.
 
-See **[Installation from source](docs/INSTALLATION.md)** for the development path.
+See **[Installation from source](docs/INSTALLATION.md)** for the current development path.
 
 ## Licence
 
