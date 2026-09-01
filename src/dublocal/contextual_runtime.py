@@ -8,6 +8,7 @@ import socket
 import subprocess
 import tempfile
 import time
+from functools import lru_cache
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -25,6 +26,7 @@ _SYSTEM_PROMPT = (
     "never invent dialogue or repair uncertain source text by guessing. Preserve requested subtitle IDs "
     "and output format exactly."
 )
+_CACHE_REUSE_TOKENS = 64
 
 
 def _llama_server_command() -> list[str] | None:
@@ -41,6 +43,23 @@ def _llama_server_command() -> list[str] | None:
     if llama and Path(llama).is_file() and os.access(llama, os.X_OK):
         return [str(llama), "serve"]
     return None
+
+
+@lru_cache(maxsize=8)
+def _server_supports_cache_reuse(command: tuple[str, ...]) -> bool:
+    """Feature-detect llama.cpp prompt-chunk reuse instead of assuming a version."""
+
+    try:
+        result = subprocess.run(
+            [*command, "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "--cache-reuse" in f"{result.stdout}\n{result.stderr}"
 
 
 def contextual_runtime_available() -> bool:
@@ -175,13 +194,23 @@ class ContextualRuntime:
         self.model_key = model_key
         self.spec = contextual_model_spec(model_key)
         self.context_tokens = _context_size(self.spec, context_tokens)
-        self._server_command = _llama_server_command()
+        server_command = _llama_server_command()
+        self.cache_reuse_tokens = 0
+        if server_command and _server_supports_cache_reuse(tuple(server_command)):
+            self.cache_reuse_tokens = _CACHE_REUSE_TOKENS
+            server_command = [
+                *server_command,
+                "--cache-reuse",
+                str(self.cache_reuse_tokens),
+            ]
+        self._server_command = server_command
         self._process: subprocess.Popen[str] | None = None
         self._log_handle = None
         self._log_path: Path | None = None
         self._base_url: str | None = None
         runtime = "llama-server" if self._server_command else "llama-cli compatibility"
-        self.mode = f"{self.spec.label} · {runtime} · ctx {self.context_tokens}"
+        reuse = f" · prompt reuse {self.cache_reuse_tokens}t" if self.cache_reuse_tokens else ""
+        self.mode = f"{self.spec.label} · {runtime} · ctx {self.context_tokens}{reuse}"
 
     def __enter__(self) -> "ContextualRuntime":
         if not contextual_model_valid(self.model_key):
