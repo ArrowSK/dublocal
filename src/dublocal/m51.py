@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from yt_dlp import YoutubeDL
 
@@ -31,6 +31,9 @@ _VIDEO_BITRATES = {
     720: "5M",
     480: "2500k",
 }
+
+MixFunction = Callable[..., Path]
+TimingFunction = Callable[..., m5.TimingFit]
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,13 +185,7 @@ def create_dubbed_mix(
     dialogue_subtitle_path: str | Path | None,
     progress_callback=None,
 ) -> Path:
-    """Create a stronger dubbing mix using subtitle-window ducking.
-
-    Professional dubbing normally works from a dialogue-free M&E stem. Consumer media
-    rarely provides one, so this path suppresses the full original mix across source
-    dialogue windows, keeping original speech/singing consistently below the dub even
-    when a generated line is shorter than its source subtitle window.
-    """
+    """Create a stronger dubbing mix using subtitle-window ducking."""
 
     ffmpeg = m5._require("ffmpeg")
     probe = m5._probe(source_media)
@@ -209,7 +206,6 @@ def create_dubbed_mix(
             "alimiter=limit=0.95[mix]"
         )
     else:
-        # Safe fallback when no timed dialogue guide is available.
         filter_graph = (
             "[0:a:0]aresample=48000,aformat=channel_layouts=stereo[orig];"
             "[1:a:0]aresample=48000,aformat=channel_layouts=stereo,asplit=2[voice_sc][voice_mix];"
@@ -495,7 +491,11 @@ def render_dubbed_media(
     source_language: str | None = None,
     translated_language: str | None = None,
     progress_callback=None,
+    mix_function: MixFunction | None = None,
+    timing_function: TimingFunction | None = None,
 ) -> RenderResult:
+    """Render dubbed media with explicit timing and mix strategy dependencies."""
+
     if not info:
         raise DubLocalError("Load a source before export.")
     if not language:
@@ -505,6 +505,13 @@ def render_dubbed_media(
     if not voice.is_file():
         raise DubLocalError("Generate a voice track before export.")
 
+    if timing_function is None:
+        from .voice_timing import native_voice_timing
+
+        timing_function = native_voice_timing
+    if mix_function is None:
+        mix_function = create_dubbed_mix
+
     job_dir = m5._new_job_dir("m51-render")
     source = acquire_source_media(
         info,
@@ -512,14 +519,14 @@ def render_dubbed_media(
         video_quality=video_quality,
         progress_callback=progress_callback,
     )
-    timing = m5.fit_voice_timing(
+    timing = timing_function(
         voice,
         job_dir,
         maximum_speedup=1.25,
         progress_callback=progress_callback,
     )
     dialogue_timeline = source_subtitle_path or translated_subtitle_path
-    mixed = create_dubbed_mix(
+    mixed = mix_function(
         source,
         timing.wav_path,
         job_dir,
