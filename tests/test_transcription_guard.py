@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import dublocal.transcription as transcription
 import dublocal.transcription_guard as guard
 from dublocal.timeline import Segment, parse_srt, segments_to_srt
 
 
-def test_vad_run_retries_same_job_without_vad_when_no_srt(monkeypatch, tmp_path: Path):
+def test_vad_run_retries_same_job_without_vad_when_no_srt(tmp_path: Path):
     calls: list[list[str]] = []
     output_prefix = tmp_path / "captions"
 
@@ -18,9 +17,6 @@ def test_vad_run_retries_same_job_without_vad_when_no_srt(monkeypatch, tmp_path:
                 "1\n00:00:28,000 --> 00:00:30,000\nHello.\n",
                 encoding="utf-8",
             )
-
-    monkeypatch.setattr(guard, "_ORIGINAL_RUN", fake_run)
-    monkeypatch.setattr(guard, "_repair_repetition", lambda command: None)
 
     command = [
         "whisper-cli",
@@ -37,48 +33,13 @@ def test_vad_run_retries_same_job_without_vad_when_no_srt(monkeypatch, tmp_path:
         "--vad-threshold",
         "0.45",
     ]
-    guard._run_with_vad_fallback(command)
+    guard.run_whisper_guarded(command, runner=fake_run)
 
     assert len(calls) == 2
     assert "--vad" in calls[0]
     assert "--vad" not in calls[1]
     assert "--vad-model" not in calls[1]
     assert output_prefix.with_suffix(".srt").is_file()
-
-
-def test_accurate_music_profile_does_not_force_vad(monkeypatch):
-    observed: list[bool] = []
-
-    monkeypatch.setattr(transcription, "_whisper_supports_vad", lambda _exe: True)
-
-    def fake_transcribe(info, model_id="base", language="auto"):
-        observed.append(transcription._whisper_supports_vad("whisper-cli"))
-        return object()
-
-    monkeypatch.setattr(guard, "_ORIGINAL_TRANSCRIBE", fake_transcribe)
-
-    guard._transcribe_with_media_policy(
-        {"kind": "local", "path": "/tmp/source.mkv"},
-        model_id="large-v3-turbo-q5_0",
-        language="auto",
-    )
-
-    assert observed == [False]
-    assert transcription._whisper_supports_vad("whisper-cli") is True
-
-
-def test_base_profile_keeps_vad_policy(monkeypatch):
-    observed: list[bool] = []
-    monkeypatch.setattr(transcription, "_whisper_supports_vad", lambda _exe: True)
-
-    def fake_transcribe(info, model_id="base", language="auto"):
-        observed.append(transcription._whisper_supports_vad("whisper-cli"))
-        return object()
-
-    monkeypatch.setattr(guard, "_ORIGINAL_TRANSCRIBE", fake_transcribe)
-    guard._transcribe_with_media_policy({}, model_id="base", language="auto")
-
-    assert observed == [True]
 
 
 def test_accurate_command_disables_rolling_context_and_raises_entropy_guard():
@@ -93,11 +54,26 @@ def test_accurate_command_disables_rolling_context_and_raises_entropy_guard():
         "-nth",
         "0.50",
     ]
-
     prepared = guard._prepare_command(command)
-
     assert prepared[prepared.index("-mc") + 1] == "0"
     assert prepared[prepared.index("-et") + 1] == "2.60"
+
+
+def test_base_command_keeps_normal_context_policy():
+    command = [
+        "whisper-cli",
+        "-m",
+        "/models/ggml-base.bin",
+        "-f",
+        "speech.wav",
+        "-mc",
+        "64",
+        "-nth",
+        "0.50",
+    ]
+    prepared = guard._prepare_command(command)
+    assert prepared[prepared.index("-mc") + 1] == "64"
+    assert "-et" not in prepared
 
 
 def test_repeat_detector_catches_near_duplicate_intro_and_long_loop():
@@ -115,7 +91,6 @@ def test_repeat_detector_catches_near_duplicate_intro_and_long_loop():
         segments.append(Segment(index, start, start + 3_000, "The same invented phrase again."))
 
     runs = guard._find_repeat_runs(segments)
-
     assert len(runs) == 2
     assert runs[0].count == 6
     assert runs[0].start_ms == 0
@@ -123,7 +98,7 @@ def test_repeat_detector_catches_near_duplicate_intro_and_long_loop():
     assert runs[1].severe is True
 
 
-def test_repetition_guard_replaces_suspicious_intro_with_isolated_retry(monkeypatch, tmp_path: Path):
+def test_repetition_guard_replaces_suspicious_intro_with_isolated_retry(tmp_path: Path):
     prefix = tmp_path / "captions"
     original = [
         Segment(1, 0, 5000, "I am not sure if you have questions."),
@@ -143,8 +118,6 @@ def test_repetition_guard_replaces_suspicious_intro_with_isolated_retry(monkeypa
             encoding="utf-8",
         )
 
-    monkeypatch.setattr(guard, "_ORIGINAL_RUN", fake_run)
-
     command = [
         "whisper-cli",
         "-m",
@@ -157,7 +130,7 @@ def test_repetition_guard_replaces_suspicious_intro_with_isolated_retry(monkeypa
         "-mc",
         "0",
     ]
-    guard._repair_repetition(command)
+    guard._repair_repetition(command, runner=fake_run)
 
     cleaned = parse_srt(prefix.with_suffix(".srt").read_text(encoding="utf-8"))
     assert [segment.text for segment in cleaned] == ["Actual opening speech.", "Real line."]
@@ -174,8 +147,11 @@ def test_severe_unrecoverable_loop_is_suppressed_not_passed_downstream(monkeypat
     segments.append(Segment(14, 90_000, 94_000, "Good ending."))
     prefix.with_suffix(".srt").write_text(segments_to_srt(segments), encoding="utf-8")
 
-    monkeypatch.setattr(guard, "_recover_repeat_run", lambda command, run, ordinal: (None, "still bad"))
-
+    monkeypatch.setattr(
+        guard,
+        "_recover_repeat_run",
+        lambda command, run, ordinal, *, runner: (None, "still bad"),
+    )
     guard._repair_repetition(
         [
             "whisper-cli",
@@ -186,10 +162,10 @@ def test_severe_unrecoverable_loop_is_suppressed_not_passed_downstream(monkeypat
             "-osrt",
             "-of",
             str(prefix),
-        ]
+        ],
+        runner=lambda command: None,
     )
 
     cleaned = parse_srt(prefix.with_suffix(".srt").read_text(encoding="utf-8"))
     assert [segment.text for segment in cleaned] == ["Good opening.", "Good ending."]
-    note = guard.quality_note_for(prefix.with_suffix(".srt"))
-    assert "suppressed 12 repeated segment" in note
+    assert "suppressed 12 repeated segment" in guard.quality_note_for(prefix.with_suffix(".srt"))

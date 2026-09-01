@@ -4,22 +4,20 @@ import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any
+from typing import Callable
 
 from . import transcription
 from .media import DubLocalError
 from .timeline import Segment, parse_srt, segments_to_srt
 
 
-# Accurate/Large-v3-Turbo is the UI profile for songs and difficult audio.
-# Singing does not pair reliably with speech VAD, so this profile uses Whisper's
-# decoder directly but disables rolling text context to prevent self-reinforcing
-# long-form repetition loops.
+# Accurate/Large-v3-Turbo is the UI profile for songs and difficult audio. Its command
+# policy is applied directly here instead of by replacing transcription functions.
 _SINGING_FRIENDLY_MODEL = "large-v3-turbo-q5_0"
 
+# Compatibility alias used by the bounded recovery helpers/tests. Production callers
+# pass the runner explicitly through run_whisper_guarded().
 _ORIGINAL_RUN = transcription._run_whisper_with_progress
-_ORIGINAL_TRANSCRIBE = transcription.transcribe_source
-_INSTALLED = False
 
 _VAD_VALUE_OPTIONS = {
     "--vad-model",
@@ -44,6 +42,7 @@ _OPTION_ALIASES = {
 }
 _WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
 _QUALITY_NOTES: dict[str, str] = {}
+WhisperRunner = Callable[[list[str]], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,12 +141,9 @@ def _is_accurate_music_command(command: list[str]) -> bool:
 def _prepare_command(command: list[str]) -> list[str]:
     output = list(command)
     if _is_accurate_music_command(output):
-        # whisper.cpp conditions long-form decoding on previous text whenever max
-        # context is > 0. Setting it to 0 prevents one bad lyric from becoming the
-        # prompt that drives the next minute of audio.
+        # Disable rolling text context so one bad lyric cannot drive a long repeated
+        # hallucination; slightly stronger entropy gating is intentionally conservative.
         output = _set_option(output, "-mc", "0")
-        # A slightly higher entropy threshold is a conservative anti-repetition
-        # setting recommended in upstream whisper.cpp hallucination discussions.
         output = _set_option(output, "-et", "2.60")
     return output
 
@@ -194,12 +190,7 @@ def _text_similarity(left: str, right: str) -> float:
 
 
 def _find_repeat_runs(segments: list[Segment]) -> list[_RepeatRun]:
-    """Find pathological consecutive near-duplicate subtitle storms.
-
-    The thresholds are intentionally conservative. Legitimate repeated choruses of
-    two or three lines are left alone; the guard targets the long, low-diversity
-    loops typical of Whisper ghosting.
-    """
+    """Find pathological consecutive near-duplicate subtitle storms."""
 
     runs: list[_RepeatRun] = []
     start = 0
@@ -283,8 +274,6 @@ def _normalise_recovery_timestamps(
     if not segments or offset_ms <= 0:
         return segments
 
-    # whisper.cpp normally reports absolute timestamps for --offset-t. Some builds
-    # have emitted range-relative timestamps, so normalize that variant defensively.
     latest = max(segment.end_ms for segment in segments)
     earliest = min(segment.start_ms for segment in segments)
     if earliest < max(2_000, offset_ms // 4) and latest <= duration_ms + 3_000:
@@ -304,6 +293,8 @@ def _recover_repeat_run(
     command: list[str],
     run: _RepeatRun,
     ordinal: int,
+    *,
+    runner: WhisperRunner = _ORIGINAL_RUN,
 ) -> tuple[list[Segment] | None, str]:
     recovery_command, recovery_prefix, offset_ms, duration_ms = _recovery_command(
         command,
@@ -311,7 +302,7 @@ def _recover_repeat_run(
         ordinal=ordinal,
     )
     try:
-        _ORIGINAL_RUN(recovery_command)
+        runner(recovery_command)
     except DubLocalError:
         return None, "retry failed"
 
@@ -329,14 +320,16 @@ def _recover_repeat_run(
 
     if not recovered:
         return [], "isolated retry found no reliable speech"
-
     if _find_repeat_runs(recovered):
         return None, "isolated retry repeated the same pattern"
-
     return recovered, "isolated retry recovered the range"
 
 
-def _repair_repetition(command: list[str]) -> None:
+def _repair_repetition(
+    command: list[str],
+    *,
+    runner: WhisperRunner = _ORIGINAL_RUN,
+) -> None:
     prefix = _output_prefix(command)
     if prefix is None:
         return
@@ -347,8 +340,6 @@ def _repair_repetition(command: list[str]) -> None:
         _remember_quality_note(srt_path, "")
         return
 
-    # Keep the raw decoder output in the temporary job cache for diagnostics. The
-    # cleaned SRT remains the file that reaches translation/TTS.
     raw_path = prefix.parent / f"{prefix.name}.raw.srt"
     try:
         raw_path.write_text(segments_to_srt(segments), encoding="utf-8")
@@ -362,7 +353,12 @@ def _repair_repetition(command: list[str]) -> None:
     unresolved_count = 0
 
     for ordinal, run in enumerate(runs, start=1):
-        replacement, _reason = _recover_repeat_run(command, run, ordinal)
+        replacement, _reason = _recover_repeat_run(
+            command,
+            run,
+            ordinal,
+            runner=runner,
+        )
         if replacement is not None:
             replacements[run.start_pos] = (run.end_pos, replacement)
             if replacement:
@@ -372,10 +368,6 @@ def _repair_repetition(command: list[str]) -> None:
                 suppressed_segments += run.count
             continue
 
-        # If a long repetition storm survives an independent no-context retry,
-        # passing it downstream is more harmful than leaving a subtitle gap.
-        # The same applies to an intro loop before 30 s. Shorter ambiguous repeated
-        # phrases are preserved rather than risking removal of a legitimate chorus.
         if run.severe or (run.start_ms < 30_000 and run.count >= 5):
             replacements[run.start_pos] = (run.end_pos, [])
             suppressed_count += 1
@@ -417,59 +409,40 @@ def _repair_repetition(command: list[str]) -> None:
         )
 
 
-def _run_with_vad_fallback(command: list[str]) -> None:
-    """Run one Whisper job with fail-safe VAD and repetition protection."""
+def run_whisper_guarded(
+    command: list[str],
+    *,
+    runner: WhisperRunner = _ORIGINAL_RUN,
+) -> None:
+    """Run one Whisper command with explicit VAD fallback and repetition protection."""
 
     prepared = _prepare_command(command)
-
     if "--vad" not in prepared:
-        _ORIGINAL_RUN(prepared)
+        runner(prepared)
         if _srt_ready(prepared):
-            _repair_repetition(prepared)
+            _repair_repetition(prepared, runner=runner)
         return
 
     fallback = _without_vad(prepared)
     try:
-        _ORIGINAL_RUN(prepared)
+        runner(prepared)
     except DubLocalError:
         _clear_partial_outputs(prepared)
-        _ORIGINAL_RUN(fallback)
+        runner(fallback)
         if _srt_ready(fallback):
-            _repair_repetition(fallback)
+            _repair_repetition(fallback, runner=runner)
         return
 
     if not _srt_ready(prepared):
         _clear_partial_outputs(prepared)
-        _ORIGINAL_RUN(fallback)
+        runner(fallback)
         prepared = fallback
 
     if _srt_ready(prepared):
-        _repair_repetition(prepared)
+        _repair_repetition(prepared, runner=runner)
 
 
-def _transcribe_with_media_policy(
-    info: dict[str, Any],
-    model_id: str = "base",
-    language: str = "auto",
-):
-    if model_id != _SINGING_FRIENDLY_MODEL:
-        return _ORIGINAL_TRANSCRIBE(info, model_id=model_id, language=language)
+def _run_with_vad_fallback(command: list[str]) -> None:
+    """Compatibility wrapper for older direct callers; no function replacement occurs."""
 
-    # Accurate/Large-v3-Turbo is the UI's song/music-video recommendation. Silero VAD
-    # can classify singing as non-speech, so do not gate this profile through VAD.
-    # _prepare_command() simultaneously turns off rolling text context for this model.
-    original_support = transcription._whisper_supports_vad
-    transcription._whisper_supports_vad = lambda _executable: False
-    try:
-        return _ORIGINAL_TRANSCRIBE(info, model_id=model_id, language=language)
-    finally:
-        transcription._whisper_supports_vad = original_support
-
-
-def install_transcription_guard() -> None:
-    global _INSTALLED
-    if _INSTALLED:
-        return
-    transcription._run_whisper_with_progress = _run_with_vad_fallback
-    transcription.transcribe_source = _transcribe_with_media_policy
-    _INSTALLED = True
+    run_whisper_guarded(command, runner=_ORIGINAL_RUN)

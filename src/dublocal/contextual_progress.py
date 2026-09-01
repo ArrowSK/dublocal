@@ -50,7 +50,7 @@ ProgressCallback = Callable[[float, str], None]
 _ADAPTIVE_BATCH_MIN = 12
 _ADAPTIVE_BATCH_MAX_4B = 36
 _ADAPTIVE_BATCH_MAX_8B = 48
-_ADAPTIVE_CACHE_POLICY = "adaptive-2026-08-30.1"
+_ADAPTIVE_CACHE_POLICY = "adaptive-production-2026-09-01.1"
 
 
 @dataclass(slots=True)
@@ -82,6 +82,47 @@ class _AdaptiveBatchState:
         if self.clean_streak >= 2 and self.current < self.maximum:
             self.current = min(self.maximum, self.current * 2)
             self.clean_streak = 0
+
+
+def _dialogue_segments(segments: Sequence[Segment]) -> list[Segment]:
+    return [
+        segment
+        for segment in segments
+        if segment.text.strip() and not is_protected_caption_tag(segment.text)
+    ]
+
+
+def _caption_density(segments: Sequence[Segment]) -> tuple[float, float, int]:
+    dialogue = _dialogue_segments(segments)
+    if not dialogue:
+        return 0.0, 0.0, 0
+    duration_ms = max((segment.end_ms for segment in segments), default=0)
+    minutes = max(duration_ms / 60_000.0, 1.0 / 60.0)
+    costs = [estimate_tokens(segment.text) for segment in dialogue]
+    return len(dialogue) / minutes, sum(costs) / len(costs), max(costs)
+
+
+def adaptive_batch_max(model_key: str, segments: Sequence[Segment]) -> int:
+    """Choose a larger optimistic batch only for dense, tiny caption fragments.
+
+    The strict ID/script validator and adaptive half-size retry remain authoritative.
+    Normal sentence-sized subtitles retain the established 48/36 limits.
+    """
+
+    base = _ADAPTIVE_BATCH_MAX_8B if model_key == "8b" else _ADAPTIVE_BATCH_MAX_4B
+    per_minute, average_tokens, largest_tokens = _caption_density(segments)
+    if per_minute >= 30.0 and average_tokens <= 8.0 and largest_tokens <= 32:
+        return 96 if model_key == "8b" else 72
+    if per_minute >= 20.0 and average_tokens <= 12.0 and largest_tokens <= 48:
+        return 72 if model_key == "8b" else 54
+    return base
+
+
+def effective_context_cap(segments: Sequence[Segment], recommendation_cap: int) -> int:
+    """Allocate the context budget the programme can actually use, not a hardware ceiling."""
+
+    plan = context_plan(segments)
+    return max(4096, min(int(recommendation_cap), int(plan.input_budget_tokens)))
 
 
 def _validated_chunk(
@@ -268,12 +309,7 @@ def _translate_chunk_with_recovery(
     progress_callback: ProgressCallback | None,
     initial_raw: str | None = None,
 ) -> list[str]:
-    """Translate one chunk and repair malformed output with bounded model calls.
-
-    Adaptive translation normally gives large batches one cheap strict attempt first.
-    When the batch has already reached the safe floor, ``initial_raw`` lets this
-    recovery path reuse that response instead of spending another identical model call.
-    """
+    """Translate one chunk and repair malformed output with bounded model calls."""
 
     raw = initial_raw if initial_raw is not None else runtime.generate(
         prompt,
@@ -412,8 +448,6 @@ def _review_chunk(
     total_chunks: int,
     progress_callback: ProgressCallback | None,
 ) -> list[str]:
-    """Run a conservative senior-review pass; keep the validated draft if review formatting fails."""
-
     if progress_callback:
         progress_callback(
             min(0.96, 0.55 + (chunk_number - 1) / max(1, total_chunks) * 0.38),
@@ -448,16 +482,12 @@ def translate_srt_contextual_with_progress(
     recommendation = active_recommendation()
     selected_model_key = model_key or recommendation.model_key
     selected_review = recommendation.review if review is None else bool(review)
-    selected_context_cap = (
+    requested_context_cap = (
         recommendation.context_cap_tokens
         if context_cap_tokens is None
         else max(4096, int(context_cap_tokens))
     )
     spec = contextual_model_spec(selected_model_key)
-    runtime_context_tokens = min(
-        int(spec.metadata["native_context"]),
-        selected_context_cap + 4096,
-    )
 
     path = Path(subtitle_path).expanduser().resolve()
     if not path.is_file():
@@ -484,13 +514,16 @@ def translate_srt_contextual_with_progress(
     if not segments:
         raise DubLocalError("The subtitle file contains no timed text to translate.")
 
+    selected_context_cap = effective_context_cap(segments, requested_context_cap)
     plan = context_plan(segments)
     if plan.input_budget_tokens > selected_context_cap:
         plan = replace(plan, input_budget_tokens=selected_context_cap)
-
-    adaptive_max_batch = (
-        _ADAPTIVE_BATCH_MAX_8B if selected_model_key == "8b" else _ADAPTIVE_BATCH_MAX_4B
+    runtime_context_tokens = min(
+        int(spec.metadata["native_context"]),
+        selected_context_cap + 4096,
     )
+
+    adaptive_max_batch = adaptive_batch_max(selected_model_key, segments)
     batch_state = _AdaptiveBatchState(
         current=adaptive_max_batch,
         maximum=adaptive_max_batch,

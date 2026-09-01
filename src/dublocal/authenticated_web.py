@@ -38,12 +38,19 @@ SOURCE_TYPE = "Course / Website"
 _PLAYWRIGHT_SPEC = "playwright>=1.49,<2.0"
 _SENSITIVE_QUERY_KEYS = {
     "access_token",
+    "api_key",
+    "apikey",
     "auth",
+    "auth_token",
     "authorization",
     "cookie",
+    "credential",
     "expires",
+    "jwt",
     "key",
+    "key-pair-id",
     "policy",
+    "security-token",
     "signature",
     "sig",
     "token",
@@ -58,6 +65,10 @@ _MEDIA_CONTENT_TYPES = (
 )
 _DRM_MARKERS = ("widevine", "fairplay", "playready", "/license", "drmlicense", "license-server")
 _LOGIN_MARKERS = ("/login", "/signin", "/sign-in", "/users/sign_in")
+_URL_RE = re.compile(r"https?://[^\s<>\]\[)('\"]+", re.IGNORECASE)
+_SECRET_RE = re.compile(
+    r"(?i)\b(access_token|authorization|cookie|credential|key-pair-id|policy|signature|sig|token)=([^\s&]+)"
+)
 
 
 def _notify(callback: ProgressCallback | None, fraction: float, label: str) -> None:
@@ -73,26 +84,49 @@ def _valid_web_url(value: str) -> str:
     return clean
 
 
+def _sensitive_query_key(key: str) -> bool:
+    lower = str(key or "").strip().lower()
+    if lower in _SENSITIVE_QUERY_KEYS:
+        return True
+    if lower.startswith(("x-amz-", "x-goog-")):
+        return True
+    return any(marker in lower for marker in ("access_token", "auth_token", "signature", "credential"))
+
+
 def sanitize_url(value: str) -> str:
-    """Remove reusable credentials from URLs before persistence/logging."""
+    """Redact reusable credentials from URLs before persistence or rendering."""
 
     try:
-        parsed = urlparse(value)
+        parsed = urlparse(str(value or ""))
     except Exception:
         return ""
-    filtered = []
-    for key, item in parse_qsl(parsed.query, keep_blank_values=True):
-        if key.lower() in _SENSITIVE_QUERY_KEYS:
-            filtered.append((key, "REDACTED"))
-        else:
-            filtered.append((key, item))
+    filtered = [
+        (key, "REDACTED" if _sensitive_query_key(key) else item)
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+    ]
     return urlunparse(parsed._replace(query=urlencode(filtered, doseq=True), fragment=""))
 
 
+def redact_authenticated_error(value: str | None) -> str | None:
+    """Make authenticated-source errors safe to persist or display."""
+
+    if value is None:
+        return None
+    text = str(value)
+    text = _URL_RE.sub(lambda match: sanitize_url(match.group(0)), text)
+    return _SECRET_RE.sub(lambda match: f"{match.group(1)}=REDACTED", text)
+
+
 def canonical_source_url(value: str) -> str:
+    """Preserve stable routing while removing transient credentials and fragments."""
+
     parsed = urlparse(_valid_web_url(value))
-    # Course identity should not depend on transient signed/query parameters.
-    return urlunparse(parsed._replace(query="", fragment=""))
+    filtered = [
+        (key, item)
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if not _sensitive_query_key(key)
+    ]
+    return urlunparse(parsed._replace(query=urlencode(filtered, doseq=True), fragment=""))
 
 
 def _safe_component(value: str, fallback: str = "Course") -> str:
@@ -215,7 +249,7 @@ def _update_course_state(
         "url": canonical_source_url(item.url),
         "state": state,
         "outputs": [str(path) for _label, path in outputs],
-        "error": error,
+        "error": redact_authenticated_error(error),
         "updated_at": int(time.time()),
     }
     payload["items"] = items
@@ -373,7 +407,8 @@ def _collect_page(page: Any, source_url: str, provider_id: str) -> dict[str, Any
         try:
             content_type = str(response.headers.get("content-type") or "").lower()
             url = str(response.url)
-            if any(content_type.startswith(prefix) for prefix in _MEDIA_CONTENT_TYPES) or url.lower().endswith((".m3u8", ".mpd", ".mp4", ".webm")):
+            media_path = urlparse(url).path.lower()
+            if any(content_type.startswith(prefix) for prefix in _MEDIA_CONTENT_TYPES) or media_path.endswith((".m3u8", ".mpd", ".mp4", ".webm")):
                 responses.append({"url": url, "content_type": content_type})
         except Exception:
             pass
@@ -382,7 +417,7 @@ def _collect_page(page: Any, source_url: str, provider_id: str) -> dict[str, Any
     try:
         page.goto(source_url, wait_until="domcontentloaded", timeout=60_000)
     except Exception as exc:
-        raise DubLocalError(f"Could not open the authenticated page: {exc}") from exc
+        raise DubLocalError(f"Could not open the authenticated page: {redact_authenticated_error(str(exc)) or exc}") from exc
     try:
         page.wait_for_timeout(1_500)
     except Exception:
@@ -417,7 +452,7 @@ def _collect_page(page: Any, source_url: str, provider_id: str) -> dict[str, Any
         performance_entries = []
     for raw in performance_entries or []:
         text = str(raw)
-        if text.lower().endswith((".m3u8", ".mpd", ".mp4", ".webm")):
+        if urlparse(text).path.lower().endswith((".m3u8", ".mpd", ".mp4", ".webm")):
             media.append({"url": text, "content_type": ""})
     media.extend(responses)
     seen: set[str] = set()
@@ -467,7 +502,7 @@ class GenericAuthenticatedProvider(SourceProvider):
         return (
             SourceItem(
                 id=_lesson_id(self.provider_id, url, 1),
-                url=url,
+                url=canonical_source_url(url),
                 title=title,
                 index=1,
                 provider_id=self.provider_id,
@@ -538,9 +573,11 @@ class GenericAuthenticatedProvider(SourceProvider):
 
     def _check_manifest(self, context: Any, candidate: str) -> None:
         lower = candidate.lower()
-        if not lower.endswith((".m3u8", ".mpd")) and not any(marker in lower for marker in _DRM_MARKERS):
+        path = urlparse(candidate).path.lower()
+        has_drm_marker = any(marker in lower for marker in _DRM_MARKERS)
+        if not path.endswith((".m3u8", ".mpd")) and not has_drm_marker:
             return
-        if any(marker in lower for marker in _DRM_MARKERS):
+        if has_drm_marker:
             raise DubLocalError("This lesson appears to use DRM-protected media. DubLocal does not bypass DRM.")
         try:
             response = context.request.get(candidate, timeout=20_000)
@@ -573,7 +610,7 @@ class GenericAuthenticatedProvider(SourceProvider):
                 if any(marker in str(page.url).lower() for marker in _LOGIN_MARKERS):
                     raise DubLocalError("The website session is not signed in. Use Open / Sign in first.")
                 cookie_file = _cookie_file(context, output_dir)
-                last_error: Exception | None = None
+                last_error: str | None = None
                 for position, candidate in enumerate(candidates, start=1):
                     check_cancelled()
                     self._check_manifest(context, candidate)
@@ -604,7 +641,7 @@ class GenericAuthenticatedProvider(SourceProvider):
                         message = str(exc).lower()
                         if "drm" in message or "encrypted" in message or "widevine" in message:
                             raise DubLocalError("This lesson appears to use DRM-protected media. DubLocal does not bypass DRM.") from exc
-                        last_error = exc
+                        last_error = redact_authenticated_error(str(exc))
                         continue
                     media_files = [
                         path
@@ -624,8 +661,9 @@ class GenericAuthenticatedProvider(SourceProvider):
                             lesson_number=item.index,
                             metadata={"provider_label": self.label},
                         )
+                suffix = f" {last_error}" if last_error else ""
                 raise DubLocalError(
-                    f"No usable unprotected media could be acquired from this authenticated page. {last_error or ''}".strip()
+                    f"No usable unprotected media could be acquired from this authenticated page.{suffix}"
                 )
             finally:
                 if cookie_file is not None:
@@ -718,7 +756,10 @@ def provider_for_url(url: str) -> SourceProvider:
 
 def inspect_authenticated_url(url: str) -> SourceInspection:
     provider = provider_for_url(url)
-    return provider.inspect(url)
+    try:
+        return provider.inspect(url)
+    except DubLocalError as exc:
+        raise DubLocalError(redact_authenticated_error(str(exc)) or "Authenticated source inspection failed.") from exc
 
 
 def inspection_summary(inspection: SourceInspection) -> str:
@@ -792,12 +833,12 @@ def publish_course_result(
 
 
 def _selected_items(inspection: SourceInspection, selected_ids: list[str] | tuple[str, ...] | None) -> tuple[SourceItem, ...]:
-    wanted = {str(value) for value in (selected_ids or [])}
     states = _manifest_states(inspection.source_url)
-    if wanted:
-        items = [item for item in inspection.items if item.id in wanted]
-    else:
+    if selected_ids is None:
         items = list(inspection.items)
+    else:
+        wanted = {str(value) for value in selected_ids}
+        items = [item for item in inspection.items if item.id in wanted]
     # Resume is deliberately conservative: a completed lesson is never reprocessed.
     return tuple(item for item in items if states.get(item.id) != "done")
 
@@ -836,8 +877,9 @@ def run_authenticated_magic_queue(
         if cancel_requested():
             for tail in selected[index:]:
                 tail_q = QueueItem(SOURCE_TYPE, tail.url, f"{tail.index:02d} · {tail.title}")
-                completed.append(QueueItemResult(tail_q, "cancelled", None, (), error="Not started because the queue was stopped."))
-                _update_course_state(inspection, tail, "cancelled", error="Not started because the queue was stopped.")
+                message = "Not started because the queue was stopped."
+                completed.append(QueueItemResult(tail_q, "cancelled", None, (), error=message))
+                _update_course_state(inspection, tail, "cancelled", error=message)
             break
         prefix = f"{index + 1}/{total} · {item.title}"
 
@@ -869,13 +911,14 @@ def run_authenticated_magic_queue(
             _update_course_state(inspection, item, "done", outputs=published)
             _notify(progress_callback, (index + 1) / total, f"{prefix} · complete")
         except JobCancelled as exc:
-            message = str(exc) or "Stopped by user."
+            message = redact_authenticated_error(str(exc) or "Stopped by user.") or "Stopped by user."
             completed.append(QueueItemResult(queue_item, "cancelled", None, (), error=message))
             _update_course_state(inspection, item, "cancelled", error=message)
             for tail in selected[index + 1 :]:
                 tail_q = QueueItem(SOURCE_TYPE, tail.url, f"{tail.index:02d} · {tail.title}")
-                completed.append(QueueItemResult(tail_q, "cancelled", None, (), error="Not started because the queue was stopped."))
-                _update_course_state(inspection, tail, "cancelled", error="Not started because the queue was stopped.")
+                tail_message = "Not started because the queue was stopped."
+                completed.append(QueueItemResult(tail_q, "cancelled", None, (), error=tail_message))
+                _update_course_state(inspection, tail, "cancelled", error=tail_message)
             break
         except Exception as exc:
             if cancel_requested():
@@ -883,7 +926,7 @@ def run_authenticated_magic_queue(
                 completed.append(QueueItemResult(queue_item, "cancelled", None, (), error=message))
                 _update_course_state(inspection, item, "cancelled", error=message)
                 break
-            message = str(exc)
+            message = redact_authenticated_error(str(exc)) or "Authenticated processing failed."
             completed.append(QueueItemResult(queue_item, "failed", None, (), error=message))
             _update_course_state(inspection, item, "failed", error=message)
             _notify(progress_callback, (index + 1) / total, f"{prefix} · failed · continuing")
@@ -902,7 +945,7 @@ def acquire_single_authenticated_source(
         raise DubLocalError("This source appears DRM protected. DubLocal does not bypass DRM.")
     if len(inspection.items) != 1:
         raise DubLocalError(
-            "Advanced mode accepts one authenticated lesson at a time. Paste a direct lesson URL, or use Simple → Course / Website for the full course."
+            "Advanced mode accepts one authenticated lesson at a time. Paste a direct lesson URL, or use Standard → Course / Website for the full course."
         )
     provider = provider_for_url(url)
     return provider.acquire(inspection.items[0], progress_callback=progress_callback)

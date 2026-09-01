@@ -2,11 +2,24 @@
 
 DubLocal is still in active development. Versions below describe development/beta builds from `main`.
 
-> **Current beta:** `v0.6.0b7` — **cross-platform Hungarian voice-over**
+> **Current beta:** `v0.6.0b8` — **production architecture cleanup**
 >
-> Beta 7 adds Hungarian voice-over with macOS system-voice Auto selection and a pinned Piper fallback that also provides the Windows/non-macOS path. Normal in-app updates continue to track official `main`.
+> Beta 8 consolidates the active runtime into explicit production services, removes import-time function/class and Gradio-constructor replacement from the running application path, and folds authenticated-source safety policy into the canonical provider while preserving the established user workflows.
 
-## v0.6.0b7 — Cross-platform Hungarian voice-over — current
+## v0.6.0b8 — Production architecture cleanup — current
+
+- Replaced the accumulated active overlay/installer composition with one explicit launcher and production UI composition root.
+- Standard, Advanced, batch, course, transcription, translation, voice, audio and export stages now connect through ordinary service calls rather than import-time function/class replacement.
+- Package import is side-effect free and limited to package metadata.
+- Added architecture regression tests that reject assignment into imported production modules and Gradio constructors.
+- Kept contextual Qwen adaptive batching, Auto source detection, subtitle-ID/script validation, bounded recovery and local translation cache behavior on the canonical translation path.
+- Made Whisper VAD fallback, repetition protection and smart recovery direct stages of canonical transcription.
+- Kept native voice timing, Hungarian/Russian/custom TTS routing, automatic vocal-range matching, adaptive audio mixing and format-aware output profiles behind explicit service boundaries.
+- Folded authenticated-source credential redaction, signed-manifest DRM inspection, non-secret query routing and explicit-empty lesson selection semantics into `authenticated_web.py` itself; removed the now-obsolete runtime policy overlay.
+- Fixed the Standard local-file queue UI callback so both the queue summary and processing-button label are updated through the declared Gradio outputs.
+- Historical compatibility modules that are no longer part of active production composition remain dormant for incremental removal instead of being deleted in a risky bulk rewrite.
+
+## v0.6.0b7 — Cross-platform Hungarian voice-over
 
 - Added Hungarian as a complete translation → voice-over target in the existing Standard workflow.
 - On macOS, Auto prefers an installed `hu_HU` system voice while keeping Piper voices selectable.

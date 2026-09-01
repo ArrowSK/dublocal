@@ -1,113 +1,120 @@
 # DubLocal 1.0 production readiness
 
-This document is a release-readiness audit, not a feature wishlist. The current pipeline is already capable enough for a 1.0 candidate; the remaining work is mainly packaging, consolidation, reproducibility and real macOS validation.
+This is a release-readiness audit rather than a feature wishlist. Beta 8 closes the main runtime-composition debt that previously made 1.0 hard to reason about; remaining work is mostly distribution, reproducibility, diagnostics and real-device acceptance testing.
 
 ## Current status
 
-DubLocal is still explicitly a development build (`0.6.0.dev0`). The current install path is a Git checkout plus an editable Python environment and an AppleScript-generated launcher. Updates track mutable `main`. CI runs the Python unit suite on Ubuntu with Python 3.11 and 3.13.
+Current packaged beta: **0.6.0b8**.
 
-Those choices are useful during rapid development but should not define the public 1.0 distribution.
+The active application now has one explicit launcher/UI composition and canonical Standard/Advanced processing services. Package import is side-effect free, the active production path does not replace imported functions/classes or Gradio constructors at runtime, and architecture tests guard that rule.
+
+The macOS CI workflow builds a real unsigned DMG on a macOS runner. Normal CI covers Python 3.11/3.13 and includes the Windows portability contract used by the Hungarian provider. This is meaningful beta validation, but it is not yet the signed/notarized, self-contained, immutable release distribution expected for 1.0.
 
 ## P0 — required before calling the app 1.0
 
-### 1. Consolidate the layered implementation
+### 1. Complete compatibility-module retirement deliberately
 
-The first UI cleanup pass is complete: the launcher now uses one active `product_ui.py` layer for the current Simple/Advanced shell, batch queue, update UX, model wizard, provider controls, audio controls and final theme. The superseded `ui_v060.py`, `ui_v060_refined.py`, `ui_v061.py`, `ui_v062.py`, `ui_v063.py` and `ui_v064.py` overlays have been removed after parity tests were added.
-
-The remaining detailed-workflow builder still carries the older `ui_v053.py` → `ui_v050.py` → `ui_v042.py` → `ui.py` chain, and runtime refinements are still installed through several compatibility wrappers. Those layers protected working behavior while the product was changing quickly, but they should not remain the final 1.0 structure.
+The active production path is consolidated. Historical compatibility/refinement modules may still exist in the repository for regression context or old direct callers, but they are not imported by the production composition root.
 
 Before 1.0:
 
-- consolidate the remaining detailed-workflow UI chain behind normal canonical modules;
-- fold active transcription/TTS/audio refinements into their owning modules behind normal functions/classes rather than import-time monkeypatches;
-- delete superseded compatibility modules only after regression tests prove parity;
-- keep public behavior and the current Simple/Advanced UX unchanged during the cleanup.
+- remove dormant compatibility modules incrementally when no tests/documentation/direct development entry point still requires them;
+- keep the production architecture guardrails so runtime monkeypatch composition cannot return accidentally;
+- treat each deletion as maintenance with regression coverage, not as an excuse to redesign the working pipeline.
 
-The important rule is that this is consolidation, not a pipeline rewrite.
+This is no longer a blocker to the beta runtime itself; it is repository hygiene before the codebase is declared stable.
 
-### 2. Ship a real macOS application artifact
+### 2. Ship a signed/notarized production macOS artifact
 
-The current installer creates launchers under `~/Applications` and keeps the Python virtual environment inside the Git checkout. The generated bundle also has its own hard-coded launcher version unrelated to the Python package version.
+The beta already builds a conventional drag-to-Applications DMG and verifies the generated application is intentionally unsigned. For 1.0 the distribution should add:
 
-For 1.0, build a normal distributable macOS application (or a self-contained signed application plus DMG/ZIP) with:
-
-- one authoritative semantic version;
-- reproducible packaged runtime;
-- Apple code signing and notarization;
-- branded icon/metadata;
+- Apple Developer ID signing;
+- notarization;
+- one authoritative semantic version/build number;
+- release-artifact integrity verification;
 - clean install/uninstall behavior;
-- no requirement for the user to clone a Git repository or run a shell script.
+- a packaging decision on whether Python remains a managed prerequisite or becomes part of a self-contained runtime.
 
-Large optional models should remain outside the application bundle and continue using DubLocal's explicit model setup flow.
+Large optional models should remain outside the application bundle and continue using explicit model setup.
 
-### 3. Move stable updates from `main` to releases
+### 3. Move stable updates from mutable `main` to immutable releases
 
-The current one-button updater is good UX but it still updates from the official `main` branch. Production users should receive immutable releases rather than whatever happens to be at the tip of development.
+The current in-app updater deliberately manages the official `main` checkout with branch/upstream/divergence safeguards and repair backup behavior. That is suitable for the beta channel.
 
 Before 1.0:
 
-- publish tagged GitHub Releases;
-- make the default updater follow the stable release channel;
-- optionally provide a separate Beta/Development channel;
-- verify release asset checksum/signature before replacing the installed application;
+- make Stable follow immutable signed/tagged releases;
+- optionally retain Beta as the current `main`/prerelease channel or another explicit prerelease channel;
+- verify downloaded release assets before installation;
 - retain rollback to the previous working release.
 
-### 4. Add macOS release CI and smoke tests
+### 4. Add end-to-end macOS smoke/acceptance coverage
 
-Current CI validates unit tests on Ubuntu/Python 3.11 and 3.13. That does not exercise the real production environment: macOS, Homebrew executables, VideoToolbox, app launch/restart or Apple Silicon-specific behavior.
+Current macOS CI verifies the actual DMG build, package contracts and shell/package mechanics. The remaining release gap is behavioral smoke testing on real production-like Macs.
 
-The release pipeline should add macOS jobs that at minimum verify:
+Before 1.0, automate where practical and manually validate where hardware matters:
 
-- application build/package;
-- app starts and binds only to localhost;
-- ffmpeg/ffprobe discovery;
-- whisper.cpp discovery and a tiny deterministic transcription fixture;
-- local-file Magic Flow smoke path;
-- updater/relaunch logic against a controlled fixture;
-- model setup state and migration behavior.
+- application launch and localhost-only binding;
+- FFmpeg/ffprobe discovery;
+- a tiny deterministic local-file transcription fixture;
+- Standard local-file end-to-end processing;
+- MP4/MKV/Shareable export, including burned-subtitle capability selection;
+- updater/restart behavior against a controlled release fixture;
+- authenticated-source redaction/selection/DRM boundaries without storing reusable credentials;
+- low-memory M1-class and newer higher-memory Apple Silicon acceptance runs.
 
-A small manual release matrix should still cover low-memory M1 and a newer high-memory M-series Mac because GitHub runners cannot represent every unified-memory profile.
+GitHub-hosted runners cannot fully substitute for representative unified-memory Macs.
 
-### 5. Make dependency resolution reproducible
+### 5. Make dependency resolution more reproducible
 
-`pyproject.toml` currently uses broad dependency ranges and optional runtimes are partly installed through Homebrew or separate Python environments. That is appropriate for development but exposes production users to upstream breakage.
+Core dependencies are constrained, and optional engines/models already use several pinned revisions/checksums, but 1.0 should reduce exposure to upstream drift further.
 
 Before 1.0:
 
 - maintain tested production constraints/lock data for the application runtime;
-- pin or constrain known-sensitive packages such as Gradio, Kokoro/PyTorch and yt-dlp to tested ranges;
-- record minimum/tested versions of ffmpeg, whisper.cpp, llama.cpp, eSpeak NG and Demucs runtime dependencies;
-- keep model revision/checksum verification as it works today.
+- record tested/minimum versions of FFmpeg, whisper.cpp, llama.cpp and optional audio/TTS runtimes;
+- preserve model revision/checksum verification;
+- ensure a release build can be reproduced from declared inputs without relying on an unrecorded local environment.
 
-### 6. Synchronize documentation and legal notices with active code
+### 6. Synchronize legal inventory with the release build
 
-Some top-level documentation still describes older behavior, including FFmpeg post-stretch timing and the pre-separation soundtrack model, while the active runtime now uses native Kokoro timing and optional vocal separation.
+The project already separates application licensing from third-party/model licensing and keeps GPL Piper out of the Apache-2.0 process via an isolated runtime.
 
 Before 1.0:
 
-- make README, architecture, user guide and troubleshooting describe the same current behavior;
-- generate the release's third-party/model licence notice from the actual enabled dependency/model registry;
-- clearly distinguish official Kokoro models from third-party providers such as Russian Kokoro.
+- generate/reconcile third-party and model notices against the exact release configuration;
+- re-check redistribution/commercial-use statements for every bundled or automatically prepared component;
+- keep OS-provided system voices explicitly outside DubLocal redistribution claims.
 
-## P1 — strongly recommended for 1.0, but not architectural blockers
+## P1 — strongly recommended for 1.0
 
-- A single **System Check / Diagnostics** screen that can export a privacy-safe support bundle containing versions, detected executables, model readiness and recent DubLocal logs.
-- Versioned user-config migrations so future settings/model receipts can evolve without manual deletion.
-- A clear Stable/Beta channel selector once release channels exist.
-- Release-candidate acceptance tests for representative YouTube, local video, dialogue-heavy and music-heavy material.
-- Graceful cancellation between long pipeline stages and queue items.
+- A single **System Check / Diagnostics** screen that can export a privacy-safe support bundle with versions, executables, model readiness and recent logs.
+- Versioned user-config migrations for settings/model/provider receipts.
+- A clear Stable/Beta update-channel selector once immutable stable releases exist.
+- Release-candidate acceptance fixtures for dialogue-heavy, music-heavy, local-file and representative online-source jobs.
+- More explicit performance/ETA telemetry for long model stages without compromising local privacy.
 
 ## What does not need rewriting
 
-The core product architecture can stay: one sequential Magic Flow queue over the same transcription, translation, TTS, mixing and export engines; explicit optional model downloads; hardware-aware recommendations; local-only processing; and the Simple/Advanced split.
+The current product shape can stay:
 
-The 1.0 effort should therefore be treated as **productionization and consolidation**, not another feature milestone.
+- Standard as the default consumer workflow;
+- Advanced for stage-by-stage control;
+- one sequential queue;
+- explicit optional model downloads;
+- hardware-aware translation recommendations;
+- local-first processing;
+- provider-neutral source/TTS boundaries;
+- format-aware output profiles;
+- conservative subtitle/translation validation.
+
+The 1.0 effort should therefore be treated as **distribution and release hardening**, not another pipeline rewrite.
 
 ## Recommended sequence
 
-1. Freeze new architecture-changing features.
-2. Finish consolidating the remaining detailed UI/runtime overlays while preserving behavior.
-3. Add macOS release/smoke CI and reproducible dependency constraints.
-4. Build signed/notarized release artifacts and switch updater to tagged releases.
-5. Synchronize docs/licences and run the release-candidate test matrix.
-6. Tag `1.0.0-rc1`, test on representative M-series Macs, then promote the same tested artifact to `1.0.0`.
+1. Keep the beta 8 explicit production composition stable while deleting dormant compatibility files incrementally.
+2. Add production constraints and behavioral macOS smoke fixtures.
+3. Decide/package the signed/notarized 1.0 runtime shape.
+4. Move Stable updates to immutable verified releases while keeping Beta explicit.
+5. Reconcile legal/notices and run the representative-Mac acceptance matrix.
+6. Tag a release candidate, validate the exact artifact, then promote that tested artifact to 1.0.

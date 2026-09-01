@@ -364,6 +364,7 @@ def prepare_kokoro(language: str, voice: str, speed: float = 1.0) -> str:
                 "speed": float(speed),
                 "repo_id": KOKORO_OFFICIAL_MODEL_REPO,
                 "output_dir": str(job_dir / "segments"),
+                "adaptive_timing": False,
                 "segments": [{"index": 1, "text": _PREPARE_TEXT[language]}],
             },
             job_dir,
@@ -435,9 +436,6 @@ def _assemble_voice_track(
                 pcm = (np.clip(chunk, -1.0, 1.0) * 32767.0).astype("<i2")
                 handle.writeframes(pcm.tobytes())
     finally:
-        # np.memmap relies on object finalization on POSIX, where unlinking an open
-        # mapping is allowed. Windows does not: close the mapping explicitly before
-        # removing the temporary file. This is shared by Kokoro and other providers.
         try:
             mix.flush()
         except (OSError, ValueError):
@@ -457,11 +455,18 @@ def generate_voice_track(
     speed: float = 1.0,
     segment_voices: dict[int, str] | None = None,
 ) -> VoiceTrackResult:
+    """Generate an official Kokoro track with native per-line timing targets.
+
+    The worker first renders every line naturally. Only a line that materially exceeds
+    its subtitle window is regenerated at a faster Kokoro speaking rate. This is an
+    explicit request/response contract; no module function is replaced at runtime.
+    """
+
     source = Path(subtitle_path)
     if not source.is_file():
         raise DubLocalError("Choose an extracted, transcribed or translated SRT first.")
     if source.suffix.lower() != ".srt":
-        raise DubLocalError("M4 Kokoro voice generation currently expects an SRT timeline.")
+        raise DubLocalError("Kokoro voice generation expects an SRT timeline.")
 
     segment_voices = {int(key): str(value) for key, value in (segment_voices or {}).items() if value}
     all_voices = list(dict.fromkeys([voice, *segment_voices.values()]))
@@ -487,11 +492,13 @@ def generate_voice_track(
             "speed": float(speed),
             "repo_id": KOKORO_OFFICIAL_MODEL_REPO,
             "output_dir": str(segment_dir),
+            "adaptive_timing": True,
             "segments": [
                 {
                     "index": item.index,
                     "text": item.text,
                     "voice": segment_voices.get(item.index, voice),
+                    "target_duration_ms": max(1, item.end_ms - item.start_ms),
                 }
                 for item in timeline
             ],
@@ -503,12 +510,14 @@ def generate_voice_track(
         int(item["index"]): item for item in response.get("segments", []) if "index" in item
     }
     generated: list[VoiceSegmentResult] = []
+    manifest_segments: list[dict[str, Any]] = []
     for segment in timeline:
         item = response_by_index.get(segment.index)
         if item is None or not item.get("path"):
             raise DubLocalError(f"Kokoro did not return audio for subtitle segment {segment.index}.")
         duration_ms = int(item.get("duration_ms") or 0)
         slot_ms = max(0, segment.end_ms - segment.start_ms)
+        wav_path = Path(str(item["path"]))
         generated.append(
             VoiceSegmentResult(
                 index=segment.index,
@@ -518,8 +527,26 @@ def generate_voice_track(
                 voice_duration_ms=duration_ms,
                 slot_ms=slot_ms,
                 overflow_ms=max(0, duration_ms - slot_ms),
-                wav_path=Path(str(item["path"])),
+                wav_path=wav_path,
             )
+        )
+        manifest_segments.append(
+            {
+                "index": segment.index,
+                "start_ms": segment.start_ms,
+                "end_ms": segment.end_ms,
+                "text": segment.text,
+                "voice": segment_voices.get(segment.index, voice),
+                "voice_duration_ms": duration_ms,
+                "slot_ms": slot_ms,
+                "overflow_ms": max(0, duration_ms - slot_ms),
+                "wav": str(wav_path),
+                "native_speed": float(item.get("speed", speed)),
+                "pilot_duration_ms": int(item.get("pilot_duration_ms") or duration_ms),
+                "target_duration_ms": int(item.get("target_duration_ms") or slot_ms),
+                "timing_error_ms": int(item.get("timing_error_ms") or 0),
+                "generation_passes": int(item.get("generation_passes") or 1),
+            }
         )
 
     safe_language = language.replace("/", "-")
@@ -543,20 +570,10 @@ def generate_voice_track(
                 "speed": float(speed),
                 "sample_rate": int(response["sample_rate"]),
                 "source_srt": str(source),
-                "segments": [
-                    {
-                        "index": item.index,
-                        "start_ms": item.start_ms,
-                        "end_ms": item.end_ms,
-                        "text": item.text,
-                        "voice": segment_voices.get(item.index, voice),
-                        "voice_duration_ms": item.voice_duration_ms,
-                        "slot_ms": item.slot_ms,
-                        "overflow_ms": item.overflow_ms,
-                        "wav": str(item.wav_path),
-                    }
-                    for item in generated
-                ],
+                "timing_mode": "native_kokoro_speed",
+                "adaptive_timing": True,
+                "post_stretch": False,
+                "segments": manifest_segments,
             },
             ensure_ascii=False,
             indent=2,
