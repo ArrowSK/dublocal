@@ -776,7 +776,6 @@ def _build_standard() -> None:
 
         queue_note = gr.Markdown("Paste one video, playlist, or channel URL. Collections are expanded into one sequential queue.", elem_classes=["dl-queue-note"])
         source_type.change(fn=_toggle_standard_source, inputs=[source_type], outputs=[youtube_url, local_files, course_panel, queue_note], queue=False)
-        local_files.change(fn=_local_queue_status, inputs=[local_files], outputs=[queue_note,], queue=False)
 
         rights = gr.Checkbox(label="I confirm that I have legitimate access to this content and the right or legal authority to process it for my intended use", value=False)
         with gr.Row():
@@ -795,6 +794,12 @@ def _build_standard() -> None:
         with gr.Row(elem_classes=["dl-magic-actions"]):
             run = gr.Button("Start Processing", variant="primary")
             stop = gr.Button("Stop", variant="secondary", elem_classes=["dl-stop-button"])
+        local_files.change(
+            fn=_local_queue_status,
+            inputs=[local_files],
+            outputs=[queue_note, run],
+            queue=False,
+        )
         stop.click(fn=_stop_processing, queue=False)
         gr.Markdown("Stop ends the current item and remaining queue; completed files stay.", elem_classes=["dl-stop-note"])
         status = gr.Markdown("**Ready** · queue work is sequential.", elem_classes=["dl-stage-status"])
