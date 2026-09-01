@@ -1,6 +1,6 @@
 # DubLocal user guide
 
-**Current beta: v0.6.0b5**
+**Current beta: v0.6.0b8**
 
 For the unsigned DMG installation and one-time Gatekeeper steps, see `BETA_INSTALLATION.md`.
 
@@ -140,7 +140,7 @@ DubLocal uses its own local Chromium profile for authenticated sites. You type c
 
 Course jobs support lesson selection, sequential processing, per-lesson failure isolation and resume state. Completed lessons are not processed again when resuming the same course. Finished course outputs are organized under `~/Movies/DubLocal/<Provider>/<Course>/` by default.
 
-Protected DRM/encrypted streams are refused rather than bypassed. If a platform provides a legitimate downloadable local copy, that local file can be processed normally.
+Protected DRM/encrypted streams are refused rather than bypassed. Signed media URLs are sanitized before errors/resume data are persisted: reusable credential/signing query values are redacted while ordinary lesson-routing parameters are retained. If a platform provides a legitimate downloadable local copy, that local file can be processed normally.
 
 # Advanced — manual control
 
@@ -154,9 +154,9 @@ The individual stages remain collapsible. Advanced preserves the same processing
 
 ## 1 · Source
 
-Choose YouTube, Local file, or a direct Course / Website lesson and click **Load source**.
+Choose YouTube or Local file and click **Load source**. Full Course / Website selection belongs in Standard so Advanced does not duplicate the course queue manager.
 
-A persistent card confirms title, duration and useful subtitle inventory. Full course lesson selection belongs in Standard; Advanced accepts one direct authenticated lesson at a time so it does not duplicate the course queue manager.
+A persistent card confirms title, duration and useful subtitle inventory.
 
 YouTube inspection does not download the full video at this stage. Local files are inspected with ffprobe.
 
