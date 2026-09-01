@@ -425,10 +425,26 @@ def _assemble_voice_track(
             handle.setframerate(sample_rate)
             chunk_samples = sample_rate * 20
             for offset in range(0, total_samples, chunk_samples):
-                chunk = np.asarray(mix[offset : offset + chunk_samples])
+                # Copy each chunk out of the mmap so Windows never keeps a live view
+                # when the temporary backing file is removed below.
+                chunk = np.array(
+                    mix[offset : offset + chunk_samples],
+                    dtype=np.float32,
+                    copy=True,
+                )
                 pcm = (np.clip(chunk, -1.0, 1.0) * 32767.0).astype("<i2")
                 handle.writeframes(pcm.tobytes())
     finally:
+        # np.memmap relies on object finalization on POSIX, where unlinking an open
+        # mapping is allowed. Windows does not: close the mapping explicitly before
+        # removing the temporary file. This is shared by Kokoro and other providers.
+        try:
+            mix.flush()
+        except (OSError, ValueError):
+            pass
+        mmap_handle = getattr(mix, "_mmap", None)
+        if mmap_handle is not None:
+            mmap_handle.close()
         del mix
         raw_path.unlink(missing_ok=True)
 
