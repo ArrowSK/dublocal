@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from dublocal.hungarian_tts import install_hungarian_metadata
 from dublocal.media import DubLocalError
 from dublocal.timeline import Segment
 from dublocal.tts import (
@@ -30,10 +31,11 @@ def _write_tone(path: Path, *, frames: int, value: int = 4000, rate: int = 24000
 
 def test_translation_language_suggestions_are_explicit():
     _apply_provider_metadata()
+    install_hungarian_metadata()
     assert suggested_kokoro_language("en") == "en-US"
     assert suggested_kokoro_language("fr") == "fr"
     assert suggested_kokoro_language("pt") == "pt-BR"
-    assert suggested_kokoro_language("hu") is None
+    assert suggested_kokoro_language("hu") == "hu"
     assert suggested_kokoro_language("ru") == "ru"
 
 

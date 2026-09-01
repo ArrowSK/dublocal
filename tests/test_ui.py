@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dublocal
+from dublocal.hungarian_tts import install_hungarian_metadata
 from dublocal.subtitle_export import SUBTITLE_FORMAT_CHOICES
 from dublocal.ui import (
     MATRIX_CSS,
@@ -36,14 +37,16 @@ def test_voice_dropdown_uses_language_default():
     assert any(value == "bm_george" for _label, value in update.choices)
 
 
-def test_unsupported_translated_language_clears_kokoro_voice():
+def test_translated_hungarian_offers_local_voice():
+    install_hungarian_metadata()
     language_update, voice_update = _suggest_voice_controls(
         "Translated subtitles",
         "en",
         "hu",
     )
-    assert language_update.value is None
-    assert voice_update.value is None
+    assert language_update.value == "hu"
+    assert voice_update.value is not None
+    assert any(value == voice_update.value for _label, value in voice_update.choices)
 
 
 def test_source_english_suggests_american_kokoro():

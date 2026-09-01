@@ -93,7 +93,7 @@ def generate_voice_track_with_progress(
     total = max(1, len(segments))
     jobs_root = Path(user_cache_dir("DubLocal")) / "jobs"
     jobs_root.mkdir(parents=True, exist_ok=True)
-    before = {item for item in jobs_root.glob("kokoro-*") if item.is_dir()}
+    before = {item for item in jobs_root.iterdir() if item.is_dir()}
 
     thread, box = _run_in_thread(
         lambda: generate_voice_track(
@@ -106,14 +106,14 @@ def generate_voice_track_with_progress(
     )
     job_dir: Path | None = None
     if progress_callback:
-        progress_callback(0.02, "Loading Kokoro and voice assets")
+        progress_callback(0.02, "Loading local voice engine and voice assets")
 
     while thread.is_alive():
         if job_dir is None:
             candidates = [
                 item
-                for item in jobs_root.glob("kokoro-*")
-                if item.is_dir() and item not in before
+                for item in jobs_root.iterdir()
+                if item.is_dir() and item not in before and (item / "segments").is_dir()
             ]
             if candidates:
                 job_dir = max(candidates, key=lambda item: item.stat().st_mtime)
@@ -125,10 +125,10 @@ def generate_voice_track_with_progress(
                 fraction = min(0.92, 0.05 + 0.85 * completed / total)
                 progress_callback(
                     fraction,
-                    f"Generating Kokoro speech {min(completed, total)}/{total}",
+                    f"Generating local speech {min(completed, total)}/{total}",
                 )
             else:
-                progress_callback(0.03, "Loading Kokoro and voice assets")
+                progress_callback(0.03, "Loading local voice engine and voice assets")
         time.sleep(0.5)
 
     thread.join()
