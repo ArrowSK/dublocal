@@ -28,6 +28,7 @@ output_profile_runtime.install_output_profile_runtime()
 
 from . import shareable_burn
 from .adaptive_audio import install_adaptive_audio_refinement
+from .hungarian_tts_integration import install_hungarian_tts_integration
 from .job_control import install_shutdown_hooks, shutdown_all
 from .language_extensions import install_language_extensions
 from .m53 import install_runtime_refinements
@@ -47,6 +48,9 @@ install_russian_runtime_compat(tts_provider_refinement)
 # Provider routing must be installed before native_tts_timing is imported: that
 # module captures the then-current TTS generator as its stable synthesis backend.
 tts_provider_refinement.install_tts_provider_refinement()
+# Hungarian is a small additive provider layer: macOS can use an installed hu-HU
+# system voice, while Windows/other platforms use the same pinned Piper fallback.
+install_hungarian_tts_integration()
 from .native_tts_timing import install_native_timing_refinement
 
 # Install wrappers before UI modules import app/progress-operation/render symbols.
@@ -128,7 +132,7 @@ def main() -> None:
         )
     finally:
         # Launcher stop/restart and normal interpreter shutdown must never leave
-        # llama.cpp, Kokoro/Russian TTS, whisper.cpp, Demucs or ffmpeg children alive.
+        # llama.cpp, local TTS, whisper.cpp, Demucs or ffmpeg children alive.
         shutdown_all()
         # Normal shutdown is another safe point to remove only stale (>24 h) jobs.
         # Current-session outputs remain available until their normal cache age.
