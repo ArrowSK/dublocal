@@ -201,7 +201,7 @@ make_app() {
   temp_script="$(/usr/bin/mktemp -t dublocal-launcher).applescript"
   cat > "$temp_script" <<EOF
 on run
-  do shell script "/bin/zsh " & quoted form of "$target_script" & " >/dev/null 2>&1 &"
+  do shell script "DUBLOCAL_LAUNCH_ACTION=open /bin/zsh " & quoted form of "$target_script" & " >/dev/null 2>&1 &"
 end run
 EOF
 
@@ -216,6 +216,10 @@ EOF
   set_plist_value "$plist" "CFBundleIdentifier" "string" "$bundle_id"
   set_plist_value "$plist" "CFBundleShortVersionString" "string" "0.2"
   set_plist_value "$plist" "CFBundleVersion" "string" "2"
+  # osacompile creates an ad-hoc signature before the icon and plist are
+  # customised. Replace it after those changes so macOS can launch the
+  # finished local bundle without a stale signature mismatch.
+  /usr/bin/codesign --force --deep --sign - "$output" >/dev/null
   /usr/bin/touch "$output"
 }
 
