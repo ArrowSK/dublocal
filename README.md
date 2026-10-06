@@ -27,7 +27,7 @@
 
 DubLocal is a local-first application for people who want to understand, translate or re-voice video without turning the job into a collection of command-line tools. Give it a YouTube link, local media file, or a supported authenticated lesson; choose what you want back; DubLocal builds the processing route and keeps the heavy work local.
 
-> **Current state:** **v0.6.0b8** is the current packaged macOS beta. Beta 8 consolidates the active production runtime into explicit services and dependency injection, removes import-time function/class and Gradio-constructor replacement from the running application path, and folds authenticated-source credential/DRM policy into the canonical provider. It retains beta 7's Hungarian voice-over, beta 6's translation-performance work, beta 5's format-aware output profiles and beta 4's subtitle-capable FFmpeg handling. The backend continues to carry Windows portability checks for the Hungarian provider, but a Windows installer is not published yet. The macOS DMG remains intentionally unsigned and not notarized.
+> **Current state:** **v0.6.0b8** is the current packaged macOS beta. Beta 8 consolidates the active production runtime into explicit services and dependency injection, removes import-time function/class and Gradio-constructor replacement from the running application path, and folds authenticated-source credential/DRM policy into the canonical provider. It retains beta 7's Hungarian voice-over, beta 6's translation-performance work, beta 5's format-aware output profiles and beta 4's subtitle-capable FFmpeg handling. macOS remains the currently published package; a Windows setup workflow now builds the matching per-user beta installer for future versioned prereleases. Both package types are unsigned and not notarized.
 
 ## Install on macOS
 
@@ -44,6 +44,20 @@ Do not disable Gatekeeper globally. The extra first-launch step exists only beca
 The first setup needs an internet connection for the application environment and any optional components you choose. Large AI models are **not** bundled into the DMG.
 
 For the slightly longer version, including uninstall and first-run requirements, see **[Beta installation](docs/BETA_INSTALLATION.md)**.
+
+## Install on Windows
+
+The Windows beta workflow produces `DubLocal-<version>-Windows-Setup-unsigned.exe` plus a SHA-256 checksum for each newly published versioned prerelease. The current v0.6.0b8 release predates that package; use the macOS build above or build from source until the next Windows asset is attached.
+
+The setup is per-user and does not require administrator rights. It installs only the launcher under `%LOCALAPPDATA%`, then the first launch creates a managed checkout and private Python environment under `%LOCALAPPDATA%\DubLocal`.
+
+Before first launch, install these normal Windows prerequisites yourself:
+
+1. Git for Windows.
+2. Python 3.11, 3.12, or 3.13, including the `py.exe` launcher.
+3. FFmpeg and `ffprobe` on `PATH` for media processing.
+
+The installer does not bundle models or silently install system software. As with the macOS beta, verify the published checksum and use the normal Windows warning/approval path for this unsigned beta.
 
 ## The normal workflow
 
@@ -220,7 +234,7 @@ cd dublocal
 zsh scripts/macos/install-launcher.sh
 ```
 
-The source installer currently targets macOS. The Hungarian provider itself has a Windows portability contract and CI coverage, which is groundwork for a later Windows application package rather than a claim that one already ships.
+The source installer currently targets macOS. The Windows beta setup is built by GitHub Actions for versioned prereleases; its bootstrap and installer definitions are under `scripts/windows/` and `packaging/windows/`.
 
 See **[Installation from source](docs/INSTALLATION.md)** for the current development path.
 

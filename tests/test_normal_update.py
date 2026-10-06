@@ -76,6 +76,20 @@ def test_restart_helper_is_detached_before_old_backend_shutdown(monkeypatch, tmp
     assert calls[1] == ("wait", 5)
 
 
+def test_windows_restart_uses_the_windows_launcher(monkeypatch, tmp_path: Path) -> None:
+    launcher = tmp_path / "scripts" / "windows" / "launch-dublocal.ps1"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("# Windows launcher\n", encoding="utf-8")
+    monkeypatch.delenv("DUBLOCAL_BETA_BOOTSTRAP", raising=False)
+    monkeypatch.setattr(normal.os, "name", "nt")
+
+    command = normal._restart_command(tmp_path)
+
+    assert command[:5] == ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+    assert command[5] == str(launcher)
+    assert command[6] == "-Restart"
+
+
 def test_one_action_update_reports_up_to_date_without_restart(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         normal,

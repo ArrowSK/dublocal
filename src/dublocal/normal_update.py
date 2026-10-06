@@ -28,10 +28,36 @@ def _blocked_status(message: str) -> str:
     return f"### Update needs attention\n{message}"
 
 
-def _restart_command(root: Path) -> str:
+def _restart_command(root: Path) -> str | list[str]:
     """Return the detached restart target for source or packaged installations."""
 
     beta_bootstrap = os.environ.get("DUBLOCAL_BETA_BOOTSTRAP", "").strip()
+    if os.name == "nt":
+        if beta_bootstrap:
+            bootstrap = Path(beta_bootstrap).expanduser()
+            if bootstrap.is_file():
+                return [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(bootstrap),
+                    "-ForceRestart",
+                ]
+        launcher = root / "scripts" / "windows" / "launch-dublocal.ps1"
+        if not launcher.is_file():
+            raise UpdateError("The DubLocal Windows launcher script is missing.")
+        return [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(launcher),
+            "-Restart",
+        ]
+
     if beta_bootstrap:
         bootstrap = Path(beta_bootstrap).expanduser()
         if bootstrap.is_file():
@@ -68,12 +94,31 @@ def schedule_restart() -> None:
 
     root = repository_root()
     restart = _restart_command(root)
+    env = os.environ.copy()
+    if os.name == "nt":
+        try:
+            bootstrap = subprocess.Popen(
+                restart,
+                cwd=str(root),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=(
+                    getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    | getattr(subprocess, "DETACHED_PROCESS", 0)
+                ),
+            )
+            bootstrap.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise UpdateError(f"DubLocal could not schedule its restart: {exc}") from exc
+        return
+
     command = (
         "(sleep 1; "
         f"{restart}"
         ") </dev/null >/dev/null 2>&1 &!"
     )
-    env = os.environ.copy()
     try:
         bootstrap = subprocess.Popen(
             ["/bin/zsh", "-c", command],

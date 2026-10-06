@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "dublocal"
 version = "0.6.0b8"
-description = "Local-first subtitle translation and AI voice-over dubbing for macOS"
+description = "Local-first subtitle translation and AI voice-over dubbing"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }

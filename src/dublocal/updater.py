@@ -467,6 +467,32 @@ def repair_installation(*, replace_modified_files: bool = False) -> UpdateResult
 
 def schedule_restart() -> None:
     root = repository_root()
+    if os.name == "nt":
+        launcher = root / "scripts" / "windows" / "launch-dublocal.ps1"
+        if not launcher.is_file():
+            raise UpdateError("The DubLocal Windows launcher script is missing.")
+        subprocess.Popen(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(launcher),
+                "-Restart",
+            ],
+            cwd=str(root),
+            env=os.environ.copy(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=(
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                | getattr(subprocess, "DETACHED_PROCESS", 0)
+            ),
+        )
+        return
+
     launcher = root / "scripts" / "macos" / "launch-dublocal.sh"
     if not launcher.is_file():
         raise UpdateError("The DubLocal macOS launcher script is missing.")
